@@ -5,6 +5,8 @@ import 'providers/app_state.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 
+const String appVersion = '1.23';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const P2LTesterApp());

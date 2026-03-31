@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../main.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
 import '../services/mqtt_service.dart';
@@ -91,7 +92,19 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context, state, _) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('P2L Tester'),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                const Text('P2L Tester'),
+                const SizedBox(width: 6),
+                Text(
+                  'v$appVersion',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal),
+                ),
+              ],
+            ),
             actions: [
               if (state.isConnected)
                 Padding(
