@@ -475,12 +475,52 @@ class _UnitCard extends StatelessWidget {
                 ),
               IconButton(
                 icon: const Icon(Icons.info_outline, size: 20),
+                onPressed: () => _showUnitInfo(context, unit),
+                tooltip: 'Info',
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 20, color: Colors.green),
                 onPressed: onGetParam,
                 tooltip: 'Get Param',
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showUnitInfo(BuildContext context, P2LUnit unit) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Jednotka ${unit.displayName}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ID: ${unit.id}'),
+            if (unit.firmware != null) Text('FW: ${unit.firmware}'),
+            if (unit.hwModel != null) Text('HW: ${unit.hwModel}'),
+            if (unit.ip != null) Text('IP: ${unit.ip}'),
+            if (unit.mac != null) Text('MAC: ${unit.mac}'),
+            if (unit.ssid != null) Text('SSID: ${unit.ssid}'),
+            if (unit.mqttServer != null) Text('MQTT: ${unit.mqttServer}:${unit.mqttPort}'),
+            if (unit.battery != null) Text('Bat: ${unit.battery}%'),
+            Text('Brightness: ${unit.brightness}'),
+            if (unit.ledsPerPort.isNotEmpty)
+              Text('LEDs: ${unit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}'),
+            const SizedBox(height: 8),
+            Text('Last seen: ${unit.lastSeenText}'),
+            Text('BIN: ${unit.supportsBin ? "ano" : "ne"}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
