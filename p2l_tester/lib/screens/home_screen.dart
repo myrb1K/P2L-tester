@@ -473,6 +473,7 @@ class _UnitCard extends StatelessWidget {
                     ),
                   ),
                 ),
+              const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
               IconButton(
                 icon: const Icon(Icons.info_outline, size: 20),
                 onPressed: () => _showUnitInfo(context, unit),
