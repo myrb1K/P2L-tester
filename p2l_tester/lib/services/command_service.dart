@@ -38,15 +38,19 @@ class CommandService {
     ];
   }
 
+  /// Barvy pro porty v cyklu: RED, GREEN, BLUE, PURPLE
+  static const _portColors = [0, 1, 2, 4, 0, 1, 2, 4];
+
   /// Testovací LED pattern (OLD/JSON)
-  static String buildTestCommand({int ledsOn = 3, int ledsOff = 10, int color = 0}) {
+  static String buildTestCommand({int ledsOn = 3, int ledsOff = 10, int color = 0, List<int>? ports}) {
+    final activePorts = ports ?? [0, 1, 2, 3, 4, 5, 6, 7];
     final cmds = <Map<String, dynamic>>[
       {'cmd': 'clr_strips'},
     ];
 
-    final colorsPattern = _buildColorsPattern(ledsOn, ledsOff, color);
-
-    for (int port = 0; port < 8; port++) {
+    for (final port in activePorts) {
+      final portColor = _portColors[port];
+      final colorsPattern = _buildColorsPattern(ledsOn, ledsOff, portColor);
       cmds.add({
         'cmd': 'set_leds',
         'args': {
@@ -66,14 +70,15 @@ class CommandService {
   }
 
   /// Testovací LED pattern (BIN formát)
-  static List<int> buildTestCommandBin({int ledsOn = 3, int ledsOff = 10, int color = 0}) {
+  static List<int> buildTestCommandBin({int ledsOn = 3, int ledsOff = 10, int color = 0, List<int>? ports}) {
+    final activePorts = ports ?? [0, 1, 2, 3, 4, 5, 6, 7];
     final bytes = <int>[];
-
-    final colorsPattern = _buildColorsPattern(ledsOn, ledsOff, color);
     const x1 = 0;
     const x2 = 599;
 
-    for (int port = 0; port < 8; port++) {
+    for (final port in activePorts) {
+      final portColor = _portColors[port];
+      final colorsPattern = _buildColorsPattern(ledsOn, ledsOff, portColor);
       bytes.add(0x03);              // type: P2L-Set_leds
       bytes.add(port);              // id: port number
       bytes.add(x1 & 0xFF);        // x1 low byte

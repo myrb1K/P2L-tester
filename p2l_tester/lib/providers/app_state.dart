@@ -29,6 +29,9 @@ class AppState extends ChangeNotifier {
   int ledsOff = 10;
   int ledColor = 0; // 0=RED, 1=GREEN, 2=BLUE, 3=YELLOW, 4=PURPLE, 5=WHITE
 
+  // Vybrané porty pro test
+  Set<int> selectedPorts = {0, 1, 2, 3, 4, 5, 6, 7};
+
   // Getters pro profily
   List<BrokerProfile> get profiles => List.unmodifiable(_profiles);
   int get activeProfileIndex => _activeProfileIndex;
@@ -55,6 +58,25 @@ class AppState extends ChangeNotifier {
   bool get isConnected => _connectionState == AppMqttState.connected;
   int get selectedCount => _selectedUnits.length;
   int get totalCount => _units.length;
+
+  void togglePort(int port) {
+    if (selectedPorts.contains(port)) {
+      if (selectedPorts.length > 1) selectedPorts.remove(port);
+    } else {
+      selectedPorts.add(port);
+    }
+    notifyListeners();
+  }
+
+  void selectAllPorts() {
+    selectedPorts = {0, 1, 2, 3, 4, 5, 6, 7};
+    notifyListeners();
+  }
+
+  void deselectAllPorts() {
+    selectedPorts = {0};
+    notifyListeners();
+  }
 
   AppState() {
     _mqttService.stateStream.listen((state) {
@@ -287,8 +309,9 @@ class AppState extends ChangeNotifier {
   }
 
   void sendTest() {
-    final oldPayload = CommandService.buildTestCommand(ledsOn: ledsOn, ledsOff: ledsOff, color: ledColor);
-    final binPayload = CommandService.buildTestCommandBin(ledsOn: ledsOn, ledsOff: ledsOff, color: ledColor);
+    final ports = selectedPorts.toList()..sort();
+    final oldPayload = CommandService.buildTestCommand(ledsOn: ledsOn, ledsOff: ledsOff, color: ledColor, ports: ports);
+    final binPayload = CommandService.buildTestCommandBin(ledsOn: ledsOn, ledsOff: ledsOff, color: ledColor, ports: ports);
     for (final unitId in _selectedUnits) {
       final unit = _units[unitId];
       if (unit != null && unit.useBin) {

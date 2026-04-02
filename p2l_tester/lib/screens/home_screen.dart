@@ -375,18 +375,19 @@ class _UnitCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      color: !unit.isOnline
-          ? Colors.grey.withAlpha(30)
-          : isSelected
-              ? Colors.blue.withAlpha(20)
-              : null,
+    return Container(
+      decoration: BoxDecoration(
+        color: !unit.isOnline
+            ? Colors.grey.withAlpha(30)
+            : isSelected
+                ? Colors.blue.withAlpha(20)
+                : null,
+        border: Border(bottom: BorderSide(color: Colors.grey.withAlpha(50))),
+      ),
       child: InkWell(
         onTap: onToggle,
-        borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
           child: Row(
             children: [
               Checkbox(
@@ -394,69 +395,64 @@ class _UnitCard extends StatelessWidget {
                 onChanged: (_) => onToggle(),
               ),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Row(
-                      children: [
-                        Text(
-                          unit.displayName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        if (unit.supportsBin) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: Colors.deepPurple.withAlpha(30),
-                              borderRadius: BorderRadius.circular(4),
+                    SizedBox(
+                      width: 80,
+                      child: Row(
+                        children: [
+                          Text(
+                            unit.displayName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
-                            child: const Text('BIN', style: TextStyle(fontSize: 10, color: Colors.deepPurple, fontWeight: FontWeight.bold)),
                           ),
+                          if (unit.supportsBin) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.deepPurple.withAlpha(30),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text('BIN', style: TextStyle(fontSize: 10, color: Colors.deepPurple, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
                         ],
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: unit.isOnline ? Colors.green : Colors.grey,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          unit.lastSeenText,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            [
-                              if (unit.firmware != null) 'FW: ${unit.firmware}',
-                              if (unit.ip != null) 'IP: ${unit.ip}',
-                              if (unit.battery != null) 'Bat: ${unit.battery!.toStringAsFixed(1)}%',
-                            ].join(' | '),
-                            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                          ),
-                        ),
-                        // BIN/OLD přepínač
-                      ],
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: unit.isOnline ? Colors.green : Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    SizedBox(
+                      width: 50,
+                      child: Text(
+                        unit.lastSeenText,
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        [
+                          if (unit.firmware != null) unit.firmware!,
+                          if (unit.battery != null) '${unit.battery!.toStringAsFixed(1)}%',
+                        ].join(' | '),
+                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              if (unit.supportsBin)
+              if (unit.supportsBin) ...[
+                const SizedBox(width: 8),
                 SizedBox(
                   height: 28,
                   child: SegmentedButton<bool>(
@@ -473,6 +469,8 @@ class _UnitCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+              ],
               const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
               IconButton(
                 icon: const Icon(Icons.info_outline, size: 20),
@@ -553,6 +551,56 @@ class _ActionBar extends StatelessWidget {
             Text(
               'Vybrano: ${state.selectedCount} z ${state.totalCount}',
               style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Porty: ', style: TextStyle(fontSize: 12)),
+                for (int p = 0; p < 8; p++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: GestureDetector(
+                      onTap: () => state.togglePort(p),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: state.selectedPorts.contains(p)
+                              ? const [Colors.red, Colors.green, Colors.blue, Colors.purple, Colors.red, Colors.green, Colors.blue, Colors.purple][p]
+                              : Colors.grey[300],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '$p',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: state.selectedPorts.contains(p) ? Colors.white : Colors.grey[600],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: state.selectedPorts.length == 8
+                      ? state.deselectAllPorts
+                      : state.selectAllPorts,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.blue),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      state.selectedPorts.length == 8 ? 'Zrusit' : 'Vse',
+                      style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             Row(
