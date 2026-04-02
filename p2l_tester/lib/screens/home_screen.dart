@@ -572,7 +572,7 @@ class _ActionBar extends StatelessWidget {
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: state.selectedPorts.contains(p)
-                              ? const [Colors.red, Colors.green, Colors.blue, Colors.purple, Colors.red, Colors.green, Colors.blue, Colors.purple][p]
+                              ? const [Colors.red, Colors.green, Colors.blue, Colors.yellow, Colors.purple, Colors.red, Colors.green, Colors.blue][p]
                               : Colors.grey[300],
                           borderRadius: BorderRadius.circular(4),
                         ),

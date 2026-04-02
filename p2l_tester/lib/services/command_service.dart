@@ -39,7 +39,7 @@ class CommandService {
   }
 
   /// Barvy pro porty v cyklu: RED, GREEN, BLUE, PURPLE
-  static const _portColors = [0, 1, 2, 4, 0, 1, 2, 4];
+  static const _portColors = [0, 1, 2, 3, 4, 0, 1, 2];
 
   /// Testovací LED pattern (OLD/JSON)
   static String buildTestCommand({int ledsOn = 3, int ledsOff = 10, int color = 0, List<int>? ports}) {
