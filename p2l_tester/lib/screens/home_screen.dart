@@ -112,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Center(
                     child: Text(
                       state.broker,
-                      style: const TextStyle(fontSize: 11),
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
