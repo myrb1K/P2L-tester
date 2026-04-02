@@ -284,6 +284,27 @@ class _SelectionBar extends StatelessWidget {
             'Jednotky: ${state.totalCount}',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
+          if (state.offlineCount > 0)
+            GestureDetector(
+              onTap: state.toggleOfflineFilter,
+              child: Container(
+                margin: const EdgeInsets.only(left: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: state.filterOffline ? Colors.red.withAlpha(30) : Colors.grey.withAlpha(30),
+                  borderRadius: BorderRadius.circular(12),
+                  border: state.filterOffline ? Border.all(color: Colors.red) : null,
+                ),
+                child: Text(
+                  '${state.offlineCount} offline',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: state.filterOffline ? Colors.red : Colors.grey[600],
+                    fontWeight: state.filterOffline ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
           const Spacer(),
           TextButton(
             onPressed: state.selectAll,

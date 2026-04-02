@@ -32,6 +32,9 @@ class AppState extends ChangeNotifier {
   // Vybrané porty pro test
   Set<int> selectedPorts = {0, 1, 2, 3, 4, 5, 6, 7};
 
+  // Filtr offline jednotek
+  bool filterOffline = false;
+
   // Getters pro profily
   List<BrokerProfile> get profiles => List.unmodifiable(_profiles);
   int get activeProfileIndex => _activeProfileIndex;
@@ -45,12 +48,25 @@ class AppState extends ChangeNotifier {
 
   // Getters
   Map<String, P2LUnit> get units => Map.unmodifiable(_units);
-  List<P2LUnit> get unitList => _units.values.toList()
-    ..sort((a, b) {
+  List<P2LUnit> get unitList {
+    var list = _units.values.toList();
+    if (filterOffline) {
+      list = list.where((u) => !u.isOnline).toList();
+    }
+    list.sort((a, b) {
       final na = int.tryParse(a.id.startsWith('u') ? a.id.substring(1) : a.id) ?? 0;
       final nb = int.tryParse(b.id.startsWith('u') ? b.id.substring(1) : b.id) ?? 0;
       return na.compareTo(nb);
     });
+    return list;
+  }
+
+  int get offlineCount => _units.values.where((u) => !u.isOnline).length;
+
+  void toggleOfflineFilter() {
+    filterOffline = !filterOffline;
+    notifyListeners();
+  }
   Set<String> get selectedUnits => Set.unmodifiable(_selectedUnits);
   AppMqttState get connectionState => _connectionState;
   String? get lastError => _lastError;
