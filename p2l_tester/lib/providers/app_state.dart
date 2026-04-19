@@ -270,6 +270,9 @@ class AppState extends ChangeNotifier {
     _mqttService.disconnect();
     _units.clear();
     _selectedUnits.clear();
+    _initialFetchDone.clear();
+    _awaitingAliveAfterRestart.clear();
+    _restartSentAt.clear();
     _statusMessage = '';
     notifyListeners();
   }
@@ -313,9 +316,17 @@ class AppState extends ChangeNotifier {
         cmd == 'DELETE-DEVICES') {
       _deviceActionStatus = '$cmd na $unitId: ${code == 0 || code == '0' ? 'OK' : 'chyba'}${msg != null ? " — $msg" : ""}';
       _unitModulesPending.remove(unitId);
-      // Po úspěšné změně stavu jednotky znova načteme devices
       if (code == 0 || code == '0') {
-        Future.microtask(() => fetchDevices(unitId));
+        if (_pendingRestart.remove(unitId)) {
+          // S restartem: GET-DEVICES posílat až po návratu jednotky online (první ALIVE).
+          _awaitingAliveAfterRestart.add(unitId);
+          _restartSentAt[unitId] = DateTime.now();
+          Future.microtask(() => restartUnit(unitId));
+        } else {
+          Future.microtask(() => fetchDevices(unitId));
+        }
+      } else {
+        _pendingRestart.remove(unitId);
       }
       notifyListeners();
     }
@@ -356,7 +367,7 @@ class AppState extends ChangeNotifier {
     // Topic: D/<id>/UNIT/<id>/ALIVE
     final parts = topic.split('/');
     if (parts.length < 4) return;
-    final unitId = parts[1];
+    final unitId = _normUnitId(parts[1]);
 
     if (_units.containsKey(unitId)) {
       _units[unitId]!.lastSeen = DateTime.now();
@@ -370,6 +381,21 @@ class AppState extends ChangeNotifier {
     } else {
       _units[unitId] = P2LUnit.fromAlive(unitId, json);
       _statusMessage = 'Nalezeno ${_units.length} jednotek';
+    }
+
+    // Po restartu: první ALIVE mimo grace window → dotáhni devices.
+    if (_awaitingAliveAfterRestart.contains(unitId)) {
+      final sentAt = _restartSentAt[unitId];
+      if (sentAt != null && DateTime.now().difference(sentAt) >= _restartGrace) {
+        _awaitingAliveAfterRestart.remove(unitId);
+        _restartSentAt.remove(unitId);
+        _initialFetchDone.add(unitId);
+        _deviceActionStatus = 'Jednotka $unitId zpět online — načítám devices.';
+        Future.microtask(() => fetchDevices(unitId));
+      }
+    } else if (_initialFetchDone.add(unitId)) {
+      // První ALIVE této jednotky v rámci aktuálního připojení → auto-fetch.
+      Future.microtask(() => fetchDevices(unitId));
     }
     notifyListeners();
   }
@@ -475,6 +501,9 @@ class AppState extends ChangeNotifier {
   Future<void> fetchDevices(String unitId) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
+    // Ruční načtení ruší čekání na post-restart auto-trigger.
+    _awaitingAliveAfterRestart.remove(id);
+    _restartSentAt.remove(id);
     _deviceActionStatus = 'Načítám devices jednotky $id…';
     notifyListeners();
 
@@ -482,15 +511,36 @@ class AppState extends ChangeNotifier {
     _mqttService.publish(cmd.topic, cmd.payload);
   }
 
-  Future<void> addModules(String unitId, List<PumaModule> modules) async {
+  final Set<String> _pendingRestart = {};
+  final Set<String> _awaitingAliveAfterRestart = {};
+  final Map<String, DateTime> _restartSentAt = {};
+  // Jednotky, pro které jsme už po připojení k brokeru jednou fetchnuli devices.
+  final Set<String> _initialFetchDone = {};
+
+  /// Minimální doba po odeslání RESTART, po které teprve ALIVE počítáme jako
+  /// "jednotka nabootovala" (chrání před in-flight ALIVE, které přišel těsně
+  /// před doručením RESTART do jednotky).
+  static const _restartGrace = Duration(seconds: 2);
+
+  Future<void> addModules(String unitId, List<PumaModule> modules,
+      {bool restartAfter = false}) async {
     if (modules.isEmpty) return;
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
     _deviceActionStatus = 'Přidávám moduly do $id…';
+    if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
     final cmd = CommandService.buildAddDevicesCommand(id, modules);
     _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  Future<void> restartUnit(String unitId) async {
+    final id = _normUnitId(unitId);
+    final cmd = CommandService.buildRestartCommand(id);
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _deviceActionStatus = 'Restart jednotky $id odeslán';
+    notifyListeners();
   }
 
   Future<void> recreateDevices(String unitId, List<PumaModule> modules) async {
@@ -518,11 +568,13 @@ class AppState extends ChangeNotifier {
     required DeviceType type,
     required int oldAddress,
     required int newDefaultAddress,
+    bool restartAfter = false,
   }) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
     _deviceActionStatus =
         'Výměna ${type.code} @$oldAddress za nový ($newDefaultAddress) na $id…';
+    if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
     final cmd = CommandService.buildReplaceFromCommand(

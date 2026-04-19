@@ -9,11 +9,13 @@ class ReplaceResult {
   final DeviceType type;
   final int oldAddress;
   final int newDefaultAddress;
+  final bool restartAfter;
 
   const ReplaceResult({
     required this.type,
     required this.oldAddress,
     required this.newDefaultAddress,
+    this.restartAfter = false,
   });
 }
 
@@ -29,6 +31,7 @@ class ReplaceDeviceDialog extends StatefulWidget {
 class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
   late DeviceType _type;
   late TextEditingController _newCtrl;
+  bool _restartAfter = false;
   String? _error;
 
   @override
@@ -68,6 +71,7 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
         type: _type,
         oldAddress: widget.module.baseAddress,
         newDefaultAddress: newAddr,
+        restartAfter: _restartAfter,
       ),
     );
   }
@@ -111,6 +115,15 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(_error!, style: const TextStyle(color: Colors.red)),
               ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              value: _restartAfter,
+              onChanged: (v) => setState(() => _restartAfter = v ?? false),
+              title: const Text('Restartovat jednotku po úpravě'),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              dense: true,
+            ),
           ],
         ],
       ),

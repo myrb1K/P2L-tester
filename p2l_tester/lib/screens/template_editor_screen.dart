@@ -36,7 +36,7 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
 
   Future<void> _addModule() async {
     final existing = _modules.map((m) => m.baseAddress).toSet();
-    final result = await showDialog<PumaModule>(
+    final result = await showDialog<AddModuleResult>(
       context: context,
       builder: (_) => AddModuleDialog(
         existingAddresses: existing,
@@ -51,7 +51,7 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
         ));
         return;
       }
-      setState(() => _modules.add(result));
+      setState(() => _modules.add(result.module));
     }
   }
 

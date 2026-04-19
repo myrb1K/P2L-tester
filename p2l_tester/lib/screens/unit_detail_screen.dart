@@ -6,7 +6,6 @@ import '../models/unit.dart';
 import '../providers/app_state.dart';
 import '../widgets/add_module_dialog.dart';
 import '../widgets/apply_template_sheet.dart';
-import '../widgets/module_tile.dart';
 import '../widgets/replace_device_dialog.dart';
 
 const int kMaxChipsPerUnit = 100;
@@ -31,7 +30,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
 
   Future<void> _addModule(AppState state, List<PumaModule> currentModules) async {
     final existing = currentModules.map((m) => m.baseAddress).toSet();
-    final result = await showDialog<PumaModule>(
+    final result = await showDialog<AddModuleResult>(
       context: context,
       builder: (_) => AddModuleDialog(
         existingAddresses: existing,
@@ -46,7 +45,8 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         ));
         return;
       }
-      await state.addModules(widget.unitId, [result]);
+      await state.addModules(widget.unitId, [result.module],
+          restartAfter: result.restartAfter);
     }
   }
 
@@ -61,6 +61,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         type: result.type,
         oldAddress: result.oldAddress,
         newDefaultAddress: result.newDefaultAddress,
+        restartAfter: result.restartAfter,
       );
     }
   }
@@ -137,31 +138,28 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                   ),
                 ),
               if (pending) const LinearProgressIndicator(minHeight: 2),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Přidat modul'),
+                    onPressed: () => _addModule(state, modules),
+                  ),
+                ),
+              ),
               Expanded(
                 child: modules.isEmpty
                     ? _EmptyModules(pending: pending)
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: modules.length,
-                        itemBuilder: (context, i) {
-                          final m = modules[i];
-                          return ModuleTile(
-                            module: m,
-                            compact: true,
-                            onReplace: _canReplace(m)
-                                ? () => _replaceModule(state, m)
-                                : null,
-                            onDelete: () => _deleteModule(state, m),
-                          );
-                        },
+                    : _ModulesGroupedList(
+                        modules: modules,
+                        onReplace: (m) => _replaceModule(state, m),
+                        onDelete: (m) => _deleteModule(state, m),
+                        canReplace: _canReplace,
                       ),
               ),
             ],
-          ),
-          floatingActionButton: FloatingActionButton.extended(
-            icon: const Icon(Icons.add),
-            label: const Text('Přidat modul'),
-            onPressed: () => _addModule(state, modules),
           ),
         );
       },
@@ -185,8 +183,6 @@ class _UnitInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chipCount = modules.length;
-    final pct = chipCount / kMaxChipsPerUnit;
     return Card(
       margin: const EdgeInsets.all(8),
       child: Padding(
@@ -205,49 +201,41 @@ class _UnitInfoCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  unit.id,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                Expanded(
+                  child: Text(
+                    unit.id,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 if (unit.firmware != null)
-                  Text('FW: ${unit.firmware}', style: const TextStyle(fontSize: 11)),
+                  Text(
+                    'FW: ${unit.firmware}',
+                    style: const TextStyle(fontSize: 11),
+                    overflow: TextOverflow.ellipsis,
+                  ),
               ],
             ),
             const SizedBox(height: 8),
-            if (unit.ip != null || unit.mac != null)
-              Text(
-                [
-                  if (unit.ip != null) 'IP: ${unit.ip}',
-                  if (unit.mac != null) 'MAC: ${unit.mac}',
-                  if (unit.battery != null) 'Bat: ${unit.battery}%',
-                ].join(' · '),
-                style: const TextStyle(fontSize: 11),
-              ),
-            const SizedBox(height: 12),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Čipů: $chipCount / $kMaxChipsPerUnit',
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 4),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: pct.clamp(0.0, 1.0),
-                          minHeight: 6,
-                          color: pct > 0.9 ? Colors.red : Colors.blue,
-                          backgroundColor: Colors.grey.withAlpha(50),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: (unit.ip != null || unit.mac != null)
+                      ? Text(
+                          [
+                            if (unit.ip != null) 'IP: ${unit.ip}',
+                            if (unit.mac != null) 'MAC: ${unit.mac}',
+                            if (unit.battery != null) 'Bat: ${unit.battery}%',
+                          ].join(' · '),
+                          style: const TextStyle(fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      : const SizedBox.shrink(),
                 ),
                 if (fetchedAt != null) ...[
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   Text(
                     'načteno ${_fmtTime(fetchedAt!)}',
                     style: const TextStyle(fontSize: 10, color: Colors.grey),
@@ -266,6 +254,183 @@ class _UnitInfoCard extends StatelessWidget {
     final m = t.minute.toString().padLeft(2, '0');
     final s = t.second.toString().padLeft(2, '0');
     return '$h:$m:$s';
+  }
+}
+
+class _ModulesGroupedList extends StatelessWidget {
+  final List<PumaModule> modules;
+  final void Function(PumaModule) onReplace;
+  final void Function(PumaModule) onDelete;
+  final bool Function(PumaModule) canReplace;
+
+  const _ModulesGroupedList({
+    required this.modules,
+    required this.onReplace,
+    required this.onDelete,
+    required this.canReplace,
+  });
+
+  static const _order = [
+    ModuleType.pumA,
+    ModuleType.pumB,
+    ModuleType.pumC,
+    ModuleType.dist,
+  ];
+
+  String _label(ModuleType t) => switch (t) {
+        ModuleType.pumA => 'PUM-A',
+        ModuleType.pumB => 'PUM-B',
+        ModuleType.pumC => 'PUM-C',
+        ModuleType.dist => 'SENZOR',
+      };
+
+  Color _color(ModuleType t) => switch (t) {
+        ModuleType.pumA => Colors.blue,
+        ModuleType.pumB => Colors.orange,
+        ModuleType.pumC => Colors.purple,
+        ModuleType.dist => Colors.teal,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final byType = <ModuleType, List<PumaModule>>{};
+    for (final m in modules) {
+      byType.putIfAbsent(m.type, () => []).add(m);
+    }
+    for (final list in byType.values) {
+      list.sort((a, b) => a.baseAddress.compareTo(b.baseAddress));
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      children: [
+        for (final type in _order)
+          if (byType[type]?.isNotEmpty ?? false)
+            _GroupSection(
+              label: _label(type),
+              color: _color(type),
+              modules: byType[type]!,
+              onReplace: onReplace,
+              onDelete: onDelete,
+              canReplace: canReplace,
+            ),
+      ],
+    );
+  }
+}
+
+class _GroupSection extends StatelessWidget {
+  final String label;
+  final Color color;
+  final List<PumaModule> modules;
+  final void Function(PumaModule) onReplace;
+  final void Function(PumaModule) onDelete;
+  final bool Function(PumaModule) canReplace;
+
+  const _GroupSection({
+    required this.label,
+    required this.color,
+    required this.modules,
+    required this.onReplace,
+    required this.onDelete,
+    required this.canReplace,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label  ·  ${modules.length}',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: color,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final m in modules)
+                _AddressChip(
+                  module: m,
+                  color: color,
+                  onReplace: canReplace(m) ? () => onReplace(m) : null,
+                  onDelete: () => onDelete(m),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddressChip extends StatelessWidget {
+  final PumaModule module;
+  final Color color;
+  final VoidCallback? onReplace;
+  final VoidCallback onDelete;
+
+  const _AddressChip({
+    required this.module,
+    required this.color,
+    required this.onReplace,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: module.displayLabel,
+      offset: const Offset(0, 32),
+      onSelected: (v) {
+        if (v == 'replace') onReplace?.call();
+        if (v == 'delete') onDelete();
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          enabled: false,
+          child: Text(
+            module.displayLabel,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          ),
+        ),
+        const PopupMenuDivider(),
+        if (onReplace != null)
+          const PopupMenuItem(
+            value: 'replace',
+            child: Row(children: [
+              Icon(Icons.swap_horiz, size: 18),
+              SizedBox(width: 8),
+              Text('Vyměnit'),
+            ]),
+          ),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(children: [
+            Icon(Icons.delete_outline, size: 18, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Smazat', style: TextStyle(color: Colors.red)),
+          ]),
+        ),
+      ],
+      child: Chip(
+        label: Text(
+          module.baseAddress.toString(),
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: color.withAlpha(30),
+        side: BorderSide(color: color.withAlpha(80)),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
   }
 }
 

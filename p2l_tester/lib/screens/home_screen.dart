@@ -379,6 +379,7 @@ class _UnitListView extends StatelessWidget {
         return _UnitCard(
           unit: unit,
           isSelected: isSelected,
+          moduleCount: state.modulesForUnit(unit.id)?.length,
           onToggle: () => state.toggleUnit(unit.id),
           onGetParam: () => state.sendGetParam(unit.id),
           onToggleBin: () => state.toggleBinMode(unit.id),
@@ -396,6 +397,7 @@ class _UnitListView extends StatelessWidget {
 class _UnitCard extends StatelessWidget {
   final P2LUnit unit;
   final bool isSelected;
+  final int? moduleCount;
   final VoidCallback onToggle;
   final VoidCallback onGetParam;
   final VoidCallback onToggleBin;
@@ -404,6 +406,7 @@ class _UnitCard extends StatelessWidget {
   const _UnitCard({
     required this.unit,
     required this.isSelected,
+    required this.moduleCount,
     required this.onToggle,
     required this.onGetParam,
     required this.onToggleBin,
@@ -508,10 +511,37 @@ class _UnitCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
               ],
-              IconButton(
-                icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
-                onPressed: onOpenDetail,
-                tooltip: 'Detail jednotky',
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
+                    onPressed: onOpenDetail,
+                    tooltip: 'Detail jednotky',
+                  ),
+                  if (moduleCount != null)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 16),
+                        child: Text(
+                          '$moduleCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               IconButton(
                 icon: const Icon(Icons.info_outline, size: 20),

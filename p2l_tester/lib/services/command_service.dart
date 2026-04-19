@@ -245,6 +245,14 @@ class CommandService {
     );
   }
 
+  /// RESTART jednotky: SW restart. Payload prázdný objekt.
+  static ({String topic, String payload}) buildRestartCommand(String unitId) {
+    return (
+      topic: getUnitCommandTopic(unitId, 'RESTART'),
+      payload: '{}',
+    );
+  }
+
   /// SCAN na UNIT: najde nová zařízení na RS485.
   static ({String topic, String payload}) buildScanCommand({
     required String unitId,

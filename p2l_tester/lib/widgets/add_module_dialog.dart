@@ -3,7 +3,13 @@ import 'package:flutter/services.dart';
 
 import '../models/module.dart';
 
-/// Dialog pro přidání/editaci modulu. Vrací null při zrušení, jinak PumaModule.
+class AddModuleResult {
+  final PumaModule module;
+  final bool restartAfter;
+  const AddModuleResult({required this.module, required this.restartAfter});
+}
+
+/// Dialog pro přidání/editaci modulu. Vrací null při zrušení, jinak AddModuleResult.
 class AddModuleDialog extends StatefulWidget {
   final Set<int> existingAddresses;
   final bool hasPumAWithRoom;
@@ -25,6 +31,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
   late TextEditingController _addrCtrl;
   int _buttonCount = 0;
   bool _hasLeds = false;
+  bool _restartAfter = false;
   String? _error;
 
   // DIST config
@@ -113,7 +120,10 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
           ),
         );
     }
-    Navigator.pop(context, module);
+    Navigator.pop(
+      context,
+      AddModuleResult(module: module, restartAfter: _restartAfter),
+    );
   }
 
   @override
@@ -288,6 +298,15 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                 ),
               ]),
             ],
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              value: _restartAfter,
+              onChanged: (v) => setState(() => _restartAfter = v ?? false),
+              title: const Text('Restartovat jednotku po úpravě'),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              dense: true,
+            ),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
