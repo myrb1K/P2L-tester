@@ -156,6 +156,16 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                         modules: modules,
                         onReplace: (m) => _replaceModule(state, m),
                         onDelete: (m) => _deleteModule(state, m),
+                        onTestDisplay: (m) => state.sendDispData(
+                          unitId: widget.unitId,
+                          dispAddress: m.baseAddress,
+                          data: 'AHOJ',
+                        ),
+                        onClearDisplay: (m) => state.sendDispData(
+                          unitId: widget.unitId,
+                          dispAddress: m.baseAddress,
+                          data: '',
+                        ),
                         canReplace: _canReplace,
                       ),
               ),
@@ -261,12 +271,16 @@ class _ModulesGroupedList extends StatelessWidget {
   final List<PumaModule> modules;
   final void Function(PumaModule) onReplace;
   final void Function(PumaModule) onDelete;
+  final void Function(PumaModule) onTestDisplay;
+  final void Function(PumaModule) onClearDisplay;
   final bool Function(PumaModule) canReplace;
 
   const _ModulesGroupedList({
     required this.modules,
     required this.onReplace,
     required this.onDelete,
+    required this.onTestDisplay,
+    required this.onClearDisplay,
     required this.canReplace,
   });
 
@@ -313,6 +327,8 @@ class _ModulesGroupedList extends StatelessWidget {
               onReplace: onReplace,
               onDelete: onDelete,
               canReplace: canReplace,
+              onTestDisplay: type == ModuleType.pumA ? onTestDisplay : null,
+              onClearDisplay: type == ModuleType.pumA ? onClearDisplay : null,
             ),
       ],
     );
@@ -325,6 +341,8 @@ class _GroupSection extends StatelessWidget {
   final List<PumaModule> modules;
   final void Function(PumaModule) onReplace;
   final void Function(PumaModule) onDelete;
+  final void Function(PumaModule)? onTestDisplay;
+  final void Function(PumaModule)? onClearDisplay;
   final bool Function(PumaModule) canReplace;
 
   const _GroupSection({
@@ -334,6 +352,8 @@ class _GroupSection extends StatelessWidget {
     required this.onReplace,
     required this.onDelete,
     required this.canReplace,
+    this.onTestDisplay,
+    this.onClearDisplay,
   });
 
   @override
@@ -362,6 +382,10 @@ class _GroupSection extends StatelessWidget {
                   color: color,
                   onReplace: canReplace(m) ? () => onReplace(m) : null,
                   onDelete: () => onDelete(m),
+                  onTestDisplay:
+                      onTestDisplay != null ? () => onTestDisplay!(m) : null,
+                  onClearDisplay:
+                      onClearDisplay != null ? () => onClearDisplay!(m) : null,
                 ),
             ],
           ),
@@ -376,12 +400,16 @@ class _AddressChip extends StatelessWidget {
   final Color color;
   final VoidCallback? onReplace;
   final VoidCallback onDelete;
+  final VoidCallback? onTestDisplay;
+  final VoidCallback? onClearDisplay;
 
   const _AddressChip({
     required this.module,
     required this.color,
     required this.onReplace,
     required this.onDelete,
+    this.onTestDisplay,
+    this.onClearDisplay,
   });
 
   @override
@@ -392,6 +420,8 @@ class _AddressChip extends StatelessWidget {
       onSelected: (v) {
         if (v == 'replace') onReplace?.call();
         if (v == 'delete') onDelete();
+        if (v == 'test_disp') onTestDisplay?.call();
+        if (v == 'clear_disp') onClearDisplay?.call();
       },
       itemBuilder: (_) => [
         PopupMenuItem(
@@ -402,6 +432,24 @@ class _AddressChip extends StatelessWidget {
           ),
         ),
         const PopupMenuDivider(),
+        if (onTestDisplay != null)
+          const PopupMenuItem(
+            value: 'test_disp',
+            child: Row(children: [
+              Icon(Icons.text_fields, size: 18, color: Colors.blue),
+              SizedBox(width: 8),
+              Text('Test displeje (AHOJ)'),
+            ]),
+          ),
+        if (onClearDisplay != null)
+          const PopupMenuItem(
+            value: 'clear_disp',
+            child: Row(children: [
+              Icon(Icons.format_clear, size: 18),
+              SizedBox(width: 8),
+              Text('Smazat text'),
+            ]),
+          ),
         if (onReplace != null)
           const PopupMenuItem(
             value: 'replace',

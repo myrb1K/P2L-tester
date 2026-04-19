@@ -245,6 +245,19 @@ class CommandService {
     );
   }
 
+  /// SET-DATA na DISP: zobrazí 4-znakový text. Prázdný řetězec = smazání displeje.
+  /// DISP adresa 0 = broadcast na všechny displeje jednotky.
+  static ({String topic, String payload}) buildSetDispDataCommand({
+    required String unitId,
+    required int dispAddress,
+    required String data,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, DeviceType.disp, dispAddress, 'SET-DATA'),
+      payload: jsonEncode({'Data': data}),
+    );
+  }
+
   /// RESTART jednotky: SW restart. Payload prázdný objekt.
   static ({String topic, String payload}) buildRestartCommand(String unitId) {
     return (

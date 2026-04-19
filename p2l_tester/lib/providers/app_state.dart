@@ -543,6 +543,25 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Pošle text na DISP (4 znaky). Adresa 0 = broadcast na všechny displeje.
+  Future<void> sendDispData({
+    required String unitId,
+    required int dispAddress,
+    required String data,
+  }) async {
+    final id = _normUnitId(unitId);
+    final cmd = CommandService.buildSetDispDataCommand(
+      unitId: id,
+      dispAddress: dispAddress,
+      data: data,
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _deviceActionStatus = data.isEmpty
+        ? 'DISP @$dispAddress na $id: smazáno'
+        : 'DISP @$dispAddress na $id: "$data"';
+    notifyListeners();
+  }
+
   Future<void> recreateDevices(String unitId, List<PumaModule> modules) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
