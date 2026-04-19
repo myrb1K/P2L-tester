@@ -6,6 +6,8 @@ import '../models/unit.dart';
 import '../providers/app_state.dart';
 import '../services/mqtt_service.dart';
 import 'settings_screen.dart';
+import 'templates_screen.dart';
+import 'unit_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -124,6 +126,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: const Icon(Icons.swap_horiz),
                 tooltip: 'Vybrat broker',
                 onPressed: () => _showBrokerPicker(context, state),
+              ),
+              IconButton(
+                icon: const Icon(Icons.folder_special),
+                tooltip: 'Šablony',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const TemplatesScreen()),
+                ),
               ),
               if (state.units.isNotEmpty)
                 IconButton(
@@ -373,6 +382,11 @@ class _UnitListView extends StatelessWidget {
           onToggle: () => state.toggleUnit(unit.id),
           onGetParam: () => state.sendGetParam(unit.id),
           onToggleBin: () => state.toggleBinMode(unit.id),
+          onOpenDetail: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => UnitDetailScreen(unitId: unit.id),
+            ),
+          ),
         );
       },
     );
@@ -385,6 +399,7 @@ class _UnitCard extends StatelessWidget {
   final VoidCallback onToggle;
   final VoidCallback onGetParam;
   final VoidCallback onToggleBin;
+  final VoidCallback onOpenDetail;
 
   const _UnitCard({
     required this.unit,
@@ -392,6 +407,7 @@ class _UnitCard extends StatelessWidget {
     required this.onToggle,
     required this.onGetParam,
     required this.onToggleBin,
+    required this.onOpenDetail,
   });
 
   @override
@@ -494,8 +510,8 @@ class _UnitCard extends StatelessWidget {
               ],
               IconButton(
                 icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
-                onPressed: () {},
-                tooltip: 'Jednotka',
+                onPressed: onOpenDetail,
+                tooltip: 'Detail jednotky',
               ),
               IconButton(
                 icon: const Icon(Icons.info_outline, size: 20),

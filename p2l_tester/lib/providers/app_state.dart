@@ -4,9 +4,15 @@ import 'package:flutter/foundation.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'dart:convert';
+
 import '../models/broker_profile.dart';
+import '../models/device.dart';
+import '../models/device_template.dart';
+import '../models/module.dart';
 import '../models/unit.dart';
 import '../services/command_service.dart';
+import '../services/module_reconstruction.dart';
 import '../services/mqtt_service.dart';
 
 class AppState extends ChangeNotifier {
@@ -46,6 +52,13 @@ class AppState extends ChangeNotifier {
   String? _lastError;
   String _statusMessage = '';
 
+  // Device management state
+  final Map<String, List<PumaModule>> _unitModules = {};
+  final Map<String, DateTime> _unitModulesFetchedAt = {};
+  final Set<String> _unitModulesPending = {};
+  List<DeviceTemplate> _templates = [];
+  String _deviceActionStatus = '';
+
   // Getters
   Map<String, P2LUnit> get units => Map.unmodifiable(_units);
   List<P2LUnit> get unitList {
@@ -62,6 +75,16 @@ class AppState extends ChangeNotifier {
   }
 
   int get offlineCount => _units.values.where((u) => !u.isOnline).length;
+
+  // Device management getters
+  List<PumaModule>? modulesForUnit(String unitId) => _unitModules[_normUnitId(unitId)];
+  DateTime? modulesFetchedAt(String unitId) => _unitModulesFetchedAt[_normUnitId(unitId)];
+  bool isModulesPending(String unitId) => _unitModulesPending.contains(_normUnitId(unitId));
+  List<DeviceTemplate> get templates => List.unmodifiable(_templates);
+  String get deviceActionStatus => _deviceActionStatus;
+
+  static String _normUnitId(String unitId) =>
+      unitId.startsWith('u') ? unitId.substring(1) : unitId;
 
   void toggleOfflineFilter() {
     filterOffline = !filterOffline;
@@ -117,6 +140,15 @@ class AppState extends ChangeNotifier {
     ledsOn = prefs.getInt('leds_on') ?? 3;
     ledsOff = prefs.getInt('leds_off') ?? 10;
     ledColor = prefs.getInt('led_color') ?? 0;
+
+    final templatesJson = prefs.getString('device_templates');
+    if (templatesJson != null && templatesJson.isNotEmpty) {
+      try {
+        _templates = DeviceTemplate.listFromJson(templatesJson);
+      } catch (_) {
+        _templates = [];
+      }
+    }
     notifyListeners();
   }
 
@@ -210,6 +242,13 @@ class AppState extends ChangeNotifier {
     if (result) {
       _mqttService.subscribe('D/+/UNIT/+/ALIVE');
       _mqttService.subscribe('A/SERVER/+/CMD');
+      // Odpovědi na device management commandy (P2L32 protokol)
+      _mqttService.subscribe('O/+/UNIT/+/GET-DEVICES');
+      _mqttService.subscribe('O/+/UNIT/+/ADD-DEVICES');
+      _mqttService.subscribe('O/+/UNIT/+/RECREATE-DEVICES');
+      _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
+      _mqttService.subscribe('O/+/DIST/+/REPLACE-FROM');
+      _mqttService.subscribe('O/+/DISP/+/REPLACE-FROM');
       _statusMessage = 'Pripojeno, cekam na ALIVE...';
       _tickTimer?.cancel();
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -237,14 +276,80 @@ class AppState extends ChangeNotifier {
 
   void _handleMessage(MqttReceivedMessage<MqttMessage> message) {
     final topic = message.topic;
-    final json = MqttService.parseJsonPayload(message);
-    if (json == null) return;
-
-    if (topic.contains('/ALIVE')) {
-      _handleAlive(topic, json);
-    } else if (topic.startsWith('A/SERVER/')) {
-      _handleResponse(topic, json);
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(MqttService.getPayload(message));
+    } catch (_) {
+      return;
     }
+
+    if (topic.contains('/ALIVE') && decoded is Map<String, dynamic>) {
+      _handleAlive(topic, decoded);
+    } else if (topic.startsWith('A/SERVER/') && decoded is Map<String, dynamic>) {
+      _handleResponse(topic, decoded);
+    } else if (topic.startsWith('O/')) {
+      // GET-DEVICES odpověď je top-level pole; ostatní O/ odpovědi jsou Map s Code/Message.
+      final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+      _handleDeviceResponse(topic, json, message);
+    }
+  }
+
+  void _handleDeviceResponse(
+      String topic, Map<String, dynamic> json, dynamic message) {
+    // Topic: O/<unit>/<TYPE>/<DEVICE_ID>/<CMD>
+    final parts = topic.split('/');
+    if (parts.length < 5) return;
+    final unitId = _normUnitId(parts[1]);
+    final cmd = parts[4];
+
+    final code = json['Code'];
+    final msg = json['Message'] as String?;
+
+    if (cmd == 'GET-DEVICES') {
+      _handleGetDevicesResponse(unitId, json, message);
+    } else if (cmd == 'REPLACE-FROM' ||
+        cmd == 'ADD-DEVICES' ||
+        cmd == 'RECREATE-DEVICES' ||
+        cmd == 'DELETE-DEVICES') {
+      _deviceActionStatus = '$cmd na $unitId: ${code == 0 || code == '0' ? 'OK' : 'chyba'}${msg != null ? " — $msg" : ""}';
+      _unitModulesPending.remove(unitId);
+      // Po úspěšné změně stavu jednotky znova načteme devices
+      if (code == 0 || code == '0') {
+        Future.microtask(() => fetchDevices(unitId));
+      }
+      notifyListeners();
+    }
+  }
+
+  void _handleGetDevicesResponse(
+      String unitId, Map<String, dynamic> json, dynamic message) {
+    _unitModulesPending.remove(unitId);
+
+    // Payload: buď pole entries, nebo objekt s "Devices" polem, nebo raw payload.
+    dynamic devicesField;
+    if (json['Devices'] != null) {
+      devicesField = json['Devices'];
+    } else if (json['devices'] != null) {
+      devicesField = json['devices'];
+    } else {
+      // Možná je payload rovnou pole (parseJsonPayload nepropustí non-map).
+      // Zkus re-parse raw payloadu.
+      try {
+        final raw = MqttService.getPayload(message);
+        final decoded = jsonDecode(raw);
+        if (decoded is List) devicesField = decoded;
+      } catch (_) {}
+    }
+
+    if (devicesField != null) {
+      final devices = parseGetDevicesPayload(devicesField);
+      _unitModules[unitId] = reconstructModules(devices);
+      _unitModulesFetchedAt[unitId] = DateTime.now();
+      _deviceActionStatus = 'Devices jednotky $unitId načteny (${devices.length} entries → ${_unitModules[unitId]!.length} modulů)';
+    } else {
+      _deviceActionStatus = 'GET-DEVICES $unitId: neočekávaný formát odpovědi';
+    }
+    notifyListeners();
   }
 
   void _handleAlive(String topic, Map<String, dynamic> json) {
@@ -361,6 +466,107 @@ class AppState extends ChangeNotifier {
     _mqttService.publish(topic, payload);
     _statusMessage = 'Get param odeslan na $unitId';
     notifyListeners();
+  }
+
+  // ============================================================
+  // Device management flow
+  // ============================================================
+
+  Future<void> fetchDevices(String unitId) async {
+    final id = _normUnitId(unitId);
+    _unitModulesPending.add(id);
+    _deviceActionStatus = 'Načítám devices jednotky $id…';
+    notifyListeners();
+
+    final cmd = CommandService.buildGetDevicesCommand(id);
+    _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  Future<void> addModules(String unitId, List<PumaModule> modules) async {
+    if (modules.isEmpty) return;
+    final id = _normUnitId(unitId);
+    _unitModulesPending.add(id);
+    _deviceActionStatus = 'Přidávám moduly do $id…';
+    notifyListeners();
+
+    final cmd = CommandService.buildAddDevicesCommand(id, modules);
+    _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  Future<void> recreateDevices(String unitId, List<PumaModule> modules) async {
+    final id = _normUnitId(unitId);
+    _unitModulesPending.add(id);
+    _deviceActionStatus = 'Přepisuji konfiguraci $id…';
+    notifyListeners();
+
+    final cmd = CommandService.buildRecreateDevicesCommand(id, modules);
+    _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  Future<void> deleteModule(String unitId, PumaModule module) async {
+    final id = _normUnitId(unitId);
+    _unitModulesPending.add(id);
+    _deviceActionStatus = 'Mažu ${module.displayLabel} na $id…';
+    notifyListeners();
+
+    final cmd = CommandService.buildDeleteDevicesCommand(id, [module]);
+    _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  Future<void> replaceDevice({
+    required String unitId,
+    required DeviceType type,
+    required int oldAddress,
+    required int newDefaultAddress,
+  }) async {
+    final id = _normUnitId(unitId);
+    _unitModulesPending.add(id);
+    _deviceActionStatus =
+        'Výměna ${type.code} @$oldAddress za nový ($newDefaultAddress) na $id…';
+    notifyListeners();
+
+    final cmd = CommandService.buildReplaceFromCommand(
+      unitId: id,
+      type: type,
+      oldAddress: oldAddress,
+      newDefaultAddress: newDefaultAddress,
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  Future<void> applyTemplateToUnits(
+      DeviceTemplate template, List<String> targetUnitIds) async {
+    for (final target in targetUnitIds) {
+      final id = _normUnitId(target);
+      final cmd = CommandService.buildRecreateDevicesCommand(id, template.modules);
+      _mqttService.publish(cmd.topic, cmd.payload);
+      _unitModulesPending.add(id);
+    }
+    _deviceActionStatus =
+        'Šablona "${template.name}" aplikována na ${targetUnitIds.length} jednotek';
+    notifyListeners();
+  }
+
+  Future<void> saveTemplate(DeviceTemplate template) async {
+    final idx = _templates.indexWhere((t) => t.name == template.name);
+    if (idx >= 0) {
+      _templates[idx] = template;
+    } else {
+      _templates.add(template);
+    }
+    await _persistTemplates();
+    notifyListeners();
+  }
+
+  Future<void> deleteTemplate(String name) async {
+    _templates.removeWhere((t) => t.name == name);
+    await _persistTemplates();
+    notifyListeners();
+  }
+
+  Future<void> _persistTemplates() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('device_templates', DeviceTemplate.listToJson(_templates));
   }
 
   void scanAll() {

@@ -1,5 +1,8 @@
 import 'dart:convert';
 
+import '../models/device.dart';
+import '../models/module.dart';
+
 class CommandService {
   /// Zjistí, zda jednotka používá nový formát topicu (ID >= 1000)
   static bool isNewTopicFormat(String unitId) {
@@ -24,8 +27,7 @@ class CommandService {
     return 'I/u$fourDigit/SERVER/CMD';
   }
 
-  /// BIN topic (pouze nový formát, ID >= 1000):
-  /// I/<unit_id>/UNIT/<unit_id>/BIN
+  /// BIN topic (pouze nový formát, ID >= 1000): `I/<unit_id>/UNIT/<unit_id>/BIN`
   static String getBinTopic(String unitId) {
     return 'I/$unitId/UNIT/$unitId/BIN';
   }
@@ -127,4 +129,147 @@ class CommandService {
     if (dateNum == null) return false;
     return dateNum >= 250925;
   }
+
+  // ============================================================
+  // Device management commands (P2L32 protokol, viz README-P2L-32.md)
+  // ============================================================
+
+  /// Normalizuje unit_id na 6-místný formát (pro topicy nového protokolu).
+  static String _unitId6(String unitId) {
+    final clean = unitId.startsWith('u') ? unitId.substring(1) : unitId;
+    return clean.padLeft(6, '0');
+  }
+
+  /// Topic pro UNIT-level příkazy: `I/<unit_id>/UNIT/<unit_id>/<CMD>`.
+  static String getUnitCommandTopic(String unitId, String command) {
+    final id = _unitId6(unitId);
+    return 'I/$id/UNIT/$id/$command';
+  }
+
+  /// Topic pro konkrétní device: `I/<unit_id>/<TYPE>/<DEVICE_ID>/<CMD>`.
+  /// DEVICE_ID = 2-ciferný kód typu + 4-ciferná adresa (např. 050246 = DISP @246).
+  /// Pro BTN (bez prefixu v README) použijeme holou 6-místnou adresu.
+  static String getDeviceCommandTopic(
+      String unitId, DeviceType type, int address, String command) {
+    final unit = _unitId6(unitId);
+    final typeCode = type.addressPrefix;
+    final addrStr = address.toString().padLeft(4, '0');
+    final deviceId = typeCode != null ? '$typeCode$addrStr' : addrStr.padLeft(6, '0');
+    return 'I/$unit/${type.code}/$deviceId/$command';
+  }
+
+  /// Response topic pattern pro subscribe (O místo I): `O/<unit>/UNIT/<unit>/<CMD>`.
+  /// Pro subscribe wildcards na všechny jednotky použij MqttService přímo.
+
+  /// Request payload pro GET-DEVICES. Vrátí {topic, payload}.
+  static ({String topic, String payload}) buildGetDevicesCommand(String unitId) {
+    return (
+      topic: getUnitCommandTopic(unitId, 'GET-DEVICES'),
+      payload: '{}',
+    );
+  }
+
+  /// Sestaví payload pro ADD-DEVICES / RECREATE-DEVICES / DELETE-DEVICES.
+  /// Sgrupuje moduly do seznamu {"Type": ..., "Id": [...]} entries.
+  /// Pro DELETE použij [forDelete=true] — DIST se pošle jen s holým Id (bez configu),
+  /// i kdyby měl vnořený config, aby odpovídal příkladu v README.
+  static String _buildDevicesPayload(List<PumaModule> modules, {bool forDelete = false}) {
+    // Sgrupuj všechny atomic Device entries podle typu
+    final byType = <DeviceType, List<dynamic>>{};
+    for (final module in modules) {
+      if (module.type == ModuleType.dist && !forDelete) {
+        // DIST s plnou konfigurací (pokud je)
+        final cfg = module.distConfig ?? const DistConfig();
+        byType.putIfAbsent(DeviceType.dist, () => []).add([
+          module.baseAddress,
+          cfg.measurePeriod,
+          cfg.timeout,
+          cfg.offset,
+          cfg.maxDeviation,
+          cfg.countMeasures,
+          cfg.measureType,
+          [], // segments — první iterace nepodporuje, prázdný seznam
+        ]);
+      } else {
+        for (final dev in module.toDevices()) {
+          byType.putIfAbsent(dev.type, () => []).add(dev.id);
+        }
+      }
+    }
+
+    final entries = <Map<String, dynamic>>[];
+    for (final type in DeviceType.values) {
+      if (byType.containsKey(type) && byType[type]!.isNotEmpty) {
+        entries.add({'Type': type.code, 'Id': byType[type]!});
+      }
+    }
+
+    return jsonEncode(entries);
+  }
+
+  static ({String topic, String payload}) buildAddDevicesCommand(
+      String unitId, List<PumaModule> modules) {
+    return (
+      topic: getUnitCommandTopic(unitId, 'ADD-DEVICES'),
+      payload: _buildDevicesPayload(modules),
+    );
+  }
+
+  static ({String topic, String payload}) buildRecreateDevicesCommand(
+      String unitId, List<PumaModule> modules) {
+    return (
+      topic: getUnitCommandTopic(unitId, 'RECREATE-DEVICES'),
+      payload: _buildDevicesPayload(modules),
+    );
+  }
+
+  static ({String topic, String payload}) buildDeleteDevicesCommand(
+      String unitId, List<PumaModule> modules) {
+    return (
+      topic: getUnitCommandTopic(unitId, 'DELETE-DEVICES'),
+      payload: _buildDevicesPayload(modules, forDelete: true),
+    );
+  }
+
+  /// REPLACE-FROM: vadný device (typ+oldAddr) se nahradí novým (newDefaultAddr).
+  /// Podporováno pouze pro DIST a DISP (viz README-P2L-32.md).
+  static ({String topic, String payload}) buildReplaceFromCommand({
+    required String unitId,
+    required DeviceType type,
+    required int oldAddress,
+    required int newDefaultAddress,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, type, oldAddress, 'REPLACE-FROM'),
+      payload: jsonEncode({'Id': newDefaultAddress}),
+    );
+  }
+
+  /// SCAN na UNIT: najde nová zařízení na RS485.
+  static ({String topic, String payload}) buildScanCommand({
+    required String unitId,
+    DeviceType? type,
+    int? id,
+  }) {
+    final args = <String, dynamic>{};
+    if (type != null) args['Type'] = type.code;
+    if (id != null) args['Id'] = id;
+    return (
+      topic: getUnitCommandTopic(unitId, 'SCAN'),
+      payload: jsonEncode(args),
+    );
+  }
+
+  /// Default (výchozí) adresa nového náhradního kusu podle typu device.
+  /// DIST: 127 (rozsah 0-126 pro provoz), DISP: 247 (rozsah 127-246).
+  static int defaultReplacementAddress(DeviceType type) => switch (type) {
+        DeviceType.dist => 127,
+        DeviceType.disp => 247,
+        _ => 0, // BTN/LEDS: REPLACE-FROM není v README dokumentováno
+      };
+
+  /// Zda je výměna přes REPLACE-FROM podporována protokolem pro daný typ.
+  static bool supportsReplace(DeviceType type) =>
+      type == DeviceType.dist || type == DeviceType.disp;
 }
+
