@@ -498,22 +498,7 @@ class _UnitCard extends StatelessWidget {
               ),
               if (unit.supportsBin) ...[
                 const SizedBox(width: 8),
-                SizedBox(
-                  height: 28,
-                  child: SegmentedButton<bool>(
-                    showSelectedIcon: false,
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('BIN', style: TextStyle(fontSize: 11))),
-                      ButtonSegment(value: false, label: Text('OLD', style: TextStyle(fontSize: 11))),
-                    ],
-                    selected: {unit.useBin},
-                    onSelectionChanged: (_) => onToggleBin(),
-                    style: ButtonStyle(
-                      visualDensity: VisualDensity.compact,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                ),
+                _BinOldToggle(useBin: unit.useBin, onToggle: onToggleBin),
                 const SizedBox(width: 8),
               ],
               Stack(
@@ -736,6 +721,52 @@ class _ActionBar extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BinOldToggle extends StatelessWidget {
+  final bool useBin;
+  final VoidCallback onToggle;
+  const _BinOldToggle({required this.useBin, required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onToggle,
+      child: Container(
+        height: 22,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade400),
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _seg('BIN', useBin),
+            _seg('OLD', !useBin),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _seg(String text, bool active) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: active ? Colors.blue.withAlpha(60) : Colors.transparent,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: active ? Colors.blue.shade800 : Colors.grey.shade600,
         ),
       ),
     );
