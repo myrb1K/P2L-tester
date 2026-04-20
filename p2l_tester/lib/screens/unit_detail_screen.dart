@@ -441,6 +441,20 @@ class _AddressChip extends StatelessWidget {
     this.onClearDisplay,
   });
 
+  Color _effectiveColor() {
+    if (module.type != ModuleType.pumA) return color;
+    switch (module.buttonCount) {
+      case 0:
+        return Colors.lightBlue;
+      case 1:
+        return Colors.blue;
+      case 2:
+        return Colors.indigo;
+    }
+    return color;
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
@@ -497,16 +511,23 @@ class _AddressChip extends StatelessWidget {
           ]),
         ),
       ],
-      child: Chip(
-        label: Text(
-          module.baseAddress.toString(),
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: color.withAlpha(30),
-        side: BorderSide(color: color.withAlpha(80)),
-        visualDensity: VisualDensity.compact,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
+      child: Builder(builder: (_) {
+        final effColor = _effectiveColor();
+        return Chip(
+          label: Text(
+            module.baseAddress.toString(),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: effColor,
+            ),
+          ),
+          backgroundColor: effColor.withAlpha(30),
+          side: BorderSide(color: effColor.withAlpha(110)),
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        );
+      }),
     );
   }
 }

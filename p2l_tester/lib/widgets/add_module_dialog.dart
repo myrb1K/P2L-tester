@@ -36,6 +36,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
   ButtonSide _buttonSide = ButtonSide.left;
   bool _restartAfter = false;
   String? _error;
+  int? _lastSuggested;
 
   // DIST config
   late TextEditingController _distPeriodCtrl;
@@ -50,10 +51,10 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     super.initState();
     final init = widget.initial;
     _type = init?.type ?? ModuleType.pumA;
+    final initialSuggested = init == null ? _suggestFor(_type) : null;
+    _lastSuggested = initialSuggested;
     _addrCtrl = TextEditingController(
-      text: init?.baseAddress.toString() ??
-          widget.suggestedAddress?.toString() ??
-          '',
+      text: init?.baseAddress.toString() ?? initialSuggested?.toString() ?? '',
     );
     _buttonCount = init?.buttonCount ?? 1;
     _hasLeds = init?.hasLeds ?? false;
@@ -79,12 +80,30 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     super.dispose();
   }
 
+  int _suggestFor(ModuleType t) {
+    final taken = widget.existingAddresses;
+    if (t == ModuleType.dist) {
+      for (var i = 1; i <= 126; i++) {
+        if (!taken.contains(i)) return i;
+      }
+      return 1;
+    }
+    var i = 128;
+    while (taken.contains(i)) {
+      i++;
+    }
+    return i;
+  }
+
   String? _validate() {
     final addr = int.tryParse(_addrCtrl.text);
     if (addr == null) return 'Zadej adresu (číslo).';
     if (addr <= 0) return 'Adresa musí být > 0.';
     if (_type == ModuleType.dist && (addr < 1 || addr > 126)) {
       return 'DIST adresa musí být 1–126.';
+    }
+    if (_type != ModuleType.dist && (addr < 127 || addr > 246)) {
+      return '${_type.label} adresa musí být 127–246.';
     }
     if (_type == ModuleType.pumC && !widget.hasPumAWithRoom && widget.initial == null) {
       return 'PUM-C lze přidat jen k PUM-A, které má 0 nebo 1 tlačítko.';
@@ -175,6 +194,13 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                           _buttonCount = 0;
                           _hasLeds = false;
                         }
+                        final current = int.tryParse(_addrCtrl.text);
+                        if (_addrCtrl.text.isEmpty ||
+                            current == _lastSuggested) {
+                          final s = _suggestFor(_type);
+                          _lastSuggested = s;
+                          _addrCtrl.text = s.toString();
+                        }
                       }),
             ),
             const SizedBox(height: 12),
@@ -185,7 +211,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
               decoration: InputDecoration(
                 labelText: _type == ModuleType.dist
                     ? 'Adresa sensoru (1–126)'
-                    : 'Adresa / číslo čipu',
+                    : 'Adresa / číslo čipu (127–246)',
                 hintText: _type == ModuleType.pumA
                     ? 'např. 128 (DISP N, tlačítka 1N/2N)'
                     : _type == ModuleType.pumC

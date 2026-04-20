@@ -19,7 +19,16 @@ class ModuleTile extends StatelessWidget {
   IconData get _icon {
     switch (module.type) {
       case ModuleType.pumA:
-        return Icons.display_settings;
+        switch (module.buttonCount) {
+          case 0:
+            return Icons.monitor;
+          case 1:
+            return Icons.touch_app;
+          case 2:
+            return Icons.ads_click;
+          default:
+            return Icons.display_settings;
+        }
       case ModuleType.pumB:
         return Icons.radio_button_checked;
       case ModuleType.pumC:
@@ -48,7 +57,16 @@ class ModuleTile extends StatelessWidget {
   Color get _color {
     switch (module.type) {
       case ModuleType.pumA:
-        return Colors.blue;
+        switch (module.buttonCount) {
+          case 0:
+            return Colors.lightBlue;
+          case 1:
+            return Colors.blue;
+          case 2:
+            return Colors.indigo;
+          default:
+            return Colors.blue;
+        }
       case ModuleType.pumB:
         return Colors.orange;
       case ModuleType.pumC:
@@ -56,6 +74,19 @@ class ModuleTile extends StatelessWidget {
       case ModuleType.dist:
         return Colors.teal;
     }
+  }
+
+  String? _variantBadge() {
+    if (module.type != ModuleType.pumA) return null;
+    switch (module.buttonCount) {
+      case 0:
+        return '0 tl.';
+      case 1:
+        return module.buttonSide == ButtonSide.left ? '1 tl. L' : '1 tl. P';
+      case 2:
+        return '2 tl.';
+    }
+    return null;
   }
 
   @override
@@ -68,9 +99,33 @@ class ModuleTile extends StatelessWidget {
           backgroundColor: _color.withAlpha(40),
           child: Icon(_icon, color: _color, size: 20),
         ),
-        title: Text(
-          module.displayLabel,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                module.displayLabel,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (_variantBadge() != null)
+              Container(
+                margin: const EdgeInsets.only(left: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _color.withAlpha(40),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: _color.withAlpha(120), width: 0.5),
+                ),
+                child: Text(
+                  _variantBadge()!,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: _color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
         ),
         subtitle: Text(
           _subtitle(),
