@@ -115,7 +115,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Center(
                     child: Text(
-                      state.broker,
+                      (state.activeProfileIndex >= 0 &&
+                              state.activeProfileIndex < state.profiles.length)
+                          ? state.profiles[state.activeProfileIndex].name
+                          : state.broker,
                       style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                     ),
                   ),
