@@ -356,7 +356,7 @@ class AppState extends ChangeNotifier {
       final devices = parseGetDevicesPayload(devicesField);
       _unitModules[unitId] = reconstructModules(devices);
       _unitModulesFetchedAt[unitId] = DateTime.now();
-      _deviceActionStatus = 'Devices jednotky $unitId načteny (${devices.length} entries → ${_unitModules[unitId]!.length} modulů)';
+      _deviceActionStatus = 'Moduly P2L modulu $unitId načteny (${devices.length} entit → ${_unitModules[unitId]!.length} modulů)';
     } else {
       _deviceActionStatus = 'GET-DEVICES $unitId: neočekávaný formát odpovědi';
     }
@@ -380,7 +380,7 @@ class AppState extends ChangeNotifier {
       }
     } else {
       _units[unitId] = P2LUnit.fromAlive(unitId, json);
-      _statusMessage = 'Nalezeno ${_units.length} jednotek';
+      _statusMessage = 'Nalezeno ${_units.length} P2L modulů';
     }
 
     // Po restartu: první ALIVE mimo grace window → dotáhni devices.
@@ -390,7 +390,7 @@ class AppState extends ChangeNotifier {
         _awaitingAliveAfterRestart.remove(unitId);
         _restartSentAt.remove(unitId);
         _initialFetchDone.add(unitId);
-        _deviceActionStatus = 'Jednotka $unitId zpět online — načítám devices.';
+        _deviceActionStatus = 'P2L modul $unitId zpět online — načítám moduly.';
         Future.microtask(() => fetchDevices(unitId));
       }
     } else if (_initialFetchDone.add(unitId)) {
@@ -416,7 +416,7 @@ class AppState extends ChangeNotifier {
         final unit = P2LUnit(id: lookupId);
         unit.updateFromGetParam(args);
         _units[lookupId] = unit;
-        _statusMessage = 'Nalezeno ${_units.length} jednotek';
+        _statusMessage = 'Nalezeno ${_units.length} P2L modulů';
       }
       notifyListeners();
     }

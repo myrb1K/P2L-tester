@@ -150,6 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               IconButton(
                 icon: const Icon(Icons.settings),
+                tooltip: 'Nastavení',
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 ),
@@ -221,7 +222,7 @@ class _StatusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final message = !state.isConnected
-        ? 'Odpojeno - otevrete Nastaveni'
+        ? 'Odpojeno – otevřete Nastavení'
         : state.statusMessage.isNotEmpty
             ? state.statusMessage
             : 'Připojeno';
@@ -265,7 +266,7 @@ class _ManualIdInput extends StatelessWidget {
               controller: controller,
               enabled: isConnected,
               decoration: const InputDecoration(
-                hintText: 'ID jednotky (napr. 1017)',
+                hintText: 'ID P2L modulu (např. 1017)',
                 border: OutlineInputBorder(),
                 isDense: true,
                 contentPadding:
@@ -298,7 +299,7 @@ class _SelectionBar extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            'Jednotky: ${state.totalCount}',
+            'P2L moduly: ${state.totalCount}',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           if (state.offlineCount > 0)
@@ -358,8 +359,8 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               isConnected
-                  ? 'Čekám na ALIVE zprávy…\nNebo zadejte ID jednotky výše.'
-                  : 'Nejdrive se pripojte k brokeru\nv Nastaveni.',
+                  ? 'Čekám na ALIVE zprávy…\nNebo zadejte ID P2L modulu výše.'
+                  : 'Nejdříve se připojte k brokeru\nv Nastavení.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.grey[600]),
             ),
@@ -513,7 +514,7 @@ class _UnitCard extends StatelessWidget {
                   IconButton(
                     icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
                     onPressed: onOpenDetail,
-                    tooltip: 'Detail jednotky',
+                    tooltip: 'Seznam zařízení',
                   ),
                   if (moduleCount != null)
                     Positioned(
@@ -547,7 +548,7 @@ class _UnitCard extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.refresh, size: 20, color: Colors.green),
                 onPressed: onGetParam,
-                tooltip: 'Get Param',
+                tooltip: 'Obnovit',
               ),
             ],
           ),
@@ -571,7 +572,7 @@ class _UnitCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Jednotka ${unit.displayName}'),
+        title: Text('P2L modul ${unit.displayName}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -631,7 +632,7 @@ class _ActionBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Vybrano: ${state.selectedCount} z ${state.totalCount}',
+              'Vybráno: ${state.selectedCount} z ${state.totalCount}',
               style: TextStyle(fontSize: 13, color: Colors.grey[600]),
             ),
             const SizedBox(height: 6),
@@ -705,7 +706,7 @@ class _ActionBar extends StatelessWidget {
                     onPressed:
                         state.selectedCount > 0 ? state.sendClear : null,
                     icon: const Icon(Icons.stop),
-                    label: const Text('CLEAR'),
+                    label: const Text('ZHASNI'),
                     style: FilledButton.styleFrom(
                       backgroundColor: Colors.red,
                       padding: const EdgeInsets.symmetric(vertical: 12),

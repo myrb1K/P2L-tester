@@ -128,7 +128,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Smazat všechna devices?'),
+        title: const Text('Smazat všechny moduly?'),
         content: Text(
           'Z jednotky ${widget.unitId} se odstraní všechny moduly. Nelze vrátit.',
         ),
@@ -162,11 +162,11 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text('Jednotka ${unit.displayName}'),
+            title: Text('P2L modul ${unit.displayName}'),
             actions: [
               IconButton(
                 icon: const Icon(Icons.refresh),
-                tooltip: 'Načíst devices',
+                tooltip: 'Načíst moduly',
                 onPressed: () => state.fetchDevices(widget.unitId),
               ),
               IconButton(
@@ -181,7 +181,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
               ),
               IconButton(
                 icon: const Icon(Icons.delete_sweep, color: Colors.red),
-                tooltip: 'Smazat všechna devices',
+                tooltip: 'Smazat všechny moduly',
                 onPressed: modules.isEmpty ? null : () => _wipeAll(state),
               ),
             ],
@@ -592,7 +592,7 @@ class _EmptyModules extends StatelessWidget {
           Text(
             pending
                 ? 'Načítám devices…'
-                : 'Jednotka nemá žádné registrované moduly.\nPřidej první modul tlačítkem dole.',
+                : 'P2L modul nemá žádné registrované moduly.\nPřidej první modul tlačítkem dole.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey[600]),
           ),

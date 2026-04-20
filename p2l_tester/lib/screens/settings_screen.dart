@@ -253,7 +253,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         controller: _nameController,
                         decoration: const InputDecoration(
                           labelText: 'Nazev profilu',
-                          hintText: 'napr. Lekarna, Sklad...',
+                          hintText: 'např. Lékárna, Sklad…',
                           prefixIcon: Icon(Icons.label),
                           border: OutlineInputBorder(),
                         ),
