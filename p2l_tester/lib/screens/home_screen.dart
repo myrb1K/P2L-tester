@@ -53,7 +53,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   isActive ? Icons.check_circle : Icons.circle_outlined,
                   color: isActive ? Colors.green : Colors.grey,
                 ),
-                title: Text(p.name),
+                title: Text(
+                  p.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
                 subtitle: Text('${p.broker}:${p.port}'),
                 onTap: () async {
                   Navigator.pop(ctx);
