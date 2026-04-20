@@ -11,6 +11,10 @@ extension ModuleTypeExt on ModuleType {
       };
 }
 
+/// Strana tlačítka PUM-A s 1 tlačítkem.
+/// Levé = BTN 1000+N, Pravé = BTN N.
+enum ButtonSide { left, right }
+
 class DistConfig {
   final int measurePeriod;
   final int timeout;
@@ -70,6 +74,7 @@ class PumaModule {
   final int baseAddress;
   final int buttonCount; // jen pro PUM-A: 0/1/2; pevně 1 pro PUM-B, 2 pro PUM-C
   final bool hasLeds; // jen pro PUM-A
+  final ButtonSide? buttonSide; // jen pro PUM-A s 1 tlačítkem
   final DistConfig? distConfig; // jen pro DIST
 
   const PumaModule({
@@ -77,15 +82,21 @@ class PumaModule {
     required this.baseAddress,
     this.buttonCount = 0,
     this.hasLeds = false,
+    this.buttonSide,
     this.distConfig,
   });
 
-  const PumaModule.pumA({required int address, int buttonCount = 0, bool hasLeds = false})
-      : this(
+  const PumaModule.pumA({
+    required int address,
+    int buttonCount = 0,
+    bool hasLeds = false,
+    ButtonSide? buttonSide,
+  }) : this(
           type: ModuleType.pumA,
           baseAddress: address,
           buttonCount: buttonCount,
           hasLeds: hasLeds,
+          buttonSide: buttonSide,
         );
 
   const PumaModule.pumB({required int address})
@@ -102,16 +113,21 @@ class PumaModule {
         );
 
   /// Všechny MQTT Device záznamy, které tento modul (1 čip) generuje do GET-DEVICES.
+  /// PUM-A/PUM-C konvence: BTN levé = 1000+N, BTN pravé = N.
   List<Device> toDevices() {
     switch (type) {
       case ModuleType.pumA:
         return [
           Device(type: DeviceType.disp, id: baseAddress),
           if (hasLeds) Device(type: DeviceType.leds, id: baseAddress),
-          if (buttonCount == 1) Device(type: DeviceType.btn, id: 1000 + baseAddress),
+          if (buttonCount == 1)
+            Device(
+              type: DeviceType.btn,
+              id: buttonSide == ButtonSide.right ? baseAddress : 1000 + baseAddress,
+            ),
           if (buttonCount == 2) ...[
             Device(type: DeviceType.btn, id: 1000 + baseAddress),
-            Device(type: DeviceType.btn, id: 2000 + baseAddress),
+            Device(type: DeviceType.btn, id: baseAddress),
           ],
         ];
       case ModuleType.pumB:
@@ -133,7 +149,7 @@ class PumaModule {
         if (buttonCount == 0) {
           parts.add('bez tl.');
         } else if (buttonCount == 1) {
-          parts.add('1 tl.');
+          parts.add(buttonSide == ButtonSide.right ? '1 tl. (P)' : '1 tl. (L)');
         } else {
           parts.add('2 tl.');
         }
@@ -153,17 +169,22 @@ class PumaModule {
         'baseAddress': baseAddress,
         'buttonCount': buttonCount,
         'hasLeds': hasLeds,
+        if (buttonSide != null) 'buttonSide': buttonSide!.name,
         if (distConfig != null) 'distConfig': distConfig!.toJson(),
       };
 
   factory PumaModule.fromJson(Map<String, dynamic> json) {
     final typeName = json['type'] as String;
     final type = ModuleType.values.firstWhere((t) => t.name == typeName);
+    final sideName = json['buttonSide'] as String?;
     return PumaModule(
       type: type,
       baseAddress: json['baseAddress'] as int,
       buttonCount: json['buttonCount'] as int? ?? 0,
       hasLeds: json['hasLeds'] as bool? ?? false,
+      buttonSide: sideName == null
+          ? null
+          : ButtonSide.values.firstWhere((s) => s.name == sideName),
       distConfig: json['distConfig'] != null
           ? DistConfig.fromJson(json['distConfig'] as Map<String, dynamic>)
           : (type == ModuleType.dist ? const DistConfig() : null),

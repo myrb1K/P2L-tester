@@ -42,7 +42,7 @@ void main() {
   });
 
   group('ADD-DEVICES payload', () {
-    test('Příklad z README: PUM-A 128 (DISP+LEDS+2BTN) + DIST 98', () {
+    test('PUM-A 128 (DISP+LEDS+2BTN) + DIST 98', () {
       final modules = [
         const PumaModule.pumA(address: 128, buttonCount: 2, hasLeds: true),
         PumaModule.dist(address: 98),
@@ -51,32 +51,51 @@ void main() {
       expect(cmd.topic, 'I/001001/UNIT/001001/ADD-DEVICES');
 
       final decoded = jsonDecode(cmd.payload) as List;
-      // Očekáváme entries pro BTN, DISP, LEDS, DIST
       final byType = {for (final e in decoded) (e as Map)['Type']: e['Id']};
-      expect(byType['BTN'], unorderedEquals([1128, 2128]));
+      // PUM-A 2 tl.: levé = 1128, pravé = 128
+      expect(byType['BTN'], unorderedEquals([1128, 128]));
       expect(byType['DISP'], [128]);
       expect(byType['LEDS'], [128]);
       expect(byType['DIST'], isNotNull);
-      // DIST je vnořené pole s configem
       expect((byType['DIST'] as List)[0], isA<List>());
       expect(((byType['DIST'] as List)[0] as List)[0], 98);
     });
 
-    test('Příklad PUM-A s 1 tl. + PUM-C + PUM-B', () {
+    test('PUM-A 128 s 1 tl. LEVÝM + PUM-C 130 + PUM-B 200', () {
       final modules = [
-        const PumaModule.pumA(address: 128, buttonCount: 1, hasLeds: true),
-        const PumaModule.pumC(address: 130),
+        const PumaModule.pumA(
+          address: 128,
+          buttonCount: 1,
+          hasLeds: true,
+          buttonSide: ButtonSide.left,
+        ),
+        const PumaModule.pumC(address: 129),
         const PumaModule.pumB(address: 200),
       ];
       final cmd = CommandService.buildAddDevicesCommand('001001', modules);
       final decoded = jsonDecode(cmd.payload) as List;
       final byType = {for (final e in decoded) (e as Map)['Type']: e['Id']};
 
-      // PUM-A s 1 tl. → BTN 128 (sdílí s DISP); PUM-C → 1130, 130; PUM-B → 200
-      expect(byType['BTN'], unorderedEquals([128, 1130, 130, 200]));
+      // PUM-A s 1 tl. levým → BTN 1128; PUM-C 129 → 1129, 129; PUM-B → 200
+      expect(byType['BTN'], unorderedEquals([1128, 1129, 129, 200]));
       expect(byType['DISP'], [128]);
       expect(byType['LEDS'], [128]);
       expect(byType.containsKey('DIST'), false);
+    });
+
+    test('PUM-A s 1 tl. PRAVÝM → BTN N', () {
+      final modules = [
+        const PumaModule.pumA(
+          address: 128,
+          buttonCount: 1,
+          buttonSide: ButtonSide.right,
+        ),
+      ];
+      final cmd = CommandService.buildAddDevicesCommand('001001', modules);
+      final decoded = jsonDecode(cmd.payload) as List;
+      final byType = {for (final e in decoded) (e as Map)['Type']: e['Id']};
+      expect(byType['BTN'], [128]);
+      expect(byType['DISP'], [128]);
     });
   });
 

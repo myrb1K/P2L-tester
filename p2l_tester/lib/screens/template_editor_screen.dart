@@ -36,11 +36,15 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
 
   Future<void> _addModule() async {
     final existing = _modules.map((m) => m.baseAddress).toSet();
+    final suggested = existing.isEmpty
+        ? null
+        : (existing.reduce((a, b) => a > b ? a : b) + 1);
     final result = await showDialog<AddModuleResult>(
       context: context,
       builder: (_) => AddModuleDialog(
         existingAddresses: existing,
         hasPumAWithRoom: hasPumAWithButtonRoom(_modules),
+        suggestedAddress: suggested,
       ),
     );
     if (result != null) {

@@ -26,16 +26,37 @@ void main() {
       expect(result[0].buttonCount, 1);
     });
 
-    test('PUM-A s 2 tlačítky (1000+N, 2000+N)', () {
+    test('PUM-A s 2 tlačítky (1000+N, N)', () {
       final devices = [
         const Device(type: DeviceType.disp, id: 128),
         const Device(type: DeviceType.btn, id: 1128),
-        const Device(type: DeviceType.btn, id: 2128),
+        const Device(type: DeviceType.btn, id: 128),
       ];
       final result = reconstructModules(devices);
       expect(result.length, 1);
       expect(result[0].type, ModuleType.pumA);
       expect(result[0].buttonCount, 2);
+    });
+
+    test('PUM-A s 1 tl. pravým (BTN N, bez 1000+N)', () {
+      final devices = [
+        const Device(type: DeviceType.disp, id: 128),
+        const Device(type: DeviceType.btn, id: 128),
+      ];
+      final result = reconstructModules(devices);
+      expect(result.length, 1);
+      expect(result[0].type, ModuleType.pumA);
+      expect(result[0].buttonCount, 1);
+      expect(result[0].buttonSide, ButtonSide.right);
+    });
+
+    test('PUM-A s 1 tl. levým → side=left', () {
+      final devices = [
+        const Device(type: DeviceType.disp, id: 128),
+        const Device(type: DeviceType.btn, id: 1128),
+      ];
+      final result = reconstructModules(devices);
+      expect(result[0].buttonSide, ButtonSide.left);
     });
 
     test('PUM-A s LEDS', () {
@@ -77,13 +98,13 @@ void main() {
       expect(result[0].baseAddress, 50);
     });
 
-    test('Kombinace PUM-A 128 + PUM-C 130 + PUM-B 200 + DIST 50', () {
+    test('Kombinace PUM-A 128 (1 tl. L) + PUM-C 129 + PUM-B 200 + DIST 50', () {
       final devices = [
         const Device(type: DeviceType.disp, id: 128),
         const Device(type: DeviceType.leds, id: 128),
         const Device(type: DeviceType.btn, id: 1128),
-        const Device(type: DeviceType.btn, id: 1130),
-        const Device(type: DeviceType.btn, id: 130),
+        const Device(type: DeviceType.btn, id: 1129),
+        const Device(type: DeviceType.btn, id: 129),
         const Device(type: DeviceType.btn, id: 200),
         const Device(type: DeviceType.dist, id: 50),
       ];
@@ -96,10 +117,11 @@ void main() {
       final pumA = result.firstWhere((m) => m.type == ModuleType.pumA);
       expect(pumA.baseAddress, 128);
       expect(pumA.buttonCount, 1);
+      expect(pumA.buttonSide, ButtonSide.left);
       expect(pumA.hasLeds, true);
 
       final pumC = result.firstWhere((m) => m.type == ModuleType.pumC);
-      expect(pumC.baseAddress, 130);
+      expect(pumC.baseAddress, 129);
 
       final pumB = result.firstWhere((m) => m.type == ModuleType.pumB);
       expect(pumB.baseAddress, 200);
@@ -109,39 +131,53 @@ void main() {
       expect(reconstructModules([]), isEmpty);
     });
 
-    test('Holé BTN N vedle DISP N není PUM-A tlačítko — skončí jako PUM-B', () {
-      // DISP 128 + BTN 1128 → PUM-A @128 s 1 levým tl. (zabere 1128)
-      // BTN 128 (holé) k PUM-A nepatří — holé BTN je vždy PUM-B nebo PUM-C mínus.
-      // Zbyde jako PUM-B @128.
+    test('DISP N + BTN 1000+N + BTN N → PUM-A s 2 tl.', () {
       final devices = [
         const Device(type: DeviceType.disp, id: 128),
         const Device(type: DeviceType.btn, id: 128),
         const Device(type: DeviceType.btn, id: 1128),
       ];
       final result = reconstructModules(devices);
-      final pumA = result.firstWhere((m) => m.type == ModuleType.pumA);
-      expect(pumA.buttonCount, 1);
-      expect(result.any((m) => m.type == ModuleType.pumB && m.baseAddress == 128), true);
+      expect(result.length, 1);
+      final pumA = result[0];
+      expect(pumA.type, ModuleType.pumA);
+      expect(pumA.buttonCount, 2);
     });
   });
 
   group('toDevices inverse', () {
-    test('PUM-A (2 tl. + LEDS) → 4 devices', () {
+    test('PUM-A (2 tl. + LEDS) → 4 devices (1000+N a N)', () {
       const m = PumaModule.pumA(address: 128, buttonCount: 2, hasLeds: true);
       final devices = m.toDevices();
       expect(devices.length, 4);
       expect(devices, contains(const Device(type: DeviceType.disp, id: 128)));
       expect(devices, contains(const Device(type: DeviceType.leds, id: 128)));
       expect(devices, contains(const Device(type: DeviceType.btn, id: 1128)));
-      expect(devices, contains(const Device(type: DeviceType.btn, id: 2128)));
+      expect(devices, contains(const Device(type: DeviceType.btn, id: 128)));
     });
 
-    test('PUM-A (1 tl., bez LEDS) → 2 devices (DISP + BTN 1000+N)', () {
-      const m = PumaModule.pumA(address: 128, buttonCount: 1);
+    test('PUM-A (1 tl. levé) → DISP + BTN 1000+N', () {
+      const m = PumaModule.pumA(
+        address: 128,
+        buttonCount: 1,
+        buttonSide: ButtonSide.left,
+      );
       final devices = m.toDevices();
       expect(devices.length, 2);
       expect(devices, contains(const Device(type: DeviceType.disp, id: 128)));
       expect(devices, contains(const Device(type: DeviceType.btn, id: 1128)));
+    });
+
+    test('PUM-A (1 tl. pravé) → DISP + BTN N', () {
+      const m = PumaModule.pumA(
+        address: 128,
+        buttonCount: 1,
+        buttonSide: ButtonSide.right,
+      );
+      final devices = m.toDevices();
+      expect(devices.length, 2);
+      expect(devices, contains(const Device(type: DeviceType.disp, id: 128)));
+      expect(devices, contains(const Device(type: DeviceType.btn, id: 128)));
     });
 
     test('PUM-C → 2 BTN devices', () {

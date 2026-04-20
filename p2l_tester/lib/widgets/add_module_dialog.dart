@@ -14,12 +14,14 @@ class AddModuleDialog extends StatefulWidget {
   final Set<int> existingAddresses;
   final bool hasPumAWithRoom;
   final PumaModule? initial;
+  final int? suggestedAddress;
 
   const AddModuleDialog({
     super.key,
     this.existingAddresses = const {},
     this.hasPumAWithRoom = false,
     this.initial,
+    this.suggestedAddress,
   });
 
   @override
@@ -31,6 +33,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
   late TextEditingController _addrCtrl;
   int _buttonCount = 0;
   bool _hasLeds = false;
+  ButtonSide _buttonSide = ButtonSide.left;
   bool _restartAfter = false;
   String? _error;
 
@@ -47,9 +50,14 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     super.initState();
     final init = widget.initial;
     _type = init?.type ?? ModuleType.pumA;
-    _addrCtrl = TextEditingController(text: init?.baseAddress.toString() ?? '');
+    _addrCtrl = TextEditingController(
+      text: init?.baseAddress.toString() ??
+          widget.suggestedAddress?.toString() ??
+          '',
+    );
     _buttonCount = init?.buttonCount ?? 1;
     _hasLeds = init?.hasLeds ?? false;
+    _buttonSide = init?.buttonSide ?? ButtonSide.left;
 
     final cfg = init?.distConfig ?? const DistConfig();
     _distPeriodCtrl = TextEditingController(text: cfg.measurePeriod.toString());
@@ -102,6 +110,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
           address: addr,
           buttonCount: _buttonCount,
           hasLeds: _hasLeds,
+          buttonSide: _buttonCount == 1 ? _buttonSide : null,
         );
       case ModuleType.pumB:
         module = PumaModule.pumB(address: addr);
@@ -142,9 +151,19 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              items: ModuleType.values
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t.label)))
-                  .toList(),
+              items: ModuleType.values.map((t) {
+                final disabled = t == ModuleType.pumC &&
+                    !widget.hasPumAWithRoom &&
+                    widget.initial == null;
+                return DropdownMenuItem(
+                  value: t,
+                  enabled: !disabled,
+                  child: Text(
+                    disabled ? '${t.label} (nejdřív přidej PUM-A)' : t.label,
+                    style: disabled ? const TextStyle(color: Colors.grey) : null,
+                  ),
+                );
+              }).toList(),
               onChanged: widget.initial != null
                   ? null
                   : (v) => setState(() {
@@ -188,6 +207,18 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                 selected: {_buttonCount},
                 onSelectionChanged: (s) => setState(() => _buttonCount = s.first),
               ),
+              if (_buttonCount == 1) ...[
+                const SizedBox(height: 8),
+                Text('Strana tlačítka', style: Theme.of(context).textTheme.bodyMedium),
+                SegmentedButton<ButtonSide>(
+                  segments: const [
+                    ButtonSegment(value: ButtonSide.left, label: Text('Levé (1000+N)')),
+                    ButtonSegment(value: ButtonSide.right, label: Text('Pravé (N)')),
+                  ],
+                  selected: {_buttonSide},
+                  onSelectionChanged: (s) => setState(() => _buttonSide = s.first),
+                ),
+              ],
               const SizedBox(height: 8),
               CheckboxListTile(
                 value: _hasLeds,

@@ -533,6 +533,20 @@ class AppState extends ChangeNotifier {
 
     final cmd = CommandService.buildAddDevicesCommand(id, modules);
     _mqttService.publish(cmd.topic, cmd.payload);
+
+    // Fallback: některé firmware neposílají O/.../ADD-DEVICES odpověď.
+    // Po 200 ms si vynutíme restart (pokud je požadován) nebo GET-DEVICES.
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (!_unitModulesPending.contains(id)) return;
+      _unitModulesPending.remove(id);
+      if (_pendingRestart.remove(id)) {
+        _awaitingAliveAfterRestart.add(id);
+        _restartSentAt[id] = DateTime.now();
+        restartUnit(id);
+      } else {
+        fetchDevices(id);
+      }
+    });
   }
 
   Future<void> restartUnit(String unitId) async {
@@ -570,6 +584,18 @@ class AppState extends ChangeNotifier {
 
     final cmd = CommandService.buildRecreateDevicesCommand(id, modules);
     _mqttService.publish(cmd.topic, cmd.payload);
+
+    // Fallback pro firmware, který neposílá O/.../RECREATE-DEVICES odpověď.
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (!_unitModulesPending.contains(id)) return;
+      _unitModulesPending.remove(id);
+      fetchDevices(id);
+    });
+  }
+
+  /// Smaže všechna devices jednotky (RECREATE-DEVICES s prázdným polem).
+  Future<void> wipeDevices(String unitId) async {
+    await recreateDevices(unitId, const []);
   }
 
   Future<void> deleteModule(String unitId, PumaModule module) async {
@@ -607,15 +633,26 @@ class AppState extends ChangeNotifier {
 
   Future<void> applyTemplateToUnits(
       DeviceTemplate template, List<String> targetUnitIds) async {
+    final normIds = <String>[];
     for (final target in targetUnitIds) {
       final id = _normUnitId(target);
       final cmd = CommandService.buildRecreateDevicesCommand(id, template.modules);
       _mqttService.publish(cmd.topic, cmd.payload);
       _unitModulesPending.add(id);
+      normIds.add(id);
     }
     _deviceActionStatus =
         'Šablona "${template.name}" aplikována na ${targetUnitIds.length} jednotek';
     notifyListeners();
+
+    // Fallback: firmware neposílá O/.../RECREATE-DEVICES odpověď.
+    Future.delayed(const Duration(milliseconds: 200), () {
+      for (final id in normIds) {
+        if (!_unitModulesPending.contains(id)) continue;
+        _unitModulesPending.remove(id);
+        fetchDevices(id);
+      }
+    });
   }
 
   Future<void> saveTemplate(DeviceTemplate template) async {

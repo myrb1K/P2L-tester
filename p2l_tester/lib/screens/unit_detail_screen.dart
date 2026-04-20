@@ -30,11 +30,15 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
 
   Future<void> _addModule(AppState state, List<PumaModule> currentModules) async {
     final existing = currentModules.map((m) => m.baseAddress).toSet();
+    final suggested = existing.isEmpty
+        ? null
+        : (existing.reduce((a, b) => a > b ? a : b) + 1);
     final result = await showDialog<AddModuleResult>(
       context: context,
       builder: (_) => AddModuleDialog(
         existingAddresses: existing,
         hasPumAWithRoom: hasPumAWithButtonRoom(currentModules),
+        suggestedAddress: suggested,
       ),
     );
     if (result != null) {
@@ -98,6 +102,32 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     );
   }
 
+  Future<void> _wipeAll(AppState state) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Smazat všechna devices?'),
+        content: Text(
+          'Z jednotky ${widget.unitId} se odstraní všechny moduly. Nelze vrátit.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Zrušit'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Smazat vše'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await state.wipeDevices(widget.unitId);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
@@ -118,9 +148,19 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 onPressed: () => state.fetchDevices(widget.unitId),
               ),
               IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: 'Přidat modul',
+                onPressed: () => _addModule(state, modules),
+              ),
+              IconButton(
                 icon: const Icon(Icons.dashboard_customize),
                 tooltip: 'Aplikovat šablonu',
                 onPressed: () => _applyTemplate(state),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_sweep, color: Colors.red),
+                tooltip: 'Smazat všechna devices',
+                onPressed: modules.isEmpty ? null : () => _wipeAll(state),
               ),
             ],
           ),
@@ -138,17 +178,6 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                   ),
                 ),
               if (pending) const LinearProgressIndicator(minHeight: 2),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('Přidat modul'),
-                    onPressed: () => _addModule(state, modules),
-                  ),
-                ),
-              ),
               Expanded(
                 child: modules.isEmpty
                     ? _EmptyModules(pending: pending)

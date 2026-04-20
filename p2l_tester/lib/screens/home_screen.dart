@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../main.dart';
+import '../models/device.dart';
+import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
 import '../services/mqtt_service.dart';
@@ -270,7 +272,7 @@ class _ManualIdInput extends StatelessWidget {
           const SizedBox(width: 8),
           FilledButton(
             onPressed: isConnected ? onSubmit : null,
-            child: const Text('Overit'),
+            child: const Text('Ověřit'),
           ),
         ],
       ),
@@ -381,7 +383,10 @@ class _UnitListView extends StatelessWidget {
           isSelected: isSelected,
           moduleCount: state.modulesForUnit(unit.id)?.length,
           onToggle: () => state.toggleUnit(unit.id),
-          onGetParam: () => state.sendGetParam(unit.id),
+          onGetParam: () {
+            state.sendGetParam(unit.id);
+            state.fetchDevices(unit.id);
+          },
           onToggleBin: () => state.toggleBinMode(unit.id),
           onOpenDetail: () => Navigator.of(context).push(
             MaterialPageRoute(
@@ -561,6 +566,17 @@ class _UnitCard extends StatelessWidget {
   }
 
   void _showUnitInfo(BuildContext context, P2LUnit unit) {
+    final modules = context.read<AppState>().modulesForUnit(unit.id) ?? const [];
+    final pumA = modules.where((m) => m.type == ModuleType.pumA).length;
+    final pumB = modules.where((m) => m.type == ModuleType.pumB).length;
+    final pumC = modules.where((m) => m.type == ModuleType.pumC).length;
+    final dist = modules.where((m) => m.type == ModuleType.dist).length;
+    final allDevices = modules.expand((m) => m.toDevices()).toList();
+    final totalDevices = allDevices.length;
+    final btnCount = allDevices.where((d) => d.type == DeviceType.btn).length;
+    final dispCount = allDevices.where((d) => d.type == DeviceType.disp).length;
+    final ledsCount = allDevices.where((d) => d.type == DeviceType.leds).length;
+    final distCount = allDevices.where((d) => d.type == DeviceType.dist).length;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -580,6 +596,10 @@ class _UnitCard extends StatelessWidget {
             Text('Brightness: ${unit.brightness}'),
             if (unit.ledsPerPort.isNotEmpty)
               Text('LEDs: ${unit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}'),
+            const SizedBox(height: 8),
+            Text('Devices: $totalDevices'),
+            Text('PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist'),
+            Text('BTN: $btnCount · DISP: $dispCount · LEDS: $ledsCount · DIST: $distCount'),
             const SizedBox(height: 8),
             Text('Last seen: ${unit.lastSeenText}'),
             Text('BIN: ${unit.supportsBin ? "ano" : "ne"}'),
