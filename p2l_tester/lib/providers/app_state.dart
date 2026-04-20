@@ -576,6 +576,36 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Aktualizuje konfiguraci DIST sensoru (SET-CONFIG). Lokálně updatne model.
+  Future<void> updateDistConfig({
+    required String unitId,
+    required int distAddress,
+    required DistConfig config,
+  }) async {
+    final id = _normUnitId(unitId);
+    final cmd = CommandService.buildSetDistConfigCommand(
+      unitId: id,
+      distAddress: distAddress,
+      config: config,
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+
+    final list = _unitModules[id];
+    if (list != null) {
+      final idx = list.indexWhere((m) =>
+          m.type == ModuleType.dist && m.baseAddress == distAddress);
+      if (idx >= 0) {
+        _unitModules[id] = [
+          ...list.sublist(0, idx),
+          PumaModule.dist(address: distAddress, config: config),
+          ...list.sublist(idx + 1),
+        ];
+      }
+    }
+    _deviceActionStatus = 'DIST @$distAddress: config aktualizován';
+    notifyListeners();
+  }
+
   Future<void> recreateDevices(String unitId, List<PumaModule> modules) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);

@@ -258,6 +258,25 @@ class CommandService {
     );
   }
 
+  /// SET-CONFIG pro DIST sensor.
+  static ({String topic, String payload}) buildSetDistConfigCommand({
+    required String unitId,
+    required int distAddress,
+    required DistConfig config,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, DeviceType.dist, distAddress, 'SET-CONFIG'),
+      payload: jsonEncode({
+        'MeasurePeriod': config.measurePeriod,
+        'Timeout': config.timeout,
+        'CountMeasures': config.countMeasures,
+        'MaxDeviation': config.maxDeviation,
+        'Offset': config.offset,
+        'MeasureType': config.measureType,
+      }),
+    );
+  }
+
   /// RESTART jednotky: SW restart. Payload prázdný objekt.
   static ({String topic, String payload}) buildRestartCommand(String unitId) {
     return (
