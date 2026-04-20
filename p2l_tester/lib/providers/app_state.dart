@@ -249,7 +249,7 @@ class AppState extends ChangeNotifier {
       _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
       _mqttService.subscribe('O/+/DIST/+/REPLACE-FROM');
       _mqttService.subscribe('O/+/DISP/+/REPLACE-FROM');
-      _statusMessage = 'Pripojeno, cekam na ALIVE...';
+      _statusMessage = 'Připojeno, čekám na ALIVE…';
       _tickTimer?.cancel();
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (_units.isNotEmpty) {

@@ -125,7 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              result ? 'Pripojeni uspesne!' : 'Chyba: ${state.lastError}'),
+              result ? 'Připojení úspěšné!' : 'Chyba: ${state.lastError}'),
           backgroundColor: result ? Colors.green : Colors.red,
         ),
       );
@@ -146,7 +146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Zrusit')),
+              child: const Text('Zrušit')),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Smazat')),
@@ -169,7 +169,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context, state, _) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Nastaveni MQTT'),
+            title: const Text('Nastavení MQTT'),
           ),
           body: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -178,7 +178,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 // Seznam uložených profilů
                 if (state.profiles.isNotEmpty) ...[
-                  const Text('Ulozene profily',
+                  const Text('Uložené profily',
                       style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   ...List.generate(state.profiles.length, (i) {
@@ -202,7 +202,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             if (!isActive)
                               IconButton(
                                 icon: const Icon(Icons.play_arrow, size: 20),
-                                tooltip: 'Pripojit',
+                                tooltip: 'Připojit',
                                 onPressed: () async {
                                   await state.selectProfile(i);
                                   if (!context.mounted) return;
@@ -211,7 +211,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(result
-                                            ? 'Pripojeno k ${p.name}'
+                                            ? 'Připojeno k ${p.name}'
                                             : 'Chyba: ${state.lastError}'),
                                         backgroundColor:
                                             result ? Colors.green : Colors.red,
@@ -331,14 +331,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onPressed: _save,
                         icon: const Icon(Icons.save),
                         label: Text(_editingIndex != null
-                            ? 'Ulozit zmeny'
-                            : 'Ulozit novy profil'),
+                            ? 'Uložit změny'
+                            : 'Uložit nový profil'),
                       ),
                       const SizedBox(height: 12),
                       OutlinedButton.icon(
                         onPressed: _connectAndTest,
                         icon: const Icon(Icons.wifi),
-                        label: const Text('Ulozit a pripojit'),
+                        label: const Text('Uložit a připojit'),
                       ),
                     ],
                   ),
@@ -420,7 +420,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   },
                   icon: const Icon(Icons.save),
-                  label: const Text('Ulozit schema'),
+                  label: const Text('Uložit schéma'),
                 ),
               ],
             ),

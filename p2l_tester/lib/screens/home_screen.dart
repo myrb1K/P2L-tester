@@ -69,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const Divider(),
             ListTile(
               leading: const Icon(Icons.add),
-              title: const Text('Pridat novy profil'),
+              title: const Text('Přidat nový profil'),
               onTap: () {
                 Navigator.pop(ctx);
                 Navigator.of(context).push(
@@ -224,7 +224,7 @@ class _StatusBar extends StatelessWidget {
         ? 'Odpojeno - otevrete Nastaveni'
         : state.statusMessage.isNotEmpty
             ? state.statusMessage
-            : 'Pripojeno';
+            : 'Připojeno';
 
     return Container(
       width: double.infinity,
@@ -325,11 +325,11 @@ class _SelectionBar extends StatelessWidget {
           const Spacer(),
           TextButton(
             onPressed: state.selectAll,
-            child: const Text('Vybrat vse'),
+            child: const Text('Vybrat vše'),
           ),
           TextButton(
             onPressed: state.deselectAll,
-            child: const Text('Zrusit'),
+            child: const Text('Zrušit'),
           ),
         ],
       ),
@@ -358,7 +358,7 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               isConnected
-                  ? 'Cekam na ALIVE zpravy...\nNebo zadejte ID jednotky vyse.'
+                  ? 'Čekám na ALIVE zprávy…\nNebo zadejte ID jednotky výše.'
                   : 'Nejdrive se pripojte k brokeru\nv Nastaveni.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.grey[600]),
@@ -677,7 +677,7 @@ class _ActionBar extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      state.selectedPorts.length == 8 ? 'Zrusit' : 'Vse',
+                      state.selectedPorts.length == 8 ? 'Zrušit' : 'Vše',
                       style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.bold),
                     ),
                   ),
