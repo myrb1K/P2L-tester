@@ -44,7 +44,6 @@ Topics and message formats documented in `MQTT-TOPICS.md` and `README-P2L.md`. K
 
 ### Build and Run
 ```bash
-cd p2l_tester
 flutter pub get           # Install dependencies
 flutter run -d windows    # Run on Windows
 flutter run -d <device>   # Run on connected device or emulator
@@ -52,7 +51,6 @@ flutter run -d <device>   # Run on connected device or emulator
 
 ### Analyze and Format
 ```bash
-cd p2l_tester
 flutter analyze                    # Lint check (configured in analysis_options.yaml)
 dart format lib/                   # Auto-format Dart files
 dart fix --apply                   # Apply suggested fixes
@@ -60,7 +58,6 @@ dart fix --apply                   # Apply suggested fixes
 
 ### Testing
 ```bash
-cd p2l_tester
 flutter test                       # Run all tests
 flutter test test/widget_test.dart # Run specific test file
 flutter test --coverage            # Generate coverage report
@@ -68,7 +65,6 @@ flutter test --coverage            # Generate coverage report
 
 ### Build Distributions
 ```bash
-cd p2l_tester
 flutter build windows --release    # Windows exe
 flutter build apk --release        # Android APK
 flutter build ipa --release        # iOS app
