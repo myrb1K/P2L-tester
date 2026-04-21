@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../main.dart';
@@ -7,6 +8,7 @@ import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
 import '../services/mqtt_service.dart';
+import '../widgets/bulk_config_menu.dart';
 import 'settings_screen.dart';
 import 'templates_screen.dart';
 import 'unit_detail_screen.dart';
@@ -142,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   MaterialPageRoute(builder: (_) => const TemplatesScreen()),
                 ),
               ),
+              const BulkConfigMenu(),
               if (state.units.isNotEmpty)
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
@@ -569,9 +572,30 @@ class _UnitCard extends StatelessWidget {
     final dispCount = allDevices.where((d) => d.type == DeviceType.disp).length;
     final ledsCount = allDevices.where((d) => d.type == DeviceType.leds).length;
     final distCount = allDevices.where((d) => d.type == DeviceType.dist).length;
+
+    final infoLines = <String>[
+      'P2L modul ${unit.displayName}',
+      'ID: ${unit.id}',
+      if (unit.firmware != null) 'FW: ${unit.firmware}',
+      if (unit.hwModel != null) 'HW: ${unit.hwModel}',
+      if (unit.ip != null) 'IP: ${unit.ip}',
+      if (unit.mac != null) 'MAC: ${unit.mac}',
+      if (unit.ssid != null) 'SSID: ${unit.ssid}',
+      if (unit.mqttServer != null) 'MQTT: ${unit.mqttServer}:${unit.mqttPort}',
+      if (unit.battery != null) 'Bat: ${unit.battery}%',
+      'Brightness: ${unit.brightness}',
+      if (unit.ledsPerPort.isNotEmpty)
+        'LEDs: ${unit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
+      'Devices: $totalDevices',
+      'PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist',
+      'BTN: $btnCount · DISP: $dispCount · LEDS: $ledsCount · DIST: $distCount',
+      'Last seen: ${unit.lastSeenText}',
+      'BIN: ${unit.supportsBin ? "ano" : "ne"}',
+    ];
+
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: Text('P2L modul ${unit.displayName}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -598,8 +622,24 @@ class _UnitCard extends StatelessWidget {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('Kopírovat'),
+            onPressed: () async {
+              await Clipboard.setData(
+                ClipboardData(text: infoLines.join('\n')),
+              );
+              if (!dialogCtx.mounted) return;
+              ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                const SnackBar(
+                  content: Text('Info zkopírováno do schránky'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogCtx),
             child: const Text('OK'),
           ),
         ],

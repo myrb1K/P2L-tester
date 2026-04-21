@@ -117,6 +117,50 @@ class CommandService {
     });
   }
 
+  /// Příkaz `set_Mqtt` – hromadná změna brokera.
+  static String buildSetMqttCommand({
+    required String address,
+    required int port,
+    required String user,
+    required String password,
+    bool insecure = false,
+  }) {
+    return jsonEncode({
+      'request_id': -1,
+      'cmds': [
+        {
+          'cmd': 'set_Mqtt',
+          'args': {
+            'address': address,
+            'port': port,
+            'user': user,
+            'password': password,
+            'insecure': insecure,
+          },
+        },
+      ],
+    });
+  }
+
+  /// Příkaz `set_WiFi` – hromadná změna WiFi.
+  static String buildSetWifiCommand({
+    required String ssid,
+    required String password,
+  }) {
+    return jsonEncode({
+      'request_id': -1,
+      'cmds': [
+        {
+          'cmd': 'set_WiFi',
+          'args': {
+            'SSID': ssid,
+            'PSWD': password,
+          },
+        },
+      ],
+    });
+  }
+
   /// Zjistí, zda firmware podporuje BIN (>= 250925)
   static bool firmwareSupportsBin(String? firmware) {
     if (firmware == null || firmware.isEmpty) return false;

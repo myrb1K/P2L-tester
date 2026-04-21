@@ -90,30 +90,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
+  /// Vrací true při úspěchu, false při chybě (duplicita, validace).
+  Future<bool> _save() async {
+    if (!_formKey.currentState!.validate()) return false;
 
     final state = context.read<AppState>();
     final profile = _profileFromForm();
 
-    if (_editingIndex != null) {
-      await state.updateProfile(_editingIndex!, profile);
-    } else {
-      await state.addProfile(profile);
-      _editingIndex = state.profiles.length - 1;
+    final error = _editingIndex != null
+        ? await state.updateProfile(_editingIndex!, profile)
+        : await state.addProfile(profile);
+
+    if (!mounted) return false;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: Colors.red),
+      );
+      return false;
     }
 
-    if (mounted) {
-      setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profil ulozen')),
-      );
-    }
+    _editingIndex ??= state.profiles.length - 1;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Profil uložen')),
+    );
+    return true;
   }
 
   Future<void> _connectAndTest() async {
-    await _save();
-    if (!mounted) return;
+    final saved = await _save();
+    if (!saved || !mounted) return;
 
     final state = context.read<AppState>();
     if (_editingIndex != null) {
@@ -181,55 +188,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const Text('Uložené profily',
                       style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  ...List.generate(state.profiles.length, (i) {
-                    final p = state.profiles[i];
-                    final isActive = i == state.activeProfileIndex;
-                    return Card(
-                      color: isActive ? Colors.blue.withAlpha(20) : null,
-                      child: ListTile(
-                        leading: Icon(
-                          isActive ? Icons.check_circle : Icons.circle_outlined,
-                          color: isActive ? Colors.green : Colors.grey,
-                        ),
-                        title: Text(p.name),
-                        subtitle: Text('${p.broker}:${p.port}'),
-                        onTap: () {
-                          setState(() => _loadProfile(p, i));
-                        },
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (!isActive)
+                  ReorderableListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    buildDefaultDragHandles: false,
+                    itemCount: state.profiles.length,
+                    onReorder: (oldIndex, newIndex) {
+                      // Po reorderu by se _editingIndex mohl rozejít s
+                      // reálnou pozicí profilu — raději vyčistíme formulář.
+                      setState(() => _clearForm());
+                      state.reorderProfiles(oldIndex, newIndex);
+                    },
+                    itemBuilder: (ctx, i) {
+                      final p = state.profiles[i];
+                      final isActive = i == state.activeProfileIndex;
+                      return Card(
+                        key: ValueKey('profile_${p.name}_$i'),
+                        color: isActive ? Colors.blue.withAlpha(20) : null,
+                        child: ListTile(
+                          leading: Icon(
+                            isActive
+                                ? Icons.check_circle
+                                : Icons.circle_outlined,
+                            color: isActive ? Colors.green : Colors.grey,
+                          ),
+                          title: Text(
+                            p.name,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text('${p.broker}:${p.port}'),
+                          onTap: () {
+                            setState(() => _loadProfile(p, i));
+                          },
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!isActive)
+                                IconButton(
+                                  icon: const Icon(Icons.play_arrow, size: 20),
+                                  tooltip: 'Připojit',
+                                  onPressed: () async {
+                                    await state.selectProfile(i);
+                                    if (!context.mounted) return;
+                                    final result = await state.connect();
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(result
+                                              ? 'Připojeno k ${p.name}'
+                                              : 'Chyba: ${state.lastError}'),
+                                          backgroundColor: result
+                                              ? Colors.green
+                                              : Colors.red,
+                                        ),
+                                      );
+                                      if (result) Navigator.of(context).pop();
+                                    }
+                                  },
+                                ),
                               IconButton(
-                                icon: const Icon(Icons.play_arrow, size: 20),
-                                tooltip: 'Připojit',
-                                onPressed: () async {
-                                  await state.selectProfile(i);
-                                  if (!context.mounted) return;
-                                  final result = await state.connect();
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(result
-                                            ? 'Připojeno k ${p.name}'
-                                            : 'Chyba: ${state.lastError}'),
-                                        backgroundColor:
-                                            result ? Colors.green : Colors.red,
-                                      ),
-                                    );
-                                    if (result) Navigator.of(context).pop();
-                                  }
-                                },
+                                icon: const Icon(Icons.delete_outline, size: 20),
+                                onPressed: () => _deleteProfile(i),
                               ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20),
-                              onPressed: () => _deleteProfile(i),
-                            ),
-                          ],
+                              ReorderableDragStartListener(
+                                index: i,
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 4),
+                                  child: Icon(Icons.drag_handle,
+                                      color: Colors.grey),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  }),
+                      );
+                    },
+                  ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: () => setState(() => _clearForm()),
@@ -252,14 +287,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       TextFormField(
                         controller: _nameController,
                         decoration: const InputDecoration(
-                          labelText: 'Nazev profilu',
+                          labelText: 'Název profilu',
                           hintText: 'např. Lékárna, Sklad…',
                           prefixIcon: Icon(Icons.label),
                           border: OutlineInputBorder(),
                         ),
-                        validator: (v) => v == null || v.trim().isEmpty
-                            ? 'Zadejte nazev'
-                            : null,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) {
+                            return 'Zadejte název';
+                          }
+                          if (state.isProfileNameTaken(v,
+                              excludeIndex: _editingIndex)) {
+                            return 'Tento název už existuje';
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 12),
                       TextFormField(

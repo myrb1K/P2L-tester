@@ -140,6 +140,8 @@ class AppState extends ChangeNotifier {
     ledsOn = prefs.getInt('leds_on') ?? 3;
     ledsOff = prefs.getInt('leds_off') ?? 10;
     ledColor = prefs.getInt('led_color') ?? 0;
+    _lastWifiSsid = prefs.getString('last_wifi_ssid') ?? '';
+    _lastWifiPassword = prefs.getString('last_wifi_password') ?? '';
 
     final templatesJson = prefs.getString('device_templates');
     if (templatesJson != null && templatesJson.isNotEmpty) {
@@ -177,22 +179,59 @@ class AppState extends ChangeNotifier {
     useSsl = profile.useSsl;
   }
 
-  Future<void> addProfile(BrokerProfile profile) async {
+  /// True pokud už existuje profil se stejným názvem (case-insensitive, trim).
+  /// [excludeIndex] umožňuje vynechat konkrétní profil při editaci.
+  bool isProfileNameTaken(String name, {int? excludeIndex}) {
+    final needle = name.trim().toLowerCase();
+    if (needle.isEmpty) return false;
+    for (var i = 0; i < _profiles.length; i++) {
+      if (i == excludeIndex) continue;
+      if (_profiles[i].name.trim().toLowerCase() == needle) return true;
+    }
+    return false;
+  }
+
+  /// Přidá profil. Vrací `null` při úspěchu, jinak chybovou zprávu
+  /// (např. duplicitní název).
+  Future<String?> addProfile(BrokerProfile profile) async {
+    if (isProfileNameTaken(profile.name)) {
+      return 'Profil s názvem "${profile.name.trim()}" už existuje';
+    }
     _profiles.add(profile);
     _activeProfileIndex = _profiles.length - 1;
     _applyProfile(profile);
     await _saveProfiles();
     notifyListeners();
+    return null;
   }
 
-  Future<void> updateProfile(int index, BrokerProfile profile) async {
-    if (index < 0 || index >= _profiles.length) return;
+  /// Přidá profil do seznamu, ale nenastaví ho jako aktivní a nepřepne
+  /// připojení. Používá se při hromadné změně brokera, kde uživatel zadává
+  /// nový broker pro vybrané P2L moduly, ale aplikace má zůstat na aktuálním.
+  /// Vrací `null` při úspěchu, jinak chybovou zprávu.
+  Future<String?> addProfileWithoutActivating(BrokerProfile profile) async {
+    if (isProfileNameTaken(profile.name)) {
+      return 'Profil s názvem "${profile.name.trim()}" už existuje';
+    }
+    _profiles.add(profile);
+    await _saveProfiles();
+    notifyListeners();
+    return null;
+  }
+
+  /// Upraví existující profil. Vrací `null` při úspěchu, jinak chybovou zprávu.
+  Future<String?> updateProfile(int index, BrokerProfile profile) async {
+    if (index < 0 || index >= _profiles.length) return 'Neplatný profil';
+    if (isProfileNameTaken(profile.name, excludeIndex: index)) {
+      return 'Profil s názvem "${profile.name.trim()}" už existuje';
+    }
     _profiles[index] = profile;
     if (index == _activeProfileIndex) {
       _applyProfile(profile);
     }
     await _saveProfiles();
     notifyListeners();
+    return null;
   }
 
   Future<void> deleteProfile(int index) async {
@@ -212,6 +251,34 @@ class AppState extends ChangeNotifier {
     } else if (_activeProfileIndex > index) {
       _activeProfileIndex--;
     }
+    await _saveProfiles();
+    notifyListeners();
+  }
+
+  /// Přesune profil z [oldIndex] na [newIndex] a udrží `_activeProfileIndex`
+  /// ukazující na původně aktivní profil.
+  Future<void> reorderProfiles(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= _profiles.length) return;
+    // ReorderableListView konvence: pokud táhneš dolů, newIndex je o 1 větší
+    // než cílová pozice po odebrání položky.
+    var target = newIndex;
+    if (target > oldIndex) target -= 1;
+    if (target < 0) target = 0;
+    if (target >= _profiles.length) target = _profiles.length - 1;
+    if (target == oldIndex) return;
+
+    final moved = _profiles.removeAt(oldIndex);
+    _profiles.insert(target, moved);
+
+    // Přepočet _activeProfileIndex tak, aby dál ukazoval na stejný profil.
+    if (_activeProfileIndex == oldIndex) {
+      _activeProfileIndex = target;
+    } else if (_activeProfileIndex > oldIndex && _activeProfileIndex <= target) {
+      _activeProfileIndex -= 1;
+    } else if (_activeProfileIndex < oldIndex && _activeProfileIndex >= target) {
+      _activeProfileIndex += 1;
+    }
+
     await _saveProfiles();
     notifyListeners();
   }
@@ -483,6 +550,63 @@ class AppState extends ChangeNotifier {
       _mqttService.publish(topic, payload);
     }
     _statusMessage = 'Clear odeslan na ${_selectedUnits.length} jednotek';
+    notifyListeners();
+  }
+
+  // Poslední zadané SSID/heslo pro WiFi (z SharedPreferences).
+  String _lastWifiSsid = '';
+  String _lastWifiPassword = '';
+  String get lastWifiSsid => _lastWifiSsid;
+  String get lastWifiPassword => _lastWifiPassword;
+
+  /// Hromadná změna brokera: pošle `set_Mqtt` všem vybraným jednotkám s 100ms pauzou.
+  Future<void> sendBulkBroker(BrokerProfile profile) async {
+    if (_selectedUnits.isEmpty) return;
+    final payload = CommandService.buildSetMqttCommand(
+      address: profile.broker,
+      port: profile.port,
+      user: profile.username,
+      password: profile.password,
+      insecure: !profile.useSsl,
+    );
+    final targets = _selectedUnits.toList();
+    var sent = 0;
+    for (final unitId in targets) {
+      final topic = CommandService.getCommandTopic(unitId);
+      _mqttService.publish(topic, payload);
+      sent++;
+      _statusMessage = 'Broker: $sent / ${targets.length} (${profile.name})';
+      notifyListeners();
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    _statusMessage = 'Broker "${profile.name}" odeslán na $sent P2L modulů';
+    notifyListeners();
+  }
+
+  /// Hromadná změna WiFi: pošle `set_WiFi` všem vybraným jednotkám s 100ms pauzou.
+  Future<void> sendBulkWifi({required String ssid, required String password}) async {
+    if (_selectedUnits.isEmpty) return;
+    final payload = CommandService.buildSetWifiCommand(ssid: ssid, password: password);
+    final targets = _selectedUnits.toList();
+    var sent = 0;
+    for (final unitId in targets) {
+      final topic = CommandService.getCommandTopic(unitId);
+      _mqttService.publish(topic, payload);
+      sent++;
+      _statusMessage = 'WiFi: $sent / ${targets.length}';
+      notifyListeners();
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    _lastWifiSsid = ssid;
+    _lastWifiPassword = password;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_wifi_ssid', ssid);
+    await prefs.setString('last_wifi_password', password);
+    _statusMessage = 'WiFi "$ssid" odeslána na $sent P2L modulů';
     notifyListeners();
   }
 
