@@ -10,7 +10,19 @@ import 'unit_detail_screen.dart';
 
 class TemplateEditorScreen extends StatefulWidget {
   final DeviceTemplate? initial;
-  const TemplateEditorScreen({super.key, this.initial});
+  /// Předvyplněné moduly pro novou šablonu (např. odvozené z konkrétní jednotky).
+  /// Použije se jen když [initial] není zadané.
+  final List<PumaModule>? seedModules;
+  /// Předvyplněný název pro novou šablonu (uživatel může přepsat).
+  /// Použije se jen když [initial] není zadané.
+  final String? seedName;
+
+  const TemplateEditorScreen({
+    super.key,
+    this.initial,
+    this.seedModules,
+    this.seedName,
+  });
 
   @override
   State<TemplateEditorScreen> createState() => _TemplateEditorScreenState();
@@ -24,8 +36,11 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
   @override
   void initState() {
     super.initState();
-    _nameCtrl = TextEditingController(text: widget.initial?.name ?? '');
-    _modules = List.of(widget.initial?.modules ?? const []);
+    final seedName = widget.initial?.name ?? widget.seedName ?? '';
+    _nameCtrl = TextEditingController(text: seedName);
+    _modules = List.of(
+      widget.initial?.modules ?? widget.seedModules ?? const [],
+    );
   }
 
   @override

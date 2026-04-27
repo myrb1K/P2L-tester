@@ -7,6 +7,7 @@ import '../providers/app_state.dart';
 import '../widgets/add_module_dialog.dart';
 import '../widgets/apply_template_sheet.dart';
 import '../widgets/replace_device_dialog.dart';
+import 'template_editor_screen.dart';
 
 const int kMaxChipsPerUnit = 100;
 
@@ -124,6 +125,16 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     );
   }
 
+  Future<void> _saveAsTemplate(List<PumaModule> modules) async {
+    if (modules.isEmpty) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => TemplateEditorScreen(
+        seedModules: modules,
+        seedName: 'Z modulu ${widget.unitId}',
+      ),
+    ));
+  }
+
   Future<void> _wipeAll(AppState state) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -178,6 +189,13 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 icon: const Icon(Icons.dashboard_customize),
                 tooltip: 'Aplikovat šablonu',
                 onPressed: () => _applyTemplate(state),
+              ),
+              IconButton(
+                icon: const Icon(Icons.bookmark_add_outlined),
+                tooltip: 'Uložit jako šablonu',
+                onPressed: modules.isEmpty
+                    ? null
+                    : () => _saveAsTemplate(modules),
               ),
               IconButton(
                 icon: const Icon(Icons.delete_sweep, color: Colors.red),

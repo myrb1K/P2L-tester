@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/device_template.dart';
+import '../models/module.dart';
 import '../providers/app_state.dart';
 
 /// Bottom sheet pro aplikaci šablony na jednotky.
@@ -119,6 +120,13 @@ class _ApplyTemplateSheetState extends State<ApplyTemplateSheet> {
                         onChanged: (v) => setState(() => _selectedTemplate = v),
                       ),
                     ),
+                  if (_selectedTemplate != null) ...[
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _TemplateModulesSummary(template: _selectedTemplate!),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16),
@@ -187,6 +195,89 @@ class _ApplyTemplateSheetState extends State<ApplyTemplateSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Rozpis modulů v šabloně podle typu (PUM-A 12× · SENZOR 3× …).
+/// Barvy a popisky odpovídají `_ModulesGroupedList` v UnitDetailScreen.
+class _TemplateModulesSummary extends StatelessWidget {
+  final DeviceTemplate template;
+  const _TemplateModulesSummary({required this.template});
+
+  static const _order = [
+    ModuleType.pumA,
+    ModuleType.pumB,
+    ModuleType.pumC,
+    ModuleType.dist,
+  ];
+
+  static String _label(ModuleType t) => switch (t) {
+        ModuleType.pumA => 'PUM-A',
+        ModuleType.pumB => 'PUM-B',
+        ModuleType.pumC => 'PUM-C',
+        ModuleType.dist => 'SENZOR',
+      };
+
+  static Color _color(ModuleType t) => switch (t) {
+        ModuleType.pumA => Colors.blue,
+        ModuleType.pumB => Colors.orange,
+        ModuleType.pumC => Colors.purple,
+        ModuleType.dist => Colors.teal,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final counts = <ModuleType, int>{};
+    for (final m in template.modules) {
+      counts[m.type] = (counts[m.type] ?? 0) + 1;
+    }
+    if (counts.isEmpty) {
+      return const Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          'Šablona je prázdná.',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      );
+    }
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final type in _order)
+          if ((counts[type] ?? 0) > 0)
+            _SummaryChip(
+              label: '${_label(type)} ${counts[type]}×',
+              color: _color(type),
+            ),
+      ],
+    );
+  }
+}
+
+class _SummaryChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _SummaryChip({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(30),
+        border: Border.all(color: color.withAlpha(110)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
     );
   }
 }
