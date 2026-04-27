@@ -86,6 +86,14 @@ class AppState extends ChangeNotifier {
   static String _normUnitId(String unitId) =>
       unitId.startsWith('u') ? unitId.substring(1) : unitId;
 
+  /// CMD topic pro jednotku s respektováním zjištěné generace
+  /// (`P2LUnit.isNewGen`). Pokud jednotku ještě neznáme, fallback heuristika
+  /// podle čísla (>= 1000 = nová) v `CommandService.getCommandTopic`.
+  String _topicFor(String unitId) {
+    final id = _normUnitId(unitId);
+    return CommandService.getCommandTopic(id, isNewGen: _units[id]?.isNewGen);
+  }
+
   void toggleOfflineFilter() {
     filterOffline = !filterOffline;
     notifyListeners();
@@ -434,11 +442,16 @@ class AppState extends ChangeNotifier {
     // Topic: D/<id>/UNIT/<id>/ALIVE
     final parts = topic.split('/');
     if (parts.length < 4) return;
-    final unitId = _normUnitId(parts[1]);
+    final rawId = parts[1];
+    // Stará jednotka má v topicu prefix 'u' (D/u0472/UNIT/u0472/ALIVE),
+    // nová P2L32 posílá 6-cifernou holou adresu (D/000123/UNIT/000123/ALIVE).
+    final isNewGen = !rawId.startsWith('u');
+    final unitId = _normUnitId(rawId);
 
     if (_units.containsKey(unitId)) {
       _units[unitId]!.lastSeen = DateTime.now();
       _units[unitId]!.isOnline = true;
+      _units[unitId]!.isNewGen = isNewGen;
       if (json['battery'] != null) {
         _units[unitId]!.battery = (json['battery'] as num).toDouble();
       }
@@ -446,7 +459,7 @@ class AppState extends ChangeNotifier {
         _units[unitId]!.firmware = json['firmware'] as String;
       }
     } else {
-      _units[unitId] = P2LUnit.fromAlive(unitId, json);
+      _units[unitId] = P2LUnit.fromAlive(unitId, json, isNewGen: isNewGen);
       _statusMessage = 'Nalezeno ${_units.length} P2L modulů';
     }
 
@@ -530,12 +543,12 @@ class AppState extends ChangeNotifier {
       final unit = _units[unitId];
       if (unit != null && unit.useBin) {
         // BIN: nejdřív clr_strips přes CMD, pak set_leds přes BIN
-        final cmdTopic = CommandService.getCommandTopic(unitId);
+        final cmdTopic = _topicFor(unitId);
         _mqttService.publish(cmdTopic, CommandService.buildClearCommand());
         final binTopic = CommandService.getBinTopic(unitId);
         _mqttService.publishBytes(binTopic, binPayload);
       } else {
-        final topic = CommandService.getCommandTopic(unitId);
+        final topic = _topicFor(unitId);
         _mqttService.publish(topic, oldPayload);
       }
     }
@@ -546,7 +559,7 @@ class AppState extends ChangeNotifier {
   void sendClear() {
     final payload = CommandService.buildClearCommand();
     for (final unitId in _selectedUnits) {
-      final topic = CommandService.getCommandTopic(unitId);
+      final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
     }
     _statusMessage = 'Clear odeslan na ${_selectedUnits.length} jednotek';
@@ -572,7 +585,7 @@ class AppState extends ChangeNotifier {
     final targets = _selectedUnits.toList();
     var sent = 0;
     for (final unitId in targets) {
-      final topic = CommandService.getCommandTopic(unitId);
+      final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
       sent++;
       _statusMessage = 'Broker: $sent / ${targets.length} (${profile.name})';
@@ -592,7 +605,7 @@ class AppState extends ChangeNotifier {
     final targets = _selectedUnits.toList();
     var sent = 0;
     for (final unitId in targets) {
-      final topic = CommandService.getCommandTopic(unitId);
+      final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
       sent++;
       _statusMessage = 'WiFi: $sent / ${targets.length}';
@@ -612,9 +625,43 @@ class AppState extends ChangeNotifier {
 
   void sendGetParam(String unitId) {
     final payload = CommandService.buildGetParamCommand();
-    final topic = CommandService.getCommandTopic(unitId);
+    final topic = _topicFor(unitId);
     _mqttService.publish(topic, payload);
     _statusMessage = 'Get param odeslan na $unitId';
+    notifyListeners();
+  }
+
+  /// Změní ID jednotky. Firmware se po přijetí restartuje a přihlásí se
+  /// novým ALIVE s [newId]. Lokálně staré entry odstraníme — nová entry
+  /// vznikne automaticky při příštím ALIVE.
+  Future<void> setUnitId(String oldId, int newId) async {
+    final id = _normUnitId(oldId);
+    final unit = _units[id];
+    final isNewGen = unit?.isNewGen ??
+        ((int.tryParse(id) ?? 0) >= 1000);
+
+    final cmd = CommandService.buildSetUnitIdCommand(
+      unitId: id,
+      newId: newId,
+      isNewGen: isNewGen,
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+
+    // Po set_id se firmware restartuje, na starý topic už neodpoví.
+    // Pročistit lokální stav — nová entry přijde s prvním ALIVE z new ID.
+    _units.remove(id);
+    _selectedUnits.remove(id);
+    _initialFetchDone.remove(id);
+    _awaitingAliveAfterRestart.remove(id);
+    _restartSentAt.remove(id);
+    _pendingRestart.remove(id);
+    _unitModules.remove(id);
+    _unitModulesFetchedAt.remove(id);
+    _unitModulesPending.remove(id);
+
+    final newIdStr = newId.toString().padLeft(4, '0');
+    _statusMessage =
+        'ID jednotky $id → $newIdStr odesláno; jednotka se restartuje';
     notifyListeners();
   }
 
@@ -834,7 +881,7 @@ class AppState extends ChangeNotifier {
   void scanAll() {
     final payload = CommandService.buildGetParamCommand();
     for (final unitId in _units.keys) {
-      final topic = CommandService.getCommandTopic(unitId);
+      final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
     }
     _statusMessage = 'Scan odeslan na ${_units.length} jednotek';

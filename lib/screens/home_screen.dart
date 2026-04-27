@@ -623,6 +623,14 @@ class _UnitCard extends StatelessWidget {
         ),
         actions: [
           OutlinedButton.icon(
+            icon: const Icon(Icons.drive_file_rename_outline, size: 18),
+            label: const Text('Změnit ID'),
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              _showChangeUnitIdDialog(context, unit);
+            },
+          ),
+          OutlinedButton.icon(
             icon: const Icon(Icons.copy, size: 18),
             label: const Text('Kopírovat'),
             onPressed: () async {
@@ -643,6 +651,100 @@ class _UnitCard extends StatelessWidget {
             child: const Text('OK'),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Dialog pro změnu ID jednotky. Validace: 0–9999 (4-místné), nesmí
+  /// kolidovat s jinou jednotkou. Po Potvrdit pošle SET-ID; firmware se
+  /// sám restartuje a nahlásí se s novým ID novým ALIVE.
+  void _showChangeUnitIdDialog(BuildContext context, P2LUnit unit) {
+    final state = context.read<AppState>();
+    final currentNum = int.tryParse(
+          unit.id.startsWith('u') ? unit.id.substring(1) : unit.id,
+        ) ??
+        0;
+    final ctrl = TextEditingController(
+      text: currentNum.toString().padLeft(4, '0'),
+    );
+    String? error;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Změnit ID jednotky'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Aktuální ID: ${unit.displayName}'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                decoration: InputDecoration(
+                  labelText: 'Nové ID (0000–9999)',
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  errorText: error,
+                  counterText: '',
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Nová jednotka má defaultně ID 0000.\n'
+                'Po potvrzení se firmware sám restartuje a přihlásí se s novým ID.',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Zrušit'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final raw = ctrl.text.trim();
+                final newId = int.tryParse(raw);
+                if (newId == null || newId < 0 || newId > 9999) {
+                  setLocal(() => error = 'Zadej číslo 0–9999');
+                  return;
+                }
+                if (newId == currentNum) {
+                  setLocal(() => error = 'Stejné jako aktuální ID');
+                  return;
+                }
+                final newKey = newId.toString().padLeft(
+                      newId >= 1000 ? 6 : 4,
+                      '0',
+                    );
+                // Kolize: porovnej numericky proti všem jednotkám.
+                final clash = state.units.values.any((u) {
+                  final n = int.tryParse(
+                        u.id.startsWith('u') ? u.id.substring(1) : u.id,
+                      ) ??
+                      -1;
+                  return n == newId && u.id != unit.id;
+                });
+                if (clash) {
+                  setLocal(() => error =
+                      'ID $newKey už používá jiná jednotka');
+                  return;
+                }
+                Navigator.pop(dialogCtx);
+                state.setUnitId(unit.id, newId);
+              },
+              child: const Text('Potvrdit'),
+            ),
+          ],
+        ),
       ),
     );
   }

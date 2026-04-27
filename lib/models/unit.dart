@@ -16,6 +16,10 @@ class P2LUnit {
   DateTime lastSeen;
   bool isOnline;
   bool useBin; // true = BIN režim, false = OLD/JSON režim
+  /// True = nová generace (P2L32) → topic `I/<6dig>/P2L/01<4dig>/CMD` a UNIT
+  /// příkazy. False = stará jednotka (`I/u<4dig>/SERVER/CMD`). Detekuje se z
+  /// formátu příchozího ALIVE topicu (přítomnost prefixu `u`).
+  bool isNewGen;
 
   P2LUnit({
     required this.id,
@@ -33,11 +37,16 @@ class P2LUnit {
     DateTime? lastSeen,
     this.isOnline = true,
     this.useBin = false,
+    this.isNewGen = false,
   })  : ledsPerPort = ledsPerPort ?? {},
         colors = colors ?? {},
         lastSeen = lastSeen ?? DateTime.now();
 
-  factory P2LUnit.fromAlive(String unitId, Map<String, dynamic> json) {
+  factory P2LUnit.fromAlive(
+    String unitId,
+    Map<String, dynamic> json, {
+    bool isNewGen = false,
+  }) {
     final fw = json['firmware'] as String?;
     return P2LUnit(
       id: unitId,
@@ -45,6 +54,7 @@ class P2LUnit {
       firmware: fw,
       battery: (json['battery'] as num?)?.toDouble(),
       useBin: CommandService.firmwareSupportsBin(fw),
+      isNewGen: isNewGen,
     );
   }
 

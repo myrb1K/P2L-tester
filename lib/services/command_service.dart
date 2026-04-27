@@ -11,17 +11,24 @@ class CommandService {
     return num >= 1000;
   }
 
-  /// CMD topic podle ID jednotky:
-  /// ID < 1000 (starý):  I/u<4digit>/SERVER/CMD  (např. I/u0472/SERVER/CMD)
-  /// ID >= 1000 (nový):  I/<6digit>/P2L/01<4digit>/CMD  (např. I/001017/P2L/011017/CMD)
-  static String getCommandTopic(String unitId) {
-    if (isNewTopicFormat(unitId)) {
-      final addr = unitId.padLeft(6, '0');
-      final last4 = addr.substring(addr.length - 4);
-      return 'I/$unitId/P2L/01$last4/CMD';
-    }
-    // Starý formát: I/u<4digit>/SERVER/CMD (např. I/u0547/SERVER/CMD)
+  /// CMD topic podle generace jednotky.
+  ///
+  /// [isNewGen] — pokud je zadané, použije se přímo. Jinak fallback na
+  /// heuristiku podle čísla (>= 1000 = nová generace) — ta ale selhává
+  /// u nových jednotek s nízkým ID (typicky default 0000), takže volající
+  /// by měl vždy předat příznak z `P2LUnit.isNewGen`.
+  ///
+  /// Stará (false): I/u<4dig>/SERVER/CMD (např. I/u0472/SERVER/CMD)
+  /// Nová (true):   I/<6dig>/P2L/01<4dig>/CMD (např. I/001017/P2L/011017/CMD)
+  static String getCommandTopic(String unitId, {bool? isNewGen}) {
     final cleanId = unitId.startsWith('u') ? unitId.substring(1) : unitId;
+    final useNew = isNewGen ?? ((int.tryParse(cleanId) ?? 0) >= 1000);
+
+    if (useNew) {
+      final addr = cleanId.padLeft(6, '0');
+      final last4 = addr.substring(addr.length - 4);
+      return 'I/$addr/P2L/01$last4/CMD';
+    }
     final numId = int.tryParse(cleanId) ?? 0;
     final fourDigit = numId.toString().padLeft(4, '0');
     return 'I/u$fourDigit/SERVER/CMD';
@@ -326,6 +333,38 @@ class CommandService {
     return (
       topic: getUnitCommandTopic(unitId, 'RESTART'),
       payload: '{}',
+    );
+  }
+
+  /// SET-ID: změna ID jednotky. Firmware se po přijetí restartuje a přihlásí
+  /// se s novým ID novým ALIVE.
+  ///
+  /// Stará (isNewGen=false): JSON CMD topic `I/u<4dig>/SERVER/CMD`,
+  ///   payload `{"request_id":-1,"cmds":[{"cmd":"set_id","args":{"id":<new>}}]}`
+  /// Nová (isNewGen=true): UNIT topic `I/<6dig>/UNIT/<6dig>/SET-ID`,
+  ///   payload `{"Id":<new>}`
+  static ({String topic, String payload}) buildSetUnitIdCommand({
+    required String unitId,
+    required int newId,
+    required bool isNewGen,
+  }) {
+    if (isNewGen) {
+      return (
+        topic: getUnitCommandTopic(unitId, 'SET-ID'),
+        payload: jsonEncode({'Id': newId}),
+      );
+    }
+    return (
+      topic: getCommandTopic(unitId, isNewGen: false),
+      payload: jsonEncode({
+        'request_id': -1,
+        'cmds': [
+          {
+            'cmd': 'set_id',
+            'args': {'id': newId},
+          },
+        ],
+      }),
     );
   }
 
