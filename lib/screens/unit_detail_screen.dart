@@ -222,6 +222,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 child: modules.isEmpty
                     ? _EmptyModules(pending: pending)
                     : _ModulesGroupedList(
+                        unitId: widget.unitId,
                         modules: modules,
                         onReplace: (m) => _replaceModule(state, m),
                         onEdit: (m) => _editModule(state, m),
@@ -346,6 +347,7 @@ class _UnitInfoCard extends StatelessWidget {
 }
 
 class _ModulesGroupedList extends StatelessWidget {
+  final String unitId;
   final List<PumaModule> modules;
   final void Function(PumaModule) onReplace;
   final void Function(PumaModule) onEdit;
@@ -357,6 +359,7 @@ class _ModulesGroupedList extends StatelessWidget {
   final bool Function(PumaModule) canReplace;
 
   const _ModulesGroupedList({
+    required this.unitId,
     required this.modules,
     required this.onReplace,
     required this.onEdit,
@@ -405,6 +408,7 @@ class _ModulesGroupedList extends StatelessWidget {
         for (final type in _order)
           if (byType[type]?.isNotEmpty ?? false)
             _GroupSection(
+              unitId: unitId,
               label: _label(type),
               color: _color(type),
               modules: byType[type]!,
@@ -423,6 +427,7 @@ class _ModulesGroupedList extends StatelessWidget {
 }
 
 class _GroupSection extends StatelessWidget {
+  final String unitId;
   final String label;
   final Color color;
   final List<PumaModule> modules;
@@ -436,6 +441,7 @@ class _GroupSection extends StatelessWidget {
   final bool Function(PumaModule) canReplace;
 
   const _GroupSection({
+    required this.unitId,
     required this.label,
     required this.color,
     required this.modules,
@@ -471,6 +477,7 @@ class _GroupSection extends StatelessWidget {
             children: [
               for (final m in modules)
                 _AddressChip(
+                  unitId: unitId,
                   module: m,
                   color: color,
                   onReplace: canReplace(m) ? () => onReplace(m) : null,
@@ -496,6 +503,7 @@ class _GroupSection extends StatelessWidget {
 }
 
 class _AddressChip extends StatelessWidget {
+  final String unitId;
   final PumaModule module;
   final Color color;
   final VoidCallback? onReplace;
@@ -507,6 +515,7 @@ class _AddressChip extends StatelessWidget {
   final VoidCallback? onLedsOff;
 
   const _AddressChip({
+    required this.unitId,
     required this.module,
     required this.color,
     required this.onReplace,
@@ -621,7 +630,7 @@ class _AddressChip extends StatelessWidget {
       child: Builder(builder: (_) {
         final effColor = _effectiveColor();
         final showLed = module.type == ModuleType.pumA && module.hasLeds;
-        return Chip(
+        final chip = Chip(
           label: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -644,7 +653,74 @@ class _AddressChip extends StatelessWidget {
           visualDensity: VisualDensity.compact,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         );
+
+        // BTN press flash: levý a pravý okraj zazáří 1s, když přijde D/.../BTN/.../UPDATE.
+        // Selector vrací jen relevantní timestampy — chip se rebuildne jen při novém stisku.
+        return Selector<AppState, ({DateTime? left, DateTime? right})>(
+          selector: (_, s) => (
+            left: s.lastButtonPress(unitId, module.baseAddress, left: true),
+            right: s.lastButtonPress(unitId, module.baseAddress, left: false),
+          ),
+          builder: (_, presses, child) {
+            return Stack(
+              children: [
+                child!,
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Row(
+                      children: [
+                        _PressFlash(timestamp: presses.left),
+                        const Spacer(),
+                        _PressFlash(timestamp: presses.right),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+          child: chip,
+        );
       }),
+    );
+  }
+}
+
+/// Animovaný proužek na hraně chipu — naběhne na 1.0 a vyhasne za 1s.
+/// Klíčuje TweenAnimationBuilder timestampem, aby se animace restartovala
+/// při novém stisku.
+class _PressFlash extends StatelessWidget {
+  final DateTime? timestamp;
+  const _PressFlash({required this.timestamp});
+
+  @override
+  Widget build(BuildContext context) {
+    if (timestamp == null) return const SizedBox(width: 10);
+    final age = DateTime.now().difference(timestamp!);
+    if (age >= const Duration(seconds: 1)) {
+      return const SizedBox(width: 10);
+    }
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(timestamp!.microsecondsSinceEpoch),
+      tween: Tween(begin: 1.0, end: 0.0),
+      duration: const Duration(seconds: 1),
+      curve: Curves.easeOut,
+      builder: (_, value, _) => Container(
+        width: 10,
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withValues(alpha: value),
+          borderRadius: BorderRadius.circular(3),
+          boxShadow: value > 0.05
+              ? [
+                  BoxShadow(
+                    color: Colors.redAccent.withValues(alpha: value * 0.8),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
+        ),
+      ),
     );
   }
 }

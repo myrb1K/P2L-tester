@@ -59,6 +59,9 @@ class AppState extends ChangeNotifier {
   List<DeviceTemplate> _templates = [];
   String _deviceActionStatus = '';
 
+  // Timestamp posledního stisku BTN. Klíč: "<unitId>:<baseAddr>:<left|right>".
+  final Map<String, DateTime> _btnPresses = {};
+
   // Getters
   Map<String, P2LUnit> get units => Map.unmodifiable(_units);
   List<P2LUnit> get unitList {
@@ -324,6 +327,8 @@ class AppState extends ChangeNotifier {
       _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
       _mqttService.subscribe('O/+/DIST/+/REPLACE-FROM');
       _mqttService.subscribe('O/+/DISP/+/REPLACE-FROM');
+      // BTN press notifikace pro vizuální flash na chipech
+      _mqttService.subscribe('D/+/BTN/+/UPDATE');
       _statusMessage = 'Připojeno, čekám na ALIVE…';
       _tickTimer?.cancel();
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -365,11 +370,39 @@ class AppState extends ChangeNotifier {
       _handleAlive(topic, decoded);
     } else if (topic.startsWith('A/SERVER/') && decoded is Map<String, dynamic>) {
       _handleResponse(topic, decoded);
+    } else if (topic.startsWith('D/') && topic.contains('/BTN/') && topic.endsWith('/UPDATE')) {
+      _handleBtnUpdate(topic);
     } else if (topic.startsWith('O/')) {
       // GET-DEVICES odpověď je top-level pole; ostatní O/ odpovědi jsou Map s Code/Message.
       final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
       _handleDeviceResponse(topic, json, message);
     }
+  }
+
+  /// Topic: `D/<unit>/BTN/<deviceId>/UPDATE`, deviceId = `06<addr4>`.
+  /// Adresa ≥ 1000 = levé tlačítko PUM-A/C s baseAddress = addr-1000.
+  /// Adresa < 1000 = pravé tlačítko (nebo PUM-B s 1 tlačítkem).
+  void _handleBtnUpdate(String topic) {
+    final parts = topic.split('/');
+    if (parts.length < 5) return;
+    final unitId = _normUnitId(parts[1]);
+    final deviceId = parts[3];
+    if (deviceId.length < 4) return;
+    final addr = int.tryParse(deviceId.substring(deviceId.length - 4));
+    if (addr == null) return;
+
+    final isLeft = addr >= 1000;
+    final baseAddr = isLeft ? addr - 1000 : addr;
+    final side = isLeft ? 'left' : 'right';
+    _btnPresses['$unitId:$baseAddr:$side'] = DateTime.now();
+    notifyListeners();
+  }
+
+  /// Vrátí timestamp posledního stisku tlačítka pro daný PUM modul a stranu.
+  /// `left=true` → levé tlačítko (BTN id = 1000+baseAddr).
+  DateTime? lastButtonPress(String unitId, int baseAddr, {required bool left}) {
+    final id = _normUnitId(unitId);
+    return _btnPresses['$id:$baseAddr:${left ? 'left' : 'right'}'];
   }
 
   void _handleDeviceResponse(
