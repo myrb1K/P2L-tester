@@ -747,6 +747,40 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// SET-LEDS: rozsvítí LED na daném LEDS zařízení.
+  Future<void> sendLedsOn({
+    required String unitId,
+    required int ledsAddress,
+    int style = 0,
+    int color = 1,
+  }) async {
+    final id = _normUnitId(unitId);
+    final cmd = CommandService.buildSetLedsCommand(
+      unitId: id,
+      ledsAddress: ledsAddress,
+      style: style,
+      color: color,
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _deviceActionStatus = 'LEDS @$ledsAddress na $id: rozsvíceno';
+    notifyListeners();
+  }
+
+  /// CLEAR-LEDS: zhasne LED na daném LEDS zařízení.
+  Future<void> sendLedsOff({
+    required String unitId,
+    required int ledsAddress,
+  }) async {
+    final id = _normUnitId(unitId);
+    final cmd = CommandService.buildClearLedsCommand(
+      unitId: id,
+      ledsAddress: ledsAddress,
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _deviceActionStatus = 'LEDS @$ledsAddress na $id: zhasnuto';
+    notifyListeners();
+  }
+
   /// Aktualizuje konfiguraci DIST sensoru (SET-CONFIG). Lokálně updatne model.
   Future<void> updateDistConfig({
     required String unitId,
@@ -807,6 +841,13 @@ class AppState extends ChangeNotifier {
 
     final cmd = CommandService.buildDeleteDevicesCommand(id, [module]);
     _mqttService.publish(cmd.topic, cmd.payload);
+
+    // Fallback: pokud firmware neodpoví na DELETE-DEVICES, refreshni seznam ručně.
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_unitModulesPending.contains(id)) return;
+      _unitModulesPending.remove(id);
+      fetchDevices(id);
+    });
   }
 
   Future<void> replaceDevice({

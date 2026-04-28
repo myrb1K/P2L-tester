@@ -125,6 +125,33 @@ class ModuleTile extends StatelessWidget {
                   ),
                 ),
               ),
+            if (module.type == ModuleType.pumA && module.hasLeds)
+              Container(
+                margin: const EdgeInsets.only(left: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withAlpha(40),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                      color: Colors.amber.withAlpha(160), width: 0.5),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lightbulb,
+                        size: 12, color: Color(0xFFB8860B)),
+                    SizedBox(width: 3),
+                    Text(
+                      'LED',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFFB8860B),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
         subtitle: Text(

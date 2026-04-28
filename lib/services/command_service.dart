@@ -309,6 +309,31 @@ class CommandService {
     );
   }
 
+  /// SET-LEDS na LEDS zařízení: rozsvítí LED daným stylem a barvou.
+  /// Style 0 = svítí, Color: 0=RED, 1=GREEN, 2=BLUE, 3=YELLOW, 4=PURPLE, 5=WHITE.
+  static ({String topic, String payload}) buildSetLedsCommand({
+    required String unitId,
+    required int ledsAddress,
+    int style = 0,
+    int color = 1,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, DeviceType.leds, ledsAddress, 'SET-LEDS'),
+      payload: jsonEncode({'Style': style, 'Color': color}),
+    );
+  }
+
+  /// CLEAR-LEDS: zhasne LED. Payload prázdný objekt.
+  static ({String topic, String payload}) buildClearLedsCommand({
+    required String unitId,
+    required int ledsAddress,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, DeviceType.leds, ledsAddress, 'CLEAR-LEDS'),
+      payload: '{}',
+    );
+  }
+
   /// SET-CONFIG pro DIST sensor.
   static ({String topic, String payload}) buildSetDistConfigCommand({
     required String unitId,

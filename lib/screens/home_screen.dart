@@ -710,7 +710,7 @@ class _UnitCard extends StatelessWidget {
               child: const Text('Zrušit'),
             ),
             FilledButton(
-              onPressed: () {
+              onPressed: () async {
                 final raw = ctrl.text.trim();
                 final newId = int.tryParse(raw);
                 if (newId == null || newId < 0 || newId > 9999) {
@@ -738,6 +738,31 @@ class _UnitCard extends StatelessWidget {
                       'ID $newKey už používá jiná jednotka');
                   return;
                 }
+                final confirmed = await showDialog<bool>(
+                  context: dialogCtx,
+                  builder: (confirmCtx) => AlertDialog(
+                    title: const Text('Opravdu změnit ID?'),
+                    content: Text(
+                      'Jednotka ${unit.displayName} bude přepsána na ID $newKey.\n'
+                      'Firmware se po přijetí příkazu restartuje.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(confirmCtx, false),
+                        child: const Text('Zrušit'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        onPressed: () => Navigator.pop(confirmCtx, true),
+                        child: const Text('Ano, změnit'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed != true) return;
+                if (!dialogCtx.mounted) return;
                 Navigator.pop(dialogCtx);
                 state.setUnitId(unit.id, newId);
               },

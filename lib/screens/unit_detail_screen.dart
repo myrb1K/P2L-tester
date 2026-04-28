@@ -236,6 +236,14 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                           dispAddress: m.baseAddress,
                           data: '',
                         ),
+                        onLedsOn: (m) => state.sendLedsOn(
+                          unitId: widget.unitId,
+                          ledsAddress: m.baseAddress,
+                        ),
+                        onLedsOff: (m) => state.sendLedsOff(
+                          unitId: widget.unitId,
+                          ledsAddress: m.baseAddress,
+                        ),
                         canReplace: _canReplace,
                       ),
               ),
@@ -344,6 +352,8 @@ class _ModulesGroupedList extends StatelessWidget {
   final void Function(PumaModule) onDelete;
   final void Function(PumaModule) onTestDisplay;
   final void Function(PumaModule) onClearDisplay;
+  final void Function(PumaModule) onLedsOn;
+  final void Function(PumaModule) onLedsOff;
   final bool Function(PumaModule) canReplace;
 
   const _ModulesGroupedList({
@@ -353,6 +363,8 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.onDelete,
     required this.onTestDisplay,
     required this.onClearDisplay,
+    required this.onLedsOn,
+    required this.onLedsOff,
     required this.canReplace,
   });
 
@@ -402,6 +414,8 @@ class _ModulesGroupedList extends StatelessWidget {
               canReplace: canReplace,
               onTestDisplay: type == ModuleType.pumA ? onTestDisplay : null,
               onClearDisplay: type == ModuleType.pumA ? onClearDisplay : null,
+              onLedsOn: type == ModuleType.pumA ? onLedsOn : null,
+              onLedsOff: type == ModuleType.pumA ? onLedsOff : null,
             ),
       ],
     );
@@ -417,6 +431,8 @@ class _GroupSection extends StatelessWidget {
   final void Function(PumaModule)? onEdit;
   final void Function(PumaModule)? onTestDisplay;
   final void Function(PumaModule)? onClearDisplay;
+  final void Function(PumaModule)? onLedsOn;
+  final void Function(PumaModule)? onLedsOff;
   final bool Function(PumaModule) canReplace;
 
   const _GroupSection({
@@ -429,6 +445,8 @@ class _GroupSection extends StatelessWidget {
     this.onEdit,
     this.onTestDisplay,
     this.onClearDisplay,
+    this.onLedsOn,
+    this.onLedsOff,
   });
 
   @override
@@ -462,6 +480,12 @@ class _GroupSection extends StatelessWidget {
                       onTestDisplay != null ? () => onTestDisplay!(m) : null,
                   onClearDisplay:
                       onClearDisplay != null ? () => onClearDisplay!(m) : null,
+                  onLedsOn: onLedsOn != null && m.hasLeds
+                      ? () => onLedsOn!(m)
+                      : null,
+                  onLedsOff: onLedsOff != null && m.hasLeds
+                      ? () => onLedsOff!(m)
+                      : null,
                 ),
             ],
           ),
@@ -479,6 +503,8 @@ class _AddressChip extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback? onTestDisplay;
   final VoidCallback? onClearDisplay;
+  final VoidCallback? onLedsOn;
+  final VoidCallback? onLedsOff;
 
   const _AddressChip({
     required this.module,
@@ -488,6 +514,8 @@ class _AddressChip extends StatelessWidget {
     this.onEdit,
     this.onTestDisplay,
     this.onClearDisplay,
+    this.onLedsOn,
+    this.onLedsOff,
   });
 
   Color _effectiveColor() {
@@ -515,6 +543,8 @@ class _AddressChip extends StatelessWidget {
         if (v == 'delete') onDelete();
         if (v == 'test_disp') onTestDisplay?.call();
         if (v == 'clear_disp') onClearDisplay?.call();
+        if (v == 'leds_on') onLedsOn?.call();
+        if (v == 'leds_off') onLedsOff?.call();
       },
       itemBuilder: (_) => [
         PopupMenuItem(
@@ -541,6 +571,24 @@ class _AddressChip extends StatelessWidget {
               Icon(Icons.format_clear, size: 18),
               SizedBox(width: 8),
               Text('Smazat text'),
+            ]),
+          ),
+        if (onLedsOn != null)
+          const PopupMenuItem(
+            value: 'leds_on',
+            child: Row(children: [
+              Icon(Icons.lightbulb, size: 18, color: Colors.amber),
+              SizedBox(width: 8),
+              Text('Rozsvítit LED'),
+            ]),
+          ),
+        if (onLedsOff != null)
+          const PopupMenuItem(
+            value: 'leds_off',
+            child: Row(children: [
+              Icon(Icons.lightbulb_outline, size: 18),
+              SizedBox(width: 8),
+              Text('Zhasnout LED'),
             ]),
           ),
         if (onEdit != null)
@@ -572,14 +620,24 @@ class _AddressChip extends StatelessWidget {
       ],
       child: Builder(builder: (_) {
         final effColor = _effectiveColor();
+        final showLed = module.type == ModuleType.pumA && module.hasLeds;
         return Chip(
-          label: Text(
-            module.baseAddress.toString(),
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: effColor,
-            ),
+          label: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                module.baseAddress.toString(),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: effColor,
+                ),
+              ),
+              if (showLed) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.lightbulb, size: 14, color: Colors.amber.shade700),
+              ],
+            ],
           ),
           backgroundColor: effColor.withAlpha(30),
           side: BorderSide(color: effColor.withAlpha(110)),
