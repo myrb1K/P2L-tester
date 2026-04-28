@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
 
-enum _BulkAction { broker, wifi }
+enum _BulkAction { broker, wifi, dispBrightness, unitBrightness }
 
 enum _BrokerMode { existing, newProfile }
 
@@ -26,6 +26,10 @@ class BulkConfigMenu extends StatelessWidget {
                 await _showBrokerDialog(context, state);
               case _BulkAction.wifi:
                 await _showWifiDialog(context, state);
+              case _BulkAction.dispBrightness:
+                await _showDispBrightnessDialog(context, state);
+              case _BulkAction.unitBrightness:
+                await _showUnitBrightnessDialog(context, state);
             }
           },
           itemBuilder: (context) => [
@@ -46,6 +50,26 @@ class BulkConfigMenu extends StatelessWidget {
                 title: const Text('Změnit WiFi'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BulkAction.dispBrightness,
+              child: ListTile(
+                leading: const Icon(Icons.brightness_6),
+                title: const Text('Jas displejů'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných · 0–6')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BulkAction.unitBrightness,
+              child: ListTile(
+                leading: const Icon(Icons.light_mode),
+                title: const Text('Jas jednotky'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných · 0–100 %')
                     : const Text('Nejprve vyberte P2L moduly'),
               ),
             ),
@@ -71,6 +95,26 @@ class BulkConfigMenu extends StatelessWidget {
     );
     if (result != null && context.mounted) {
       await state.sendBulkBroker(result);
+    }
+  }
+
+  Future<void> _showDispBrightnessDialog(BuildContext context, AppState state) async {
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => _BulkDispBrightnessDialog(selectedCount: state.selectedCount),
+    );
+    if (result != null && context.mounted) {
+      await state.sendBulkBrightness(result);
+    }
+  }
+
+  Future<void> _showUnitBrightnessDialog(BuildContext context, AppState state) async {
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => _BulkUnitBrightnessDialog(selectedCount: state.selectedCount),
+    );
+    if (result != null && context.mounted) {
+      await state.sendBulkUnitBrightness(result);
     }
   }
 
@@ -332,6 +376,144 @@ class _BulkBrokerDialogState extends State<_BulkBrokerDialog> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _BulkDispBrightnessDialog extends StatefulWidget {
+  final int selectedCount;
+
+  const _BulkDispBrightnessDialog({required this.selectedCount});
+
+  @override
+  State<_BulkDispBrightnessDialog> createState() => _BulkDispBrightnessDialogState();
+}
+
+class _BulkDispBrightnessDialogState extends State<_BulkDispBrightnessDialog> {
+  int _intensity = 1;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Hromadná změna jasu displejů'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Bude odesláno na ${widget.selectedCount} P2L modulů.'),
+          const SizedBox(height: 4),
+          const Text(
+            'DISP SET-CONFIG broadcast (adresa 050000) — změní jas všech displejů na každé jednotce.',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Icon(Icons.brightness_low, size: 20),
+              Expanded(
+                child: Slider(
+                  value: _intensity.toDouble(),
+                  min: 0,
+                  max: 6,
+                  divisions: 6,
+                  label: _intensity.toString(),
+                  onChanged: (v) => setState(() => _intensity = v.round()),
+                ),
+              ),
+              const Icon(Icons.brightness_high, size: 20),
+            ],
+          ),
+          Center(
+            child: Text(
+              'Intensity: $_intensity',
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _intensity),
+          child: const Text('Odeslat'),
+        ),
+      ],
+    );
+  }
+}
+
+class _BulkUnitBrightnessDialog extends StatefulWidget {
+  final int selectedCount;
+
+  const _BulkUnitBrightnessDialog({required this.selectedCount});
+
+  @override
+  State<_BulkUnitBrightnessDialog> createState() =>
+      _BulkUnitBrightnessDialogState();
+}
+
+class _BulkUnitBrightnessDialogState
+    extends State<_BulkUnitBrightnessDialog> {
+  int _value = 20;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Hromadná změna jasu jednotky'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Bude odesláno na ${widget.selectedCount} P2L modulů.'),
+          const SizedBox(height: 4),
+          const Text(
+            'set_brightness — hodnota v procentech 0–100.',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Icon(Icons.brightness_low, size: 20),
+              Expanded(
+                child: Slider(
+                  value: _value.toDouble(),
+                  min: 0,
+                  max: 100,
+                  divisions: 100,
+                  label: '$_value %',
+                  onChanged: (v) => setState(() => _value = v.round()),
+                ),
+              ),
+              const Icon(Icons.brightness_high, size: 20),
+            ],
+          ),
+          Center(
+            child: Text(
+              '$_value %',
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _value),
+          child: const Text('Odeslat'),
+        ),
+      ],
     );
   }
 }

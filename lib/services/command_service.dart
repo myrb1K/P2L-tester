@@ -149,6 +149,20 @@ class CommandService {
     });
   }
 
+  /// Příkaz `set_brightness` – nastavení jasu jednotky (LED strip apod.).
+  /// Hodnota v procentech 0–100.
+  static String buildSetBrightnessCommand({required int value}) {
+    return jsonEncode({
+      'request_id': -1,
+      'cmds': [
+        {
+          'cmd': 'set_brightness',
+          'args': {'value': value},
+        },
+      ],
+    });
+  }
+
   /// Příkaz `set_WiFi` – hromadná změna WiFi.
   static String buildSetWifiCommand({
     required String ssid,
@@ -306,6 +320,19 @@ class CommandService {
     return (
       topic: getDeviceCommandTopic(unitId, DeviceType.disp, dispAddress, 'SET-DATA'),
       payload: jsonEncode({'Data': data}),
+    );
+  }
+
+  /// SET-CONFIG na DISP: nastaví intensitu (jas) displeje. Rozsah 0–6.
+  /// DISP adresa 0 = broadcast na všechny displeje jednotky.
+  static ({String topic, String payload}) buildSetDispConfigCommand({
+    required String unitId,
+    required int dispAddress,
+    required int intensity,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, DeviceType.disp, dispAddress, 'SET-CONFIG'),
+      payload: jsonEncode({'Intensity': intensity}),
     );
   }
 

@@ -31,9 +31,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
 
   Future<void> _addModule(AppState state, List<PumaModule> currentModules) async {
     final existing = currentModules.map((m) => m.baseAddress).toSet();
-    final suggested = existing.isEmpty
-        ? null
-        : (existing.reduce((a, b) => a > b ? a : b) + 1);
+    final suggested = existing.isEmpty ? null : (existing.reduce((a, b) => a > b ? a : b) + 1);
     final result = await showDialog<AddModuleResult>(
       context: context,
       builder: (_) => AddModuleDialog(
@@ -45,13 +43,12 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     if (result != null) {
       if (currentModules.length >= kMaxChipsPerUnit) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Limit 100 čipů na jednotku dosažen.'),
-        ));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Limit 100 čipů na jednotku dosažen.')));
         return;
       }
-      await state.addModules(widget.unitId, [result.module],
-          restartAfter: result.restartAfter);
+      await state.addModules(widget.unitId, [result.module], restartAfter: result.restartAfter);
     }
   }
 
@@ -61,14 +58,10 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         .toSet();
     final result = await showDialog<AddModuleResult>(
       context: context,
-      builder: (_) => AddModuleDialog(
-        existingAddresses: existing,
-        initial: module,
-      ),
+      builder: (_) => AddModuleDialog(existingAddresses: existing, initial: module),
     );
     if (result == null) return;
-    if (result.module.type == ModuleType.dist &&
-        result.module.distConfig != null) {
+    if (result.module.type == ModuleType.dist && result.module.distConfig != null) {
       await state.updateDistConfig(
         unitId: widget.unitId,
         distAddress: result.module.baseAddress,
@@ -100,10 +93,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         title: const Text('Smazat modul'),
         content: Text('Opravdu smazat ${module.displayLabel}?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Zrušit'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Zrušit')),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
@@ -127,12 +117,12 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
 
   Future<void> _saveAsTemplate(List<PumaModule> modules) async {
     if (modules.isEmpty) return;
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => TemplateEditorScreen(
-        seedModules: modules,
-        seedName: 'Z modulu ${widget.unitId}',
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            TemplateEditorScreen(seedModules: modules, seedName: 'Z modulu ${widget.unitId}'),
       ),
-    ));
+    );
   }
 
   Future<void> _wipeAll(AppState state) async {
@@ -140,14 +130,9 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Smazat všechny moduly?'),
-        content: Text(
-          'Z jednotky ${widget.unitId} se odstraní všechny moduly. Nelze vrátit.',
-        ),
+        content: Text('Z jednotky ${widget.unitId} se odstraní všechny moduly. Nelze vrátit.'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Zrušit'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Zrušit')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
@@ -165,8 +150,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, state, _) {
-        final unit = state.units[widget.unitId] ??
-            P2LUnit(id: widget.unitId);
+        final unit = state.units[widget.unitId] ?? P2LUnit(id: widget.unitId);
         final modules = state.modulesForUnit(widget.unitId) ?? const [];
         final pending = state.isModulesPending(widget.unitId);
         final fetchedAt = state.modulesFetchedAt(widget.unitId);
@@ -193,9 +177,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
               IconButton(
                 icon: const Icon(Icons.bookmark_add_outlined),
                 tooltip: 'Uložit jako šablonu',
-                onPressed: modules.isEmpty
-                    ? null
-                    : () => _saveAsTemplate(modules),
+                onPressed: modules.isEmpty ? null : () => _saveAsTemplate(modules),
               ),
               IconButton(
                 icon: const Icon(Icons.delete_sweep, color: Colors.red),
@@ -237,14 +219,10 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                           dispAddress: m.baseAddress,
                           data: '',
                         ),
-                        onLedsOn: (m) => state.sendLedsOn(
-                          unitId: widget.unitId,
-                          ledsAddress: m.baseAddress,
-                        ),
-                        onLedsOff: (m) => state.sendLedsOff(
-                          unitId: widget.unitId,
-                          ledsAddress: m.baseAddress,
-                        ),
+                        onLedsOn: (m) =>
+                            state.sendLedsOn(unitId: widget.unitId, ledsAddress: m.baseAddress),
+                        onLedsOff: (m) =>
+                            state.sendLedsOff(unitId: widget.unitId, ledsAddress: m.baseAddress),
                         canReplace: _canReplace,
                       ),
               ),
@@ -255,8 +233,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     );
   }
 
-  bool _canReplace(PumaModule m) =>
-      m.type == ModuleType.pumA || m.type == ModuleType.dist;
+  bool _canReplace(PumaModule m) => m.type == ModuleType.pumA || m.type == ModuleType.dist;
 }
 
 class _UnitInfoCard extends StatelessWidget {
@@ -264,11 +241,7 @@ class _UnitInfoCard extends StatelessWidget {
   final List<PumaModule> modules;
   final DateTime? fetchedAt;
 
-  const _UnitInfoCard({
-    required this.unit,
-    required this.modules,
-    required this.fetchedAt,
-  });
+  const _UnitInfoCard({required this.unit, required this.modules, required this.fetchedAt});
 
   @override
   Widget build(BuildContext context) {
@@ -371,26 +344,21 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.canReplace,
   });
 
-  static const _order = [
-    ModuleType.pumA,
-    ModuleType.pumB,
-    ModuleType.pumC,
-    ModuleType.dist,
-  ];
+  static const _order = [ModuleType.pumA, ModuleType.pumB, ModuleType.pumC, ModuleType.dist];
 
   String _label(ModuleType t) => switch (t) {
-        ModuleType.pumA => 'PUM-A',
-        ModuleType.pumB => 'PUM-B',
-        ModuleType.pumC => 'PUM-C',
-        ModuleType.dist => 'SENZOR',
-      };
+    ModuleType.pumA => 'PUM-A',
+    ModuleType.pumB => 'PUM-B',
+    ModuleType.pumC => 'PUM-C',
+    ModuleType.dist => 'SENZOR',
+  };
 
   Color _color(ModuleType t) => switch (t) {
-        ModuleType.pumA => Colors.blue,
-        ModuleType.pumB => Colors.orange,
-        ModuleType.pumC => Colors.purple,
-        ModuleType.dist => Colors.teal,
-      };
+    ModuleType.pumA => Colors.blue,
+    ModuleType.pumB => Colors.orange,
+    ModuleType.pumC => Colors.purple,
+    ModuleType.dist => Colors.teal,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -457,10 +425,8 @@ class _GroupSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isPumA =
-        modules.isNotEmpty && modules.first.type == ModuleType.pumA;
-    final ledModules =
-        isPumA ? modules.where((m) => m.hasLeds).toList() : const <PumaModule>[];
+    final isPumA = modules.isNotEmpty && modules.first.type == ModuleType.pumA;
+    final ledModules = isPumA ? modules.where((m) => m.hasLeds).toList() : const <PumaModule>[];
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -471,11 +437,7 @@ class _GroupSection extends StatelessWidget {
             children: [
               Text(
                 '$label  ·  ${modules.length}',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                  fontSize: 13,
-                ),
+                style: TextStyle(fontWeight: FontWeight.w700, color: color, fontSize: 13),
               ),
               if (isPumA) ...[
                 const Spacer(),
@@ -487,10 +449,10 @@ class _GroupSection extends StatelessWidget {
                   tooltip: ledModules.isEmpty
                       ? 'Žádné moduly s LEDS'
                       : 'Rozsvítit všechny LEDS (${ledModules.length})',
-                  icon: Icon(Icons.lightbulb,
-                      color: ledModules.isEmpty
-                          ? Colors.grey
-                          : Colors.amber.shade700),
+                  icon: Icon(
+                    Icons.lightbulb,
+                    color: ledModules.isEmpty ? Colors.grey : Colors.amber.shade700,
+                  ),
                   onPressed: ledModules.isEmpty
                       ? null
                       : () => _bulkLeds(context, ledModules, on: true),
@@ -542,16 +504,10 @@ class _GroupSection extends StatelessWidget {
                   onReplace: canReplace(m) ? () => onReplace(m) : null,
                   onEdit: onEdit != null ? () => onEdit!(m) : null,
                   onDelete: () => onDelete(m),
-                  onTestDisplay:
-                      onTestDisplay != null ? () => onTestDisplay!(m) : null,
-                  onClearDisplay:
-                      onClearDisplay != null ? () => onClearDisplay!(m) : null,
-                  onLedsOn: onLedsOn != null && m.hasLeds
-                      ? () => onLedsOn!(m)
-                      : null,
-                  onLedsOff: onLedsOff != null && m.hasLeds
-                      ? () => onLedsOff!(m)
-                      : null,
+                  onTestDisplay: onTestDisplay != null ? () => onTestDisplay!(m) : null,
+                  onClearDisplay: onClearDisplay != null ? () => onClearDisplay!(m) : null,
+                  onLedsOn: onLedsOn != null && m.hasLeds ? () => onLedsOn!(m) : null,
+                  onLedsOff: onLedsOff != null && m.hasLeds ? () => onLedsOff!(m) : null,
                 ),
             ],
           ),
@@ -561,8 +517,10 @@ class _GroupSection extends StatelessWidget {
   }
 
   Future<void> _bulkLeds(
-      BuildContext context, List<PumaModule> ledModules,
-      {required bool on}) async {
+    BuildContext context,
+    List<PumaModule> ledModules, {
+    required bool on,
+  }) async {
     final state = context.read<AppState>();
     for (final m in ledModules) {
       if (on) {
@@ -576,11 +534,7 @@ class _GroupSection extends StatelessWidget {
 
   Future<void> _bulkDisp(BuildContext context, String text) async {
     // DISP adresa 0 = broadcast na všechny displeje jednotky (1 MQTT zpráva).
-    await context.read<AppState>().sendDispData(
-          unitId: unitId,
-          dispAddress: 0,
-          data: text,
-        );
+    await context.read<AppState>().sendDispData(unitId: unitId, dispAddress: 0, data: text);
   }
 }
 
@@ -622,7 +576,6 @@ class _AddressChip extends StatelessWidget {
     return color;
   }
 
-
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
@@ -649,121 +602,129 @@ class _AddressChip extends StatelessWidget {
         if (onTestDisplay != null)
           const PopupMenuItem(
             value: 'test_disp',
-            child: Row(children: [
-              Icon(Icons.text_fields, size: 18, color: Colors.blue),
-              SizedBox(width: 8),
-              Text('Test displeje (AHOJ)'),
-            ]),
+            child: Row(
+              children: [
+                Icon(Icons.text_fields, size: 18, color: Colors.blue),
+                SizedBox(width: 8),
+                Text('Test displeje (AHOJ)'),
+              ],
+            ),
           ),
         if (onClearDisplay != null)
           const PopupMenuItem(
             value: 'clear_disp',
-            child: Row(children: [
-              Icon(Icons.format_clear, size: 18),
-              SizedBox(width: 8),
-              Text('Smazat text'),
-            ]),
+            child: Row(
+              children: [
+                Icon(Icons.format_clear, size: 18),
+                SizedBox(width: 8),
+                Text('Smazat text'),
+              ],
+            ),
           ),
         if (onLedsOn != null)
           const PopupMenuItem(
             value: 'leds_on',
-            child: Row(children: [
-              Icon(Icons.lightbulb, size: 18, color: Colors.amber),
-              SizedBox(width: 8),
-              Text('Rozsvítit LED'),
-            ]),
+            child: Row(
+              children: [
+                Icon(Icons.lightbulb, size: 18, color: Colors.amber),
+                SizedBox(width: 8),
+                Text('Rozsvítit LED'),
+              ],
+            ),
           ),
         if (onLedsOff != null)
           const PopupMenuItem(
             value: 'leds_off',
-            child: Row(children: [
-              Icon(Icons.lightbulb_outline, size: 18),
-              SizedBox(width: 8),
-              Text('Zhasnout LED'),
-            ]),
+            child: Row(
+              children: [
+                Icon(Icons.lightbulb_outline, size: 18),
+                SizedBox(width: 8),
+                Text('Zhasnout LED'),
+              ],
+            ),
           ),
         if (onEdit != null)
           const PopupMenuItem(
             value: 'edit',
-            child: Row(children: [
-              Icon(Icons.edit, size: 18, color: Colors.blue),
-              SizedBox(width: 8),
-              Text('Upravit'),
-            ]),
+            child: Row(
+              children: [
+                Icon(Icons.edit, size: 18, color: Colors.blue),
+                SizedBox(width: 8),
+                Text('Upravit'),
+              ],
+            ),
           ),
         if (onReplace != null)
           const PopupMenuItem(
             value: 'replace',
-            child: Row(children: [
-              Icon(Icons.swap_horiz, size: 18),
-              SizedBox(width: 8),
-              Text('Vyměnit'),
-            ]),
+            child: Row(
+              children: [Icon(Icons.swap_horiz, size: 18), SizedBox(width: 8), Text('Vyměnit')],
+            ),
           ),
         const PopupMenuItem(
           value: 'delete',
-          child: Row(children: [
-            Icon(Icons.delete_outline, size: 18, color: Colors.red),
-            SizedBox(width: 8),
-            Text('Smazat', style: TextStyle(color: Colors.red)),
-          ]),
-        ),
-      ],
-      child: Builder(builder: (_) {
-        final effColor = _effectiveColor();
-        final showLed = module.type == ModuleType.pumA && module.hasLeds;
-        final chip = Chip(
-          label: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Row(
             children: [
-              Text(
-                module.baseAddress.toString(),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: effColor,
-                ),
-              ),
-              if (showLed) ...[
-                const SizedBox(width: 4),
-                Icon(Icons.lightbulb, size: 14, color: Colors.amber.shade700),
-              ],
+              Icon(Icons.delete_outline, size: 18, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Smazat', style: TextStyle(color: Colors.red)),
             ],
           ),
-          backgroundColor: effColor.withAlpha(30),
-          side: BorderSide(color: effColor.withAlpha(110)),
-          visualDensity: VisualDensity.compact,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        );
-
-        // BTN press flash: levý a pravý okraj zazáří 1s, když přijde D/.../BTN/.../UPDATE.
-        // Selector vrací jen relevantní timestampy — chip se rebuildne jen při novém stisku.
-        return Selector<AppState, ({DateTime? left, DateTime? right})>(
-          selector: (_, s) => (
-            left: s.lastButtonPress(unitId, module.baseAddress, left: true),
-            right: s.lastButtonPress(unitId, module.baseAddress, left: false),
-          ),
-          builder: (_, presses, child) {
-            return Stack(
+        ),
+      ],
+      child: Builder(
+        builder: (_) {
+          final effColor = _effectiveColor();
+          final showLed = module.type == ModuleType.pumA && module.hasLeds;
+          final chip = Chip(
+            label: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                child!,
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Row(
-                      children: [
-                        _PressFlash(timestamp: presses.left),
-                        const Spacer(),
-                        _PressFlash(timestamp: presses.right),
-                      ],
+                Text(
+                  module.baseAddress.toString(),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: effColor),
+                ),
+                if (showLed) ...[
+                  const SizedBox(width: 4),
+                  Icon(Icons.lightbulb, size: 14, color: Colors.amber.shade700),
+                ],
+              ],
+            ),
+            backgroundColor: effColor.withAlpha(30),
+            side: BorderSide(color: effColor.withAlpha(110)),
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          );
+
+          // BTN press flash: levý a pravý okraj zazáří 1s, když přijde D/.../BTN/.../UPDATE.
+          // Selector vrací jen relevantní timestampy — chip se rebuildne jen při novém stisku.
+          return Selector<AppState, ({DateTime? left, DateTime? right})>(
+            selector: (_, s) => (
+              left: s.lastButtonPress(unitId, module.baseAddress, left: true),
+              right: s.lastButtonPress(unitId, module.baseAddress, left: false),
+            ),
+            builder: (_, presses, child) {
+              return Stack(
+                children: [
+                  child!,
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Row(
+                        children: [
+                          _PressFlash(timestamp: presses.left),
+                          const Spacer(),
+                          _PressFlash(timestamp: presses.right),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
-            );
-          },
-          child: chip,
-        );
-      }),
+                ],
+              );
+            },
+            child: chip,
+          );
+        },
+      ),
     );
   }
 }
@@ -777,10 +738,10 @@ class _PressFlash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (timestamp == null) return const SizedBox(width: 10);
+    if (timestamp == null) return const SizedBox(width: 13);
     final age = DateTime.now().difference(timestamp!);
     if (age >= const Duration(seconds: 1)) {
-      return const SizedBox(width: 10);
+      return const SizedBox(width: 13);
     }
     return TweenAnimationBuilder<double>(
       key: ValueKey(timestamp!.microsecondsSinceEpoch),
@@ -788,7 +749,7 @@ class _PressFlash extends StatelessWidget {
       duration: const Duration(seconds: 1),
       curve: Curves.easeOut,
       builder: (_, value, _) => Container(
-        width: 10,
+        width: 13,
         decoration: BoxDecoration(
           color: Colors.redAccent.withValues(alpha: value),
           borderRadius: BorderRadius.circular(3),

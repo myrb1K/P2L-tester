@@ -632,6 +632,53 @@ class AppState extends ChangeNotifier {
   }
 
   /// Hromadná změna WiFi: pošle `set_WiFi` všem vybraným jednotkám s 100ms pauzou.
+  /// Hromadná změna jasu jednotky (`set_brightness`, value 0–100)
+  /// na všech vybraných jednotkách s 100 ms pauzou.
+  Future<void> sendBulkUnitBrightness(int value) async {
+    if (_selectedUnits.isEmpty) return;
+    final clamped = value.clamp(0, 100);
+    final payload = CommandService.buildSetBrightnessCommand(value: clamped);
+    final targets = _selectedUnits.toList();
+    var sent = 0;
+    for (final unitId in targets) {
+      final topic = _topicFor(unitId);
+      _mqttService.publish(topic, payload);
+      sent++;
+      _statusMessage = 'Jas jednotky: $sent / ${targets.length} ($clamped%)';
+      notifyListeners();
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    _statusMessage = 'Jas jednotky $clamped% odeslán na $sent P2L modulů';
+    notifyListeners();
+  }
+
+  /// Hromadná změna jasu displejů (DISP SET-CONFIG, broadcast adresa 050000)
+  /// na všech vybraných jednotkách. Intensity 0–6.
+  Future<void> sendBulkBrightness(int intensity) async {
+    if (_selectedUnits.isEmpty) return;
+    final clamped = intensity.clamp(0, 6);
+    final targets = _selectedUnits.toList();
+    var sent = 0;
+    for (final unitId in targets) {
+      final cmd = CommandService.buildSetDispConfigCommand(
+        unitId: _normUnitId(unitId),
+        dispAddress: 0,
+        intensity: clamped,
+      );
+      _mqttService.publish(cmd.topic, cmd.payload);
+      sent++;
+      _statusMessage = 'Jas: $sent / ${targets.length} (intensity=$clamped)';
+      notifyListeners();
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    _statusMessage = 'Jas $clamped odeslán na $sent P2L modulů';
+    notifyListeners();
+  }
+
   Future<void> sendBulkWifi({required String ssid, required String password}) async {
     if (_selectedUnits.isEmpty) return;
     final payload = CommandService.buildSetWifiCommand(ssid: ssid, password: password);
