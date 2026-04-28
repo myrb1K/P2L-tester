@@ -57,10 +57,11 @@ List<PumaModule> reconstructModules(List<Device> rawDevices) {
     }
   }
 
-  // 3. Zbylé osamocené BTN → PUM-B
+  // 3. Zbylé osamocené BTN → PUM-B (s LEDS pokud je LEDS na stejné adrese a nepatří PUM-A)
   final remainingPumB = btnIds.difference(claimedBtn).toList()..sort();
   for (final id in remainingPumB) {
-    modules.add(PumaModule.pumB(address: id));
+    final hasLeds = ledsIds.contains(id) && !dispIds.contains(id);
+    modules.add(PumaModule.pumB(address: id, hasLeds: hasLeds));
   }
 
   // 4. DIST

@@ -828,18 +828,20 @@ class AppState extends ChangeNotifier {
   }
 
   /// SET-LEDS: rozsvítí LED na daném LEDS zařízení.
+  /// Pokud `color` není zadané, použije se `ledColor` z nastavení (Barva LED).
   Future<void> sendLedsOn({
     required String unitId,
     required int ledsAddress,
     int style = 0,
-    int color = 1,
+    int? color,
   }) async {
     final id = _normUnitId(unitId);
+    final effectiveColor = color ?? ledColor;
     final cmd = CommandService.buildSetLedsCommand(
       unitId: id,
       ledsAddress: ledsAddress,
       style: style,
-      color: color,
+      color: effectiveColor,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
     _deviceActionStatus = 'LEDS @$ledsAddress na $id: rozsvíceno';

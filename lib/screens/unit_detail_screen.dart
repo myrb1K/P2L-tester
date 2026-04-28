@@ -289,7 +289,7 @@ class _UnitInfoCard extends StatelessWidget {
                           [
                             if (unit.ip != null) 'IP: ${unit.ip}',
                             if (unit.mac != null) 'MAC: ${unit.mac}',
-                            if (unit.battery != null) 'Bat: ${unit.battery}%',
+                            if (unit.battery != null) 'Bat: ${unit.battery!.toStringAsFixed(1)} V',
                           ].join(' · '),
                           style: const TextStyle(fontSize: 11),
                           overflow: TextOverflow.ellipsis,
@@ -386,8 +386,12 @@ class _ModulesGroupedList extends StatelessWidget {
               canReplace: canReplace,
               onTestDisplay: type == ModuleType.pumA ? onTestDisplay : null,
               onClearDisplay: type == ModuleType.pumA ? onClearDisplay : null,
-              onLedsOn: type == ModuleType.pumA ? onLedsOn : null,
-              onLedsOff: type == ModuleType.pumA ? onLedsOff : null,
+              onLedsOn: (type == ModuleType.pumA || type == ModuleType.pumB)
+                  ? onLedsOn
+                  : null,
+              onLedsOff: (type == ModuleType.pumA || type == ModuleType.pumB)
+                  ? onLedsOff
+                  : null,
             ),
       ],
     );
@@ -425,8 +429,12 @@ class _GroupSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isPumA = modules.isNotEmpty && modules.first.type == ModuleType.pumA;
-    final ledModules = isPumA ? modules.where((m) => m.hasLeds).toList() : const <PumaModule>[];
+    final firstType = modules.isNotEmpty ? modules.first.type : null;
+    final hasLedsSupport =
+        firstType == ModuleType.pumA || firstType == ModuleType.pumB;
+    final hasDispSupport = firstType == ModuleType.pumA;
+    final ledModules =
+        hasLedsSupport ? modules.where((m) => m.hasLeds).toList() : const <PumaModule>[];
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -436,11 +444,11 @@ class _GroupSection extends StatelessWidget {
           Row(
             children: [
               Text(
-                '$label  ·  ${modules.length}',
+                '$label  ${modules.length}x',
                 style: TextStyle(fontWeight: FontWeight.w700, color: color, fontSize: 13),
               ),
-              if (isPumA) ...[
-                const Spacer(),
+              if (hasLedsSupport || hasDispSupport) const Spacer(),
+              if (hasLedsSupport) ...[
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
@@ -470,6 +478,8 @@ class _GroupSection extends StatelessWidget {
                       ? null
                       : () => _bulkLeds(context, ledModules, on: false),
                 ),
+              ],
+              if (hasDispSupport) ...[
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
@@ -576,6 +586,20 @@ class _AddressChip extends StatelessWidget {
     return color;
   }
 
+  /// Barva flash indikátoru stisku tlačítka podle typu modulu a strany.
+  /// PUM-A i PUM-B: zelená (obě strany). PUM-C: levé modré, pravé červené.
+  Color _pressColor({required bool left}) {
+    switch (module.type) {
+      case ModuleType.pumA:
+      case ModuleType.pumB:
+        return Colors.green;
+      case ModuleType.pumC:
+        return left ? Colors.blue : Colors.red;
+      case ModuleType.dist:
+        return Colors.redAccent;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
@@ -675,7 +699,10 @@ class _AddressChip extends StatelessWidget {
       child: Builder(
         builder: (_) {
           final effColor = _effectiveColor();
-          final showLed = module.type == ModuleType.pumA && module.hasLeds;
+          final showLed =
+              (module.type == ModuleType.pumA || module.type == ModuleType.pumB) && module.hasLeds;
+          final leftFlash = _pressColor(left: true);
+          final rightFlash = _pressColor(left: false);
           final chip = Chip(
             label: Row(
               mainAxisSize: MainAxisSize.min,
@@ -711,9 +738,9 @@ class _AddressChip extends StatelessWidget {
                     child: IgnorePointer(
                       child: Row(
                         children: [
-                          _PressFlash(timestamp: presses.left),
+                          _PressFlash(timestamp: presses.left, color: leftFlash),
                           const Spacer(),
-                          _PressFlash(timestamp: presses.right),
+                          _PressFlash(timestamp: presses.right, color: rightFlash),
                         ],
                       ),
                     ),
@@ -734,7 +761,8 @@ class _AddressChip extends StatelessWidget {
 /// při novém stisku.
 class _PressFlash extends StatelessWidget {
   final DateTime? timestamp;
-  const _PressFlash({required this.timestamp});
+  final Color color;
+  const _PressFlash({required this.timestamp, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -751,12 +779,12 @@ class _PressFlash extends StatelessWidget {
       builder: (_, value, _) => Container(
         width: 13,
         decoration: BoxDecoration(
-          color: Colors.redAccent.withValues(alpha: value),
+          color: color.withValues(alpha: value),
           borderRadius: BorderRadius.circular(3),
           boxShadow: value > 0.05
               ? [
                   BoxShadow(
-                    color: Colors.redAccent.withValues(alpha: value * 0.8),
+                    color: color.withValues(alpha: value * 0.8),
                     blurRadius: 6,
                     spreadRadius: 1,
                   ),

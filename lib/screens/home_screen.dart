@@ -497,7 +497,7 @@ class _UnitCard extends StatelessWidget {
                       child: Text(
                         [
                           if (unit.firmware != null) unit.firmware!,
-                          if (unit.battery != null) '${unit.battery!.toStringAsFixed(1)}%',
+                          if (unit.battery != null) '${unit.battery!.toStringAsFixed(1)} V',
                         ].join(' | '),
                         style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                         overflow: TextOverflow.ellipsis,
@@ -582,7 +582,7 @@ class _UnitCard extends StatelessWidget {
       if (unit.mac != null) 'MAC: ${unit.mac}',
       if (unit.ssid != null) 'SSID: ${unit.ssid}',
       if (unit.mqttServer != null) 'MQTT: ${unit.mqttServer}:${unit.mqttPort}',
-      if (unit.battery != null) 'Bat: ${unit.battery}%',
+      if (unit.battery != null) 'Bat: ${unit.battery!.toStringAsFixed(1)} V',
       'Brightness: ${unit.brightness}',
       if (unit.ledsPerPort.isNotEmpty)
         'LEDs: ${unit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
@@ -608,7 +608,7 @@ class _UnitCard extends StatelessWidget {
             if (unit.mac != null) Text('MAC: ${unit.mac}'),
             if (unit.ssid != null) Text('SSID: ${unit.ssid}'),
             if (unit.mqttServer != null) Text('MQTT: ${unit.mqttServer}:${unit.mqttPort}'),
-            if (unit.battery != null) Text('Bat: ${unit.battery}%'),
+            if (unit.battery != null) Text('Bat: ${unit.battery!.toStringAsFixed(1)} V'),
             Text('Brightness: ${unit.brightness}'),
             if (unit.ledsPerPort.isNotEmpty)
               Text('LEDs: ${unit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}'),

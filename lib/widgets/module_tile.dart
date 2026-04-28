@@ -125,7 +125,8 @@ class ModuleTile extends StatelessWidget {
                   ),
                 ),
               ),
-            if (module.type == ModuleType.pumA && module.hasLeds)
+            if ((module.type == ModuleType.pumA || module.type == ModuleType.pumB) &&
+                module.hasLeds)
               Container(
                 margin: const EdgeInsets.only(left: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

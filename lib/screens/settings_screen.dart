@@ -417,6 +417,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Consumer<AppState>(
+                  builder: (context2, state, child) => Text(
+                    'Aktuálně: ${state.ledsOn} svítí / ${state.ledsOff} nesvítí',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 const Text('Barva LED:'),
                 const SizedBox(height: 8),
@@ -439,13 +446,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         avatar: CircleAvatar(backgroundColor: entry.$3, radius: 8),
                       ),
                   ],
-                ),
-                const SizedBox(height: 8),
-                Consumer<AppState>(
-                  builder: (context2, state, child) => Text(
-                    'Aktualne: ${state.ledsOn} sviti / ${state.ledsOff} nesviti',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
                 ),
                 const SizedBox(height: 12),
                 FilledButton.icon(

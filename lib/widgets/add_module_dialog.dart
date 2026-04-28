@@ -132,7 +132,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
           buttonSide: _buttonCount == 1 ? _buttonSide : null,
         );
       case ModuleType.pumB:
-        module = PumaModule.pumB(address: addr);
+        module = PumaModule.pumB(address: addr, hasLeds: _hasLeds);
       case ModuleType.pumC:
         module = PumaModule.pumC(address: addr);
       case ModuleType.dist:
@@ -192,7 +192,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                           _buttonCount = 1;
                         } else {
                           _buttonCount = 0;
-                          _hasLeds = false;
+                          if (_type != ModuleType.pumB) _hasLeds = false;
                         }
                         final current = int.tryParse(_addrCtrl.text);
                         if (_addrCtrl.text.isEmpty ||
@@ -245,6 +245,17 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                   onSelectionChanged: (s) => setState(() => _buttonSide = s.first),
                 ),
               ],
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                value: _hasLeds,
+                onChanged: (v) => setState(() => _hasLeds = v ?? false),
+                title: const Text('LEDS osazeny (LED kroužek aktivní)'),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+              ),
+            ],
+            if (_type == ModuleType.pumB) ...[
               const SizedBox(height: 8),
               CheckboxListTile(
                 value: _hasLeds,

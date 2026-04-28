@@ -66,6 +66,8 @@ class P2LUnit {
     mqttServer = args['mqtt_server'] as String? ?? mqttServer;
     mqttPort = args['mqtt_port'] as int? ?? mqttPort;
     brightness = args['brightness'] as int? ?? brightness;
+    final bat = args['Bat'];
+    if (bat is num) battery = bat.toDouble();
 
     for (int i = 0; i < 8; i++) {
       final key = 'leds port$i';

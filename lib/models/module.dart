@@ -73,7 +73,7 @@ class PumaModule {
   final ModuleType type;
   final int baseAddress;
   final int buttonCount; // jen pro PUM-A: 0/1/2; pevně 1 pro PUM-B, 2 pro PUM-C
-  final bool hasLeds; // jen pro PUM-A
+  final bool hasLeds; // pro PUM-A i PUM-B (LED kroužek na adrese baseAddress)
   final ButtonSide? buttonSide; // jen pro PUM-A s 1 tlačítkem
   final DistConfig? distConfig; // jen pro DIST
 
@@ -99,8 +99,13 @@ class PumaModule {
           buttonSide: buttonSide,
         );
 
-  const PumaModule.pumB({required int address})
-      : this(type: ModuleType.pumB, baseAddress: address, buttonCount: 1);
+  const PumaModule.pumB({required int address, bool hasLeds = false})
+      : this(
+          type: ModuleType.pumB,
+          baseAddress: address,
+          buttonCount: 1,
+          hasLeds: hasLeds,
+        );
 
   const PumaModule.pumC({required int address})
       : this(type: ModuleType.pumC, baseAddress: address, buttonCount: 2);
@@ -131,7 +136,10 @@ class PumaModule {
           ],
         ];
       case ModuleType.pumB:
-        return [Device(type: DeviceType.btn, id: baseAddress)];
+        return [
+          Device(type: DeviceType.btn, id: baseAddress),
+          if (hasLeds) Device(type: DeviceType.leds, id: baseAddress),
+        ];
       case ModuleType.pumC:
         return [
           Device(type: DeviceType.btn, id: 1000 + baseAddress),
@@ -156,7 +164,7 @@ class PumaModule {
         if (hasLeds) parts.add('LEDS');
         return parts.join(' · ');
       case ModuleType.pumB:
-        return 'PUM-B @$baseAddress';
+        return hasLeds ? 'PUM-B @$baseAddress · LEDS' : 'PUM-B @$baseAddress';
       case ModuleType.pumC:
         return 'PUM-C @$baseAddress';
       case ModuleType.dist:
