@@ -457,18 +457,77 @@ class _GroupSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPumA =
+        modules.isNotEmpty && modules.first.type == ModuleType.pumA;
+    final ledModules =
+        isPumA ? modules.where((m) => m.hasLeds).toList() : const <PumaModule>[];
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '$label  ·  ${modules.length}',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: color,
-              fontSize: 13,
-            ),
+          Row(
+            children: [
+              Text(
+                '$label  ·  ${modules.length}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                  fontSize: 13,
+                ),
+              ),
+              if (isPumA) ...[
+                const Spacer(),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  iconSize: 18,
+                  tooltip: ledModules.isEmpty
+                      ? 'Žádné moduly s LEDS'
+                      : 'Rozsvítit všechny LEDS (${ledModules.length})',
+                  icon: Icon(Icons.lightbulb,
+                      color: ledModules.isEmpty
+                          ? Colors.grey
+                          : Colors.amber.shade700),
+                  onPressed: ledModules.isEmpty
+                      ? null
+                      : () => _bulkLeds(context, ledModules, on: true),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  iconSize: 18,
+                  tooltip: ledModules.isEmpty
+                      ? 'Žádné moduly s LEDS'
+                      : 'Zhasnout všechny LEDS (${ledModules.length})',
+                  icon: const Icon(Icons.lightbulb_outline),
+                  onPressed: ledModules.isEmpty
+                      ? null
+                      : () => _bulkLeds(context, ledModules, on: false),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  iconSize: 18,
+                  tooltip: 'AHOJ na všechny displeje (broadcast)',
+                  icon: const Icon(Icons.text_fields, color: Colors.blue),
+                  onPressed: () => _bulkDisp(context, 'AHOJ'),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  iconSize: 18,
+                  tooltip: 'Smazat text na všech displejích (broadcast)',
+                  icon: const Icon(Icons.format_clear),
+                  onPressed: () => _bulkDisp(context, ''),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 6),
           Wrap(
@@ -499,6 +558,29 @@ class _GroupSection extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _bulkLeds(
+      BuildContext context, List<PumaModule> ledModules,
+      {required bool on}) async {
+    final state = context.read<AppState>();
+    for (final m in ledModules) {
+      if (on) {
+        await state.sendLedsOn(unitId: unitId, ledsAddress: m.baseAddress);
+      } else {
+        await state.sendLedsOff(unitId: unitId, ledsAddress: m.baseAddress);
+      }
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+  }
+
+  Future<void> _bulkDisp(BuildContext context, String text) async {
+    // DISP adresa 0 = broadcast na všechny displeje jednotky (1 MQTT zpráva).
+    await context.read<AppState>().sendDispData(
+          unitId: unitId,
+          dispAddress: 0,
+          data: text,
+        );
   }
 }
 
