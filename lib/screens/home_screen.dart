@@ -38,51 +38,64 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     showModalBottomSheet(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Vybrat broker',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-            ...List.generate(state.profiles.length, (i) {
-              final p = state.profiles[i];
-              final isActive = i == state.activeProfileIndex;
-              return ListTile(
-                leading: Icon(
-                  isActive ? Icons.check_circle : Icons.circle_outlined,
-                  color: isActive ? Colors.green : Colors.grey,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final maxHeight = MediaQuery.of(ctx).size.height * 0.8;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Vybrat broker',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
-                title: Text(
-                  p.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: state.profiles.length,
+                    itemBuilder: (_, i) {
+                      final p = state.profiles[i];
+                      final isActive = i == state.activeProfileIndex;
+                      return ListTile(
+                        leading: Icon(
+                          isActive ? Icons.check_circle : Icons.circle_outlined,
+                          color: isActive ? Colors.green : Colors.grey,
+                        ),
+                        title: Text(
+                          p.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text('${p.broker}:${p.port}'),
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          state.disconnect();
+                          await state.selectProfile(i);
+                          await state.connect();
+                        },
+                      );
+                    },
+                  ),
                 ),
-                subtitle: Text('${p.broker}:${p.port}'),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  state.disconnect();
-                  await state.selectProfile(i);
-                  await state.connect();
-                },
-              );
-            }),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.add),
-              title: const Text('Přidat nový profil'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-              },
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.add),
+                  title: const Text('Přidat nový profil'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
