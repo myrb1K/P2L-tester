@@ -111,7 +111,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (_) => ApplyTemplateSheet(preselectedUnitId: widget.unitId),
+      builder: (_) => ApplyTemplateSheet(preselectedUnitIds: {widget.unitId}),
     );
   }
 

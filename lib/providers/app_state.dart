@@ -1001,6 +1001,85 @@ class AppState extends ChangeNotifier {
     await prefs.setString('device_templates', DeviceTemplate.listToJson(_templates));
   }
 
+  /// Serializuje broker profily, šablony a LED pattern do jednoho JSON stringu.
+  /// WiFi credentials se z bezpečnostních důvodů neexportují.
+  String exportSettingsJson() {
+    return const JsonEncoder.withIndent('  ').convert({
+      'version': 1,
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'brokerProfiles': _profiles.map((p) => p.toJson()).toList(),
+      'deviceTemplates': _templates.map((t) => t.toJson()).toList(),
+      'ledPattern': {
+        'on': ledsOn,
+        'off': ledsOff,
+        'color': ledColor,
+      },
+    });
+  }
+
+  /// Importuje nastavení z JSON stringu — přepíše broker profily, šablony,
+  /// LED pattern. Aktivní profil se zachová pokud existuje, jinak `-1`.
+  /// Vrací `null` při úspěchu, jinak chybovou zprávu.
+  Future<String?> importSettingsJson(String jsonString) async {
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(jsonString);
+    } catch (e) {
+      return 'Nelze parsovat JSON: $e';
+    }
+    if (decoded is! Map<String, dynamic>) {
+      return 'Neplatný formát: očekáván objekt';
+    }
+
+    try {
+      final activeBefore = _activeProfileIndex >= 0 &&
+              _activeProfileIndex < _profiles.length
+          ? _profiles[_activeProfileIndex].name
+          : null;
+
+      final profilesRaw = decoded['brokerProfiles'];
+      if (profilesRaw is List) {
+        _profiles = profilesRaw
+            .whereType<Map<String, dynamic>>()
+            .map(BrokerProfile.fromJson)
+            .toList();
+      }
+
+      final templatesRaw = decoded['deviceTemplates'];
+      if (templatesRaw is List) {
+        _templates = templatesRaw
+            .whereType<Map<String, dynamic>>()
+            .map(DeviceTemplate.fromJson)
+            .toList();
+      }
+
+      final ledRaw = decoded['ledPattern'];
+      if (ledRaw is Map<String, dynamic>) {
+        ledsOn = (ledRaw['on'] as num?)?.toInt() ?? ledsOn;
+        ledsOff = (ledRaw['off'] as num?)?.toInt() ?? ledsOff;
+        ledColor = (ledRaw['color'] as num?)?.toInt() ?? ledColor;
+      }
+
+      // Zkusit zachovat aktivní profil podle názvu, jinak -1.
+      _activeProfileIndex = activeBefore == null
+          ? -1
+          : _profiles.indexWhere((p) => p.name == activeBefore);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('broker_profiles', BrokerProfile.listToJson(_profiles));
+      await prefs.setInt('active_profile', _activeProfileIndex);
+      await prefs.setString('device_templates', DeviceTemplate.listToJson(_templates));
+      await prefs.setInt('leds_on', ledsOn);
+      await prefs.setInt('leds_off', ledsOff);
+      await prefs.setInt('led_color', ledColor);
+
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return 'Chyba při importu: $e';
+    }
+  }
+
   void scanAll() {
     final payload = CommandService.buildGetParamCommand();
     for (final unitId in _units.keys) {
