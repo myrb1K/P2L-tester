@@ -28,6 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _useSsl = false;
   bool _obscurePassword = true;
   int? _editingIndex;
+  bool _addingNew = false;
 
   @override
   void initState() {
@@ -35,20 +36,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _nameController = TextEditingController();
     _brokerController = TextEditingController();
     _portController = TextEditingController(text: '1883');
-    _usernameController = TextEditingController();
-    _passwordController = TextEditingController();
+    _usernameController = TextEditingController(text: 'smartbox_user');
+    _passwordController = TextEditingController(text: 'smartbox2022');
 
     final state = context.read<AppState>();
     _ledsOnController = TextEditingController(text: state.ledsOn.toString());
     _ledsOffController = TextEditingController(text: state.ledsOff.toString());
     _selectedColor = state.ledColor;
-
-    // Pokud existuje aktivní profil, načti ho do formuláře
-    if (state.activeProfileIndex >= 0 &&
-        state.activeProfileIndex < state.profiles.length) {
-      _loadProfile(state.profiles[state.activeProfileIndex],
-          state.activeProfileIndex);
-    }
   }
 
   @override
@@ -65,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _loadProfile(BrokerProfile profile, int index) {
     _editingIndex = index;
+    _addingNew = false;
     _nameController.text = profile.name;
     _brokerController.text = profile.broker;
     _portController.text = profile.port.toString();
@@ -75,12 +70,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _clearForm() {
     _editingIndex = null;
+    _addingNew = false;
     _nameController.clear();
     _brokerController.clear();
     _portController.text = '1883';
     _usernameController.text = 'smartbox_user';
     _passwordController.text = 'smartbox2022';
     _useSsl = false;
+  }
+
+  void _toggleEdit(BrokerProfile profile, int index) {
+    setState(() {
+      if (_editingIndex == index && !_addingNew) {
+        _clearForm();
+      } else {
+        _loadProfile(profile, index);
+      }
+    });
+  }
+
+  void _toggleAddNew() {
+    setState(() {
+      if (_addingNew) {
+        _clearForm();
+      } else {
+        _clearForm();
+        _addingNew = true;
+      }
+    });
   }
 
   BrokerProfile _profileFromForm() {
@@ -94,42 +111,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Vrací true při úspěchu, false při chybě (duplicita, validace).
-  Future<bool> _save() async {
-    if (!_formKey.currentState!.validate()) return false;
+  /// Vrací index uloženého profilu, null při chybě.
+  Future<int?> _save() async {
+    if (!_formKey.currentState!.validate()) return null;
 
     final state = context.read<AppState>();
     final profile = _profileFromForm();
+    final originalIndex = _editingIndex;
 
-    final error = _editingIndex != null
-        ? await state.updateProfile(_editingIndex!, profile)
+    final error = originalIndex != null
+        ? await state.updateProfile(originalIndex, profile)
         : await state.addProfile(profile);
 
-    if (!mounted) return false;
+    if (!mounted) return null;
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error), backgroundColor: Colors.red),
       );
-      return false;
+      return null;
     }
 
-    _editingIndex ??= state.profiles.length - 1;
-    setState(() {});
+    final savedIndex = originalIndex ?? state.profiles.length - 1;
+    setState(_clearForm);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Profil uložen')),
     );
-    return true;
+    return savedIndex;
   }
 
   Future<void> _connectAndTest() async {
-    final saved = await _save();
-    if (!saved || !mounted) return;
+    final savedIndex = await _save();
+    if (savedIndex == null || !mounted) return;
 
     final state = context.read<AppState>();
-    if (_editingIndex != null) {
-      await state.selectProfile(_editingIndex!);
-    }
+    await state.selectProfile(savedIndex);
     final result = await state.connect();
 
     if (mounted) {
@@ -167,7 +183,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed == true) {
       await state.deleteProfile(index);
       if (_editingIndex == index) {
-        setState(() => _clearForm());
+        setState(_clearForm);
       } else {
         setState(() {});
       }
@@ -274,6 +290,114 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildProfileForm(AppState state) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextFormField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: 'Název profilu',
+              hintText: 'např. Lékárna, Sklad…',
+              prefixIcon: Icon(Icons.label),
+              border: OutlineInputBorder(),
+            ),
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) {
+                return 'Zadejte název';
+              }
+              if (state.isProfileNameTaken(v, excludeIndex: _editingIndex)) {
+                return 'Tento název už existuje';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _brokerController,
+            decoration: const InputDecoration(
+              labelText: 'Broker adresa',
+              hintText: 'mqtt.lekarna.smartci4.com',
+              prefixIcon: Icon(Icons.dns),
+              border: OutlineInputBorder(),
+            ),
+            validator: (v) => v == null || v.trim().isEmpty
+                ? 'Zadejte adresu brokeru'
+                : null,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _portController,
+            decoration: const InputDecoration(
+              labelText: 'Port',
+              hintText: '1883',
+              prefixIcon: Icon(Icons.settings_ethernet),
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.number,
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) return 'Zadejte port';
+              final port = int.tryParse(v.trim());
+              if (port == null || port < 1 || port > 65535) {
+                return 'Port musi byt 1-65535';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _usernameController,
+            decoration: const InputDecoration(
+              labelText: 'Username',
+              prefixIcon: Icon(Icons.person),
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _passwordController,
+            obscureText: _obscurePassword,
+            decoration: InputDecoration(
+              labelText: 'Password',
+              prefixIcon: const Icon(Icons.lock),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(_obscurePassword
+                    ? Icons.visibility
+                    : Icons.visibility_off),
+                onPressed: () =>
+                    setState(() => _obscurePassword = !_obscurePassword),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            title: const Text('SSL/TLS'),
+            value: _useSsl,
+            onChanged: (v) => setState(() => _useSsl = v),
+            secondary: const Icon(Icons.security),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save),
+            label: Text(_editingIndex != null
+                ? 'Uložit změny'
+                : 'Uložit nový profil'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _connectAndTest,
+            icon: const Icon(Icons.wifi),
+            label: const Text('Uložit a připojit'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
@@ -315,11 +439,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Seznam uložených profilů
-                if (state.profiles.isNotEmpty) ...[
-                  const Text('Uložené profily',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
+                const Text('Uložené profily',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                if (state.profiles.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Žádné uložené profily',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  )
+                else
                   ReorderableListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -328,195 +459,125 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onReorder: (oldIndex, newIndex) {
                       // Po reorderu by se _editingIndex mohl rozejít s
                       // reálnou pozicí profilu — raději vyčistíme formulář.
-                      setState(() => _clearForm());
+                      setState(_clearForm);
                       state.reorderProfiles(oldIndex, newIndex);
                     },
                     itemBuilder: (ctx, i) {
                       final p = state.profiles[i];
                       final isActive = i == state.activeProfileIndex;
+                      final isEditing = _editingIndex == i && !_addingNew;
+                      final scheme = Theme.of(context).colorScheme;
                       return Card(
                         key: ValueKey('profile_${p.name}_$i'),
                         color: isActive ? Colors.blue.withAlpha(20) : null,
-                        child: ListTile(
-                          leading: Icon(
-                            isActive
-                                ? Icons.check_circle
-                                : Icons.circle_outlined,
-                            color: isActive ? Colors.green : Colors.grey,
-                          ),
-                          title: Text(
-                            p.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text('${p.broker}:${p.port}'),
-                          onTap: () {
-                            setState(() => _loadProfile(p, i));
-                          },
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (!isActive)
-                                IconButton(
-                                  icon: const Icon(Icons.play_arrow, size: 20),
-                                  tooltip: 'Připojit',
-                                  onPressed: () async {
-                                    await state.selectProfile(i);
-                                    if (!context.mounted) return;
-                                    final result = await state.connect();
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(result
-                                              ? 'Připojeno k ${p.name}'
-                                              : 'Chyba: ${state.lastError}'),
-                                          backgroundColor: result
-                                              ? Colors.green
-                                              : Colors.red,
-                                        ),
-                                      );
-                                      if (result) Navigator.of(context).pop();
-                                    }
-                                  },
-                                ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 20),
-                                onPressed: () => _deleteProfile(i),
+                        shape: isEditing
+                            ? RoundedRectangleBorder(
+                                side: BorderSide(
+                                    color: scheme.primary, width: 2),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
+                        child: Column(
+                          children: [
+                            ListTile(
+                              leading: Icon(
+                                isActive
+                                    ? Icons.check_circle
+                                    : Icons.circle_outlined,
+                                color: isActive ? Colors.green : Colors.grey,
                               ),
-                              ReorderableDragStartListener(
-                                index: i,
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 4),
-                                  child: Icon(Icons.drag_handle,
-                                      color: Colors.grey),
-                                ),
+                              title: Text(
+                                p.name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold),
                               ),
-                            ],
-                          ),
+                              subtitle: Text('${p.broker}:${p.port}'),
+                              onTap: () => _toggleEdit(p, i),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (!isActive)
+                                    IconButton(
+                                      icon: const Icon(Icons.play_arrow,
+                                          size: 20),
+                                      tooltip: 'Připojit',
+                                      onPressed: () async {
+                                        await state.selectProfile(i);
+                                        if (!context.mounted) return;
+                                        final result = await state.connect();
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(result
+                                                  ? 'Připojeno k ${p.name}'
+                                                  : 'Chyba: ${state.lastError}'),
+                                              backgroundColor: result
+                                                  ? Colors.green
+                                                  : Colors.red,
+                                            ),
+                                          );
+                                          if (result) {
+                                            Navigator.of(context).pop();
+                                          }
+                                        }
+                                      },
+                                    ),
+                                  IconButton(
+                                    icon: Icon(
+                                      isEditing
+                                          ? Icons.close
+                                          : Icons.edit_outlined,
+                                      size: 20,
+                                    ),
+                                    tooltip: isEditing
+                                        ? 'Zavřít editaci'
+                                        : 'Upravit',
+                                    onPressed: () => _toggleEdit(p, i),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline,
+                                        size: 20),
+                                    onPressed: () => _deleteProfile(i),
+                                  ),
+                                  ReorderableDragStartListener(
+                                    index: i,
+                                    child: const Padding(
+                                      padding: EdgeInsets.symmetric(
+                                          horizontal: 4),
+                                      child: Icon(Icons.drag_handle,
+                                          color: Colors.grey),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (isEditing)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                    16, 0, 16, 16),
+                                child: _buildProfileForm(state),
+                              ),
+                          ],
                         ),
                       );
                     },
                   ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _toggleAddNew,
+                  icon: Icon(_addingNew ? Icons.close : Icons.add),
+                  label: Text(_addingNew ? 'Zrušit nový profil' : 'Nový profil'),
+                ),
+                if (_addingNew) ...[
                   const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => setState(() => _clearForm()),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Novy profil'),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: _buildProfileForm(state),
+                    ),
                   ),
-                  const Divider(height: 32),
                 ],
-                // Formulář
-                Text(
-                  _editingIndex != null ? 'Upravit profil' : 'Novy profil',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-                Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextFormField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Název profilu',
-                          hintText: 'např. Lékárna, Sklad…',
-                          prefixIcon: Icon(Icons.label),
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Zadejte název';
-                          }
-                          if (state.isProfileNameTaken(v,
-                              excludeIndex: _editingIndex)) {
-                            return 'Tento název už existuje';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _brokerController,
-                        decoration: const InputDecoration(
-                          labelText: 'Broker adresa',
-                          hintText: 'mqtt.lekarna.smartci4.com',
-                          prefixIcon: Icon(Icons.dns),
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) => v == null || v.trim().isEmpty
-                            ? 'Zadejte adresu brokeru'
-                            : null,
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _portController,
-                        decoration: const InputDecoration(
-                          labelText: 'Port',
-                          hintText: '1883',
-                          prefixIcon: Icon(Icons.settings_ethernet),
-                          border: OutlineInputBorder(),
-                        ),
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Zadejte port';
-                          final port = int.tryParse(v.trim());
-                          if (port == null || port < 1 || port > 65535) {
-                            return 'Port musi byt 1-65535';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _usernameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Username',
-                          prefixIcon: Icon(Icons.person),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock),
-                          border: const OutlineInputBorder(),
-                          suffixIcon: IconButton(
-                            icon: Icon(_obscurePassword
-                                ? Icons.visibility
-                                : Icons.visibility_off),
-                            onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SwitchListTile(
-                        title: const Text('SSL/TLS'),
-                        value: _useSsl,
-                        onChanged: (v) => setState(() => _useSsl = v),
-                        secondary: const Icon(Icons.security),
-                      ),
-                      const SizedBox(height: 24),
-                      FilledButton.icon(
-                        onPressed: _save,
-                        icon: const Icon(Icons.save),
-                        label: Text(_editingIndex != null
-                            ? 'Uložit změny'
-                            : 'Uložit nový profil'),
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: _connectAndTest,
-                        icon: const Icon(Icons.wifi),
-                        label: const Text('Uložit a připojit'),
-                      ),
-                    ],
-                  ),
-                ),
                 const Divider(height: 32),
                 // LED pattern
                 const Text('Schema LED pasku',
@@ -561,6 +622,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 8,
                   children: [
                     for (final entry in const [
                       (0, 'RED', Color(0xFFE53935)),
