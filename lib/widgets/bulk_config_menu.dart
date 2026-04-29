@@ -3,8 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
+import 'apply_template_sheet.dart';
 
-enum _BulkAction { broker, wifi, dispBrightness, unitBrightness }
+enum _BulkAction { broker, wifi, dispBrightness, unitBrightness, applyTemplate }
 
 enum _BrokerMode { existing, newProfile }
 
@@ -30,6 +31,8 @@ class BulkConfigMenu extends StatelessWidget {
                 await _showDispBrightnessDialog(context, state);
               case _BulkAction.unitBrightness:
                 await _showUnitBrightnessDialog(context, state);
+              case _BulkAction.applyTemplate:
+                _showApplyTemplateSheet(context, state);
             }
           },
           itemBuilder: (context) => [
@@ -70,6 +73,16 @@ class BulkConfigMenu extends StatelessWidget {
                 title: const Text('Jas jednotky'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných · 0–100 %')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BulkAction.applyTemplate,
+              child: ListTile(
+                leading: const Icon(Icons.dashboard_customize),
+                title: const Text('Aplikovat šablonu'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných')
                     : const Text('Nejprve vyberte P2L moduly'),
               ),
             ),
@@ -116,6 +129,16 @@ class BulkConfigMenu extends StatelessWidget {
     if (result != null && context.mounted) {
       await state.sendBulkUnitBrightness(result);
     }
+  }
+
+  void _showApplyTemplateSheet(BuildContext context, AppState state) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ApplyTemplateSheet(
+        preselectedUnitIds: state.selectedUnits,
+      ),
+    );
   }
 
   Future<void> _showWifiDialog(BuildContext context, AppState state) async {

@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -170,6 +174,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _exportSettings(AppState state) async {
+    final json = state.exportSettingsJson();
+    final stamp = DateTime.now().toIso8601String().substring(0, 16).replaceAll(':', '-');
+    final defaultName = 'p2l_tester_settings_$stamp.json';
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Uložit nastavení',
+        fileName: defaultName,
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        bytes: utf8.encode(json),
+      );
+      if (path == null) return;
+      // Na desktopech `saveFile` ne vždy zapíše obsah — udělej to ručně.
+      final file = File(path);
+      if (!await file.exists() || await file.length() == 0) {
+        await file.writeAsString(json);
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('Exportováno do $path'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Export selhal: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _importSettings(AppState state) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Načíst nastavení',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final String content;
+    try {
+      if (file.bytes != null) {
+        content = utf8.decode(file.bytes!);
+      } else if (file.path != null) {
+        content = await File(file.path!).readAsString();
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Nelze načíst obsah souboru'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Čtení souboru selhalo: $e'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Přepsat nastavení?'),
+        content: const Text(
+          'Stávající broker profily, šablony a LED pattern budou nahrazeny obsahem souboru. Pokračovat?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Zrušit'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Přepsat'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final error = await state.importSettingsJson(content);
+    if (!mounted) return;
+    if (error != null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    setState(() {
+      _clearForm();
+      _ledsOnController.text = state.ledsOn.toString();
+      _ledsOffController.text = state.ledsOff.toString();
+      _selectedColor = state.ledColor;
+    });
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Nastavení naimportováno'), backgroundColor: Colors.green),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
@@ -177,6 +281,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return Scaffold(
           appBar: AppBar(
             title: const Text('Nastavení MQTT'),
+            actions: [
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.import_export),
+                tooltip: 'Export / Import nastavení',
+                onSelected: (v) {
+                  if (v == 'export') _exportSettings(state);
+                  if (v == 'import') _importSettings(state);
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'export',
+                    child: ListTile(
+                      leading: Icon(Icons.upload_file),
+                      title: Text('Export nastavení'),
+                      subtitle: Text('Profily, šablony, LED pattern do JSON'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'import',
+                    child: ListTile(
+                      leading: Icon(Icons.download),
+                      title: Text('Import nastavení'),
+                      subtitle: Text('Přepíše stávající profily a šablony'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
           body: SingleChildScrollView(
             padding: const EdgeInsets.all(16),

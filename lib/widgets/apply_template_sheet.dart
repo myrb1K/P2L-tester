@@ -6,10 +6,10 @@ import '../models/module.dart';
 import '../providers/app_state.dart';
 
 /// Bottom sheet pro aplikaci šablony na jednotky.
-/// [preselectedUnitId] — pokud je zadán, zaškrtne se automaticky.
+/// [preselectedUnitIds] — jednotky, které budou v sheetu od začátku zaškrtnuté.
 class ApplyTemplateSheet extends StatefulWidget {
-  final String? preselectedUnitId;
-  const ApplyTemplateSheet({super.key, this.preselectedUnitId});
+  final Set<String>? preselectedUnitIds;
+  const ApplyTemplateSheet({super.key, this.preselectedUnitIds});
 
   @override
   State<ApplyTemplateSheet> createState() => _ApplyTemplateSheetState();
@@ -22,8 +22,8 @@ class _ApplyTemplateSheetState extends State<ApplyTemplateSheet> {
   @override
   void initState() {
     super.initState();
-    if (widget.preselectedUnitId != null) {
-      _selectedUnits.add(widget.preselectedUnitId!);
+    if (widget.preselectedUnitIds != null) {
+      _selectedUnits.addAll(widget.preselectedUnitIds!);
     }
   }
 
