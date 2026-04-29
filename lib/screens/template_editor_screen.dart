@@ -78,6 +78,21 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
     setState(() => _modules.removeAt(index));
   }
 
+  Future<void> _editAt(int index) async {
+    final existing = _modules.map((m) => m.baseAddress).toSet();
+    final result = await showDialog<AddModuleResult>(
+      context: context,
+      builder: (_) => AddModuleDialog(
+        existingAddresses: existing,
+        hasPumAWithRoom: hasPumAWithButtonRoom(_modules),
+        initial: _modules[index],
+      ),
+    );
+    if (result != null) {
+      setState(() => _modules[index] = result.module);
+    }
+  }
+
   Future<void> _save(AppState state) async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
@@ -190,6 +205,7 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
                         itemBuilder: (context, i) => ModuleTile(
                           module: _modules[i],
                           compact: true,
+                          onEdit: () => _editAt(i),
                           onDelete: () => _removeAt(i),
                         ),
                       ),

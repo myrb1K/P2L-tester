@@ -5,6 +5,7 @@ import '../models/module.dart';
 class ModuleTile extends StatelessWidget {
   final PumaModule module;
   final VoidCallback? onReplace;
+  final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final bool compact;
 
@@ -12,6 +13,7 @@ class ModuleTile extends StatelessWidget {
     super.key,
     required this.module,
     this.onReplace,
+    this.onEdit,
     this.onDelete,
     this.compact = false,
   });
@@ -159,14 +161,24 @@ class ModuleTile extends StatelessWidget {
           _subtitle(),
           style: const TextStyle(fontSize: 11),
         ),
-        trailing: (onReplace != null || onDelete != null)
+        trailing: (onReplace != null || onEdit != null || onDelete != null)
             ? PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, size: 20),
                 onSelected: (v) {
                   if (v == 'replace') onReplace?.call();
+                  if (v == 'edit') onEdit?.call();
                   if (v == 'delete') onDelete?.call();
                 },
                 itemBuilder: (_) => [
+                  if (onEdit != null)
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Row(children: [
+                        Icon(Icons.edit_outlined, size: 18),
+                        SizedBox(width: 8),
+                        Text('Upravit'),
+                      ]),
+                    ),
                   if (onReplace != null)
                     const PopupMenuItem(
                       value: 'replace',
