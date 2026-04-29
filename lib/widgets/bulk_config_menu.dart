@@ -5,7 +5,14 @@ import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
 import 'apply_template_sheet.dart';
 
-enum _BulkAction { broker, wifi, dispBrightness, unitBrightness, applyTemplate }
+enum _BulkAction {
+  broker,
+  wifi,
+  dispBrightness,
+  unitBrightness,
+  applyTemplate,
+  restart,
+}
 
 enum _BrokerMode { existing, newProfile }
 
@@ -33,6 +40,8 @@ class BulkConfigMenu extends StatelessWidget {
                 await _showUnitBrightnessDialog(context, state);
               case _BulkAction.applyTemplate:
                 _showApplyTemplateSheet(context, state);
+              case _BulkAction.restart:
+                await _showRestartDialog(context, state);
             }
           },
           itemBuilder: (context) => [
@@ -81,6 +90,16 @@ class BulkConfigMenu extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.dashboard_customize),
                 title: const Text('Aplikovat šablonu'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BulkAction.restart,
+              child: ListTile(
+                leading: const Icon(Icons.power_settings_new),
+                title: const Text('Restart jednotek'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných')
                     : const Text('Nejprve vyberte P2L moduly'),
@@ -139,6 +158,56 @@ class BulkConfigMenu extends StatelessWidget {
         preselectedUnitIds: state.selectedUnits,
       ),
     );
+  }
+
+  Future<void> _showRestartDialog(BuildContext context, AppState state) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hromadný restart'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Restart bude odeslán na ${state.selectedCount} P2L modulů.'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withAlpha(30),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'P2L moduly se restartují a po nabootování se znovu '
+                      'přihlásí ALIVE zprávou.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Zrušit'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Restartovat'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && context.mounted) {
+      await state.sendBulkRestart();
+    }
   }
 
   Future<void> _showWifiDialog(BuildContext context, AppState state) async {

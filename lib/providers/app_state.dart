@@ -521,15 +521,27 @@ class AppState extends ChangeNotifier {
 
       final lookupId = unitId.startsWith('u') ? unitId.substring(1) : unitId;
 
+      String effectiveId;
       if (_units.containsKey(lookupId)) {
         _units[lookupId]!.updateFromGetParam(args);
+        effectiveId = lookupId;
       } else if (_units.containsKey(unitId)) {
         _units[unitId]!.updateFromGetParam(args);
+        effectiveId = unitId;
       } else {
         final unit = P2LUnit(id: lookupId);
         unit.updateFromGetParam(args);
         _units[lookupId] = unit;
         _statusMessage = 'Nalezeno ${_units.length} P2L modulů';
+        effectiveId = lookupId;
+      }
+
+      // Po manuálním ověření (get_param) dotáhni devices hned, ať uživatel
+      // nemusí čekat na další ALIVE. Guard přes _initialFetchDone zajistí,
+      // že se nevolá podruhé, až přijde nejbližší ALIVE.
+      if (!_awaitingAliveAfterRestart.contains(effectiveId) &&
+          _initialFetchDone.add(effectiveId)) {
+        Future.microtask(() => fetchDevices(effectiveId));
       }
       notifyListeners();
     }
@@ -805,6 +817,30 @@ class AppState extends ChangeNotifier {
     final cmd = CommandService.buildRestartCommand(id);
     _mqttService.publish(cmd.topic, cmd.payload);
     _deviceActionStatus = 'Restart jednotky $id odeslán';
+    notifyListeners();
+  }
+
+  /// Hromadný restart: pošle RESTART všem vybraným jednotkám s 100ms pauzou.
+  /// Každou jednotku zaregistruje do `_awaitingAliveAfterRestart`, aby si
+  /// `_handleAlive` po jejím návratu sám znovu stáhnul devices.
+  Future<void> sendBulkRestart() async {
+    if (_selectedUnits.isEmpty) return;
+    final targets = _selectedUnits.toList();
+    var sent = 0;
+    for (final unitId in targets) {
+      final id = _normUnitId(unitId);
+      final cmd = CommandService.buildRestartCommand(id);
+      _awaitingAliveAfterRestart.add(id);
+      _restartSentAt[id] = DateTime.now();
+      _mqttService.publish(cmd.topic, cmd.payload);
+      sent++;
+      _statusMessage = 'Restart: $sent / ${targets.length}';
+      notifyListeners();
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    _statusMessage = 'Restart odeslán na $sent P2L modulů';
     notifyListeners();
   }
 
