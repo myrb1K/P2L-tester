@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../main.dart';
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
 
@@ -406,6 +407,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           appBar: AppBar(
             title: const Text('Nastavení MQTT'),
             actions: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Center(
+                  child: Text(
+                    'v$appVersion',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.import_export),
                 tooltip: 'Export / Import nastavení',
