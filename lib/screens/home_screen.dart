@@ -416,7 +416,7 @@ class _UnitCard extends StatelessWidget {
       child: InkWell(
         onTap: onToggle,
         child: Padding(
-          padding: const EdgeInsets.only(left: 0, right: 8, top: 0, bottom: 0),
+          padding: const EdgeInsets.only(left: 0, right: 8, top: 1, bottom: 1),
           child: Row(
             children: [
               Checkbox(
@@ -471,7 +471,7 @@ class _UnitCard extends StatelessWidget {
                 offset: const Offset(-2, 2),
                 label: Text('$moduleCount'),
                 child: IconButton(
-                  icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
+                  icon: const Icon(Icons.device_hub, size: 28, color: Colors.blueGrey),
                   onPressed: onOpenDetail,
                   tooltip: 'Seznam zařízení',
                   visualDensity: VisualDensity.compact,
@@ -479,16 +479,18 @@ class _UnitCard extends StatelessWidget {
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
               ),
+              const SizedBox(width: 6),
               IconButton(
-                icon: const Icon(Icons.info_outline, size: 20),
+                icon: const Icon(Icons.info_outline, size: 28),
                 onPressed: () => _showUnitInfo(context, unit),
                 tooltip: 'Info',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
+              const SizedBox(width: 6),
               IconButton(
-                icon: const Icon(Icons.refresh, size: 20, color: Colors.green),
+                icon: const Icon(Icons.refresh, size: 28, color: Colors.green),
                 onPressed: onGetParam,
                 tooltip: 'Obnovit',
                 visualDensity: VisualDensity.compact,
