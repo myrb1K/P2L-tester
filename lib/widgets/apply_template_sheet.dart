@@ -141,14 +141,19 @@ class _ApplyTemplateSheetState extends State<ApplyTemplateSheet> {
                   Expanded(
                     child: units.isEmpty
                         ? const Center(child: Text('Žádné jednotky'))
-                        : ListView.builder(
+                        : ListView.separated(
                             controller: scrollCtrl,
                             itemCount: units.length,
+                            separatorBuilder: (_, _) => const Divider(
+                              height: 1,
+                              thickness: 1,
+                            ),
                             itemBuilder: (context, i) {
                               final u = units[i];
                               final checked = _selectedUnits.contains(u.id);
+                              final moduleCount =
+                                  state.modulesForUnit(u.id)?.length;
                               return CheckboxListTile(
-                                dense: true,
                                 value: checked,
                                 onChanged: (v) => setState(() {
                                   if (v == true) {
@@ -157,10 +162,30 @@ class _ApplyTemplateSheetState extends State<ApplyTemplateSheet> {
                                     _selectedUnits.remove(u.id);
                                   }
                                 }),
-                                title: Text(u.displayName),
-                                subtitle: Text(
-                                  '${u.id}${u.isOnline ? "" : " · offline"}',
-                                  style: const TextStyle(fontSize: 11),
+                                title: Row(
+                                  children: [
+                                    Text(
+                                      u.displayName,
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: u.isOnline ? null : Colors.grey,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Badge(
+                                      isLabelVisible: moduleCount != null,
+                                      backgroundColor: Colors.blueGrey,
+                                      textColor: Colors.white,
+                                      offset: const Offset(-2, 2),
+                                      label: Text('$moduleCount'),
+                                      child: const Icon(
+                                        Icons.device_hub,
+                                        size: 24,
+                                        color: Colors.blueGrey,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 secondary: Container(
                                   width: 8,
