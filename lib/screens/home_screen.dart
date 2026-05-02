@@ -30,9 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showBrokerPicker(BuildContext context, AppState state) {
     if (state.profiles.isEmpty) {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const SettingsScreen()),
-      );
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
       return;
     }
     showModalBottomSheet(
@@ -48,8 +46,10 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 const Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('Vybrat broker',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  child: Text(
+                    'Vybrat broker',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                 ),
                 Flexible(
                   child: ListView.builder(
@@ -63,10 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           isActive ? Icons.check_circle : Icons.circle_outlined,
                           color: isActive ? Colors.green : Colors.grey,
                         ),
-                        title: Text(
-                          p.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Text('${p.broker}:${p.port}'),
                         onTap: () async {
                           Navigator.pop(ctx);
@@ -84,9 +81,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: const Text('Přidat nový profil'),
                   onTap: () {
                     Navigator.pop(ctx);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                    );
+                    Navigator.of(
+                      context,
+                    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
                   },
                 ),
                 const SizedBox(height: 8),
@@ -139,9 +136,9 @@ class _HomeScreenState extends State<HomeScreen> {
               IconButton(
                 icon: const Icon(Icons.folder_special),
                 tooltip: 'Šablony',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const TemplatesScreen()),
-                ),
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const TemplatesScreen())),
               ),
               const BulkConfigMenu(),
               if (state.units.isNotEmpty)
@@ -153,9 +150,9 @@ class _HomeScreenState extends State<HomeScreen> {
               IconButton(
                 icon: const Icon(Icons.settings),
                 tooltip: 'Nastavení',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                ),
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
               ),
             ],
           ),
@@ -167,8 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSubmit: _sendManualGetParam,
                 isConnected: state.isConnected,
               ),
-              if (state.units.isNotEmpty)
-                _SelectionBar(state: state),
+              if (state.units.isNotEmpty) _SelectionBar(state: state),
               Expanded(
                 child: state.units.isEmpty
                     ? _EmptyState(isConnected: state.isConnected)
@@ -226,15 +222,13 @@ class _StatusBar extends StatelessWidget {
     final message = !state.isConnected
         ? 'Odpojeno – otevřete Nastavení'
         : state.statusMessage.isNotEmpty
-            ? state.statusMessage
-            : 'Připojeno';
+        ? state.statusMessage
+        : 'Připojeno';
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: state.isConnected
-          ? Colors.green.withAlpha(25)
-          : Colors.orange.withAlpha(25),
+      color: state.isConnected ? Colors.green.withAlpha(25) : Colors.orange.withAlpha(25),
       child: Text(
         message,
         style: TextStyle(
@@ -271,18 +265,14 @@ class _ManualIdInput extends StatelessWidget {
                 hintText: 'ID P2L modulu (např. 1017)',
                 border: OutlineInputBorder(),
                 isDense: true,
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
               keyboardType: TextInputType.text,
               onSubmitted: (_) => onSubmit(),
             ),
           ),
           const SizedBox(width: 8),
-          FilledButton(
-            onPressed: isConnected ? onSubmit : null,
-            child: const Text('Ověřit'),
-          ),
+          FilledButton(onPressed: isConnected ? onSubmit : null, child: const Text('Ověřit')),
         ],
       ),
     );
@@ -326,14 +316,8 @@ class _SelectionBar extends StatelessWidget {
               ),
             ),
           const Spacer(),
-          TextButton(
-            onPressed: state.selectAll,
-            child: const Text('Vybrat vše'),
-          ),
-          TextButton(
-            onPressed: state.deselectAll,
-            child: const Text('Zrušit'),
-          ),
+          TextButton(onPressed: state.selectAll, child: const Text('Vybrat vše')),
+          TextButton(onPressed: state.deselectAll, child: const Text('Zrušit')),
         ],
       ),
     );
@@ -353,11 +337,7 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              isConnected ? Icons.search : Icons.wifi_off,
-              size: 64,
-              color: Colors.grey[400],
-            ),
+            Icon(isConnected ? Icons.search : Icons.wifi_off, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
               isConnected
@@ -396,11 +376,9 @@ class _UnitListView extends StatelessWidget {
             state.sendGetParam(unit.id);
             state.fetchDevices(unit.id);
           },
-          onOpenDetail: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => UnitDetailScreen(unitId: unit.id),
-            ),
-          ),
+          onOpenDetail: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => UnitDetailScreen(unitId: unit.id))),
         );
       },
     );
@@ -431,8 +409,8 @@ class _UnitCard extends StatelessWidget {
         color: !unit.isOnline
             ? Colors.grey.withAlpha(30)
             : isSelected
-                ? Colors.blue.withAlpha(20)
-                : null,
+            ? Colors.blue.withAlpha(20)
+            : null,
         border: Border(bottom: BorderSide(color: Colors.grey.withAlpha(50))),
       ),
       child: InkWell(
@@ -454,10 +432,7 @@ class _UnitCard extends StatelessWidget {
                       width: 40,
                       child: Text(
                         unit.displayName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                     ),
                     Container(
@@ -470,7 +445,7 @@ class _UnitCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 4),
                     SizedBox(
-                      width: 50,
+                      width: 42,
                       child: Text(
                         unit.lastSeenText,
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
@@ -482,7 +457,7 @@ class _UnitCard extends StatelessWidget {
                           if (unit.firmware != null) unit.firmware!,
                           if (unit.battery != null) '${unit.battery!.toStringAsFixed(1)} V',
                         ].join(' | '),
-                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -588,11 +563,15 @@ class _UnitCard extends StatelessWidget {
                 if (liveUnit.ip != null) Text('IP: ${liveUnit.ip}'),
                 if (liveUnit.mac != null) Text('MAC: ${liveUnit.mac}'),
                 if (liveUnit.ssid != null) Text('SSID: ${liveUnit.ssid}'),
-                if (liveUnit.mqttServer != null) Text('MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'),
-                if (liveUnit.battery != null) Text('Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'),
+                if (liveUnit.mqttServer != null)
+                  Text('MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'),
+                if (liveUnit.battery != null)
+                  Text('Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'),
                 Text('Brightness: ${liveUnit.brightness}'),
                 if (liveUnit.ledsPerPort.isNotEmpty)
-                  Text('LEDs: ${liveUnit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}'),
+                  Text(
+                    'LEDs: ${liveUnit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
+                  ),
                 const SizedBox(height: 8),
                 Text('Devices: $totalDevices'),
                 Text('PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist'),
@@ -630,9 +609,7 @@ class _UnitCard extends StatelessWidget {
             icon: const Icon(Icons.copy, size: 18),
             label: const Text('Kopírovat'),
             onPressed: () async {
-              await Clipboard.setData(
-                ClipboardData(text: infoLines.join('\n')),
-              );
+              await Clipboard.setData(ClipboardData(text: infoLines.join('\n')));
               if (!dialogCtx.mounted) return;
               ScaffoldMessenger.of(dialogCtx).showSnackBar(
                 const SnackBar(
@@ -642,10 +619,7 @@ class _UnitCard extends StatelessWidget {
               );
             },
           ),
-          OutlinedButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('OK'),
-          ),
+          OutlinedButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('OK')),
         ],
       ),
     );
@@ -656,13 +630,8 @@ class _UnitCard extends StatelessWidget {
   /// sám restartuje a nahlásí se s novým ID novým ALIVE.
   void _showChangeUnitIdDialog(BuildContext context, P2LUnit unit) {
     final state = context.read<AppState>();
-    final currentNum = int.tryParse(
-          unit.id.startsWith('u') ? unit.id.substring(1) : unit.id,
-        ) ??
-        0;
-    final ctrl = TextEditingController(
-      text: currentNum.toString().padLeft(4, '0'),
-    );
+    final currentNum = int.tryParse(unit.id.startsWith('u') ? unit.id.substring(1) : unit.id) ?? 0;
+    final ctrl = TextEditingController(text: currentNum.toString().padLeft(4, '0'));
     String? error;
 
     showDialog(
@@ -681,9 +650,7 @@ class _UnitCard extends StatelessWidget {
                 autofocus: true,
                 keyboardType: TextInputType.number,
                 maxLength: 4,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                ],
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: InputDecoration(
                   labelText: 'Nové ID (0000–9999)',
                   border: const OutlineInputBorder(),
@@ -701,10 +668,7 @@ class _UnitCard extends StatelessWidget {
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogCtx),
-              child: const Text('Zrušit'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Zrušit')),
             FilledButton(
               onPressed: () async {
                 final raw = ctrl.text.trim();
@@ -717,21 +681,14 @@ class _UnitCard extends StatelessWidget {
                   setLocal(() => error = 'Stejné jako aktuální ID');
                   return;
                 }
-                final newKey = newId.toString().padLeft(
-                      newId >= 1000 ? 6 : 4,
-                      '0',
-                    );
+                final newKey = newId.toString().padLeft(newId >= 1000 ? 6 : 4, '0');
                 // Kolize: porovnej numericky proti všem jednotkám.
                 final clash = state.units.values.any((u) {
-                  final n = int.tryParse(
-                        u.id.startsWith('u') ? u.id.substring(1) : u.id,
-                      ) ??
-                      -1;
+                  final n = int.tryParse(u.id.startsWith('u') ? u.id.substring(1) : u.id) ?? -1;
                   return n == newId && u.id != unit.id;
                 });
                 if (clash) {
-                  setLocal(() => error =
-                      'ID $newKey už používá jiná jednotka');
+                  setLocal(() => error = 'ID $newKey už používá jiná jednotka');
                   return;
                 }
                 final confirmed = await showDialog<bool>(
@@ -748,9 +705,7 @@ class _UnitCard extends StatelessWidget {
                         child: const Text('Zrušit'),
                       ),
                       FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.red,
-                        ),
+                        style: FilledButton.styleFrom(backgroundColor: Colors.red),
                         onPressed: () => Navigator.pop(confirmCtx, true),
                         child: const Text('Ano, změnit'),
                       ),
@@ -814,7 +769,16 @@ class _ActionBar extends StatelessWidget {
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: state.selectedPorts.contains(p)
-                              ? const [Colors.red, Colors.green, Colors.blue, Colors.yellow, Colors.purple, Colors.red, Colors.green, Colors.blue][p]
+                              ? const [
+                                  Colors.red,
+                                  Colors.green,
+                                  Colors.blue,
+                                  Colors.yellow,
+                                  Colors.purple,
+                                  Colors.red,
+                                  Colors.green,
+                                  Colors.blue,
+                                ][p]
                               : Colors.grey[300],
                           borderRadius: BorderRadius.circular(4),
                         ),
@@ -823,7 +787,9 @@ class _ActionBar extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: state.selectedPorts.contains(p) ? Colors.white : Colors.grey[600],
+                            color: state.selectedPorts.contains(p)
+                                ? Colors.white
+                                : Colors.grey[600],
                           ),
                         ),
                       ),
@@ -842,7 +808,11 @@ class _ActionBar extends StatelessWidget {
                     ),
                     child: Text(
                       state.selectedPorts.length == 8 ? 'Zrušit' : 'Vše',
-                      style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.blue,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -853,8 +823,7 @@ class _ActionBar extends StatelessWidget {
               children: [
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed:
-                        state.selectedCount > 0 ? state.sendTest : null,
+                    onPressed: state.selectedCount > 0 ? state.sendTest : null,
                     icon: const Icon(Icons.play_arrow),
                     label: const Text('TEST'),
                     style: FilledButton.styleFrom(
@@ -866,8 +835,7 @@ class _ActionBar extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed:
-                        state.selectedCount > 0 ? state.sendClear : null,
+                    onPressed: state.selectedCount > 0 ? state.sendClear : null,
                     icon: const Icon(Icons.stop),
                     label: const Text('ZHASNI'),
                     style: FilledButton.styleFrom(
@@ -879,8 +847,7 @@ class _ActionBar extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed:
-                        state.totalCount > 0 ? state.scanAll : null,
+                    onPressed: state.totalCount > 0 ? state.scanAll : null,
                     icon: const Icon(Icons.refresh),
                     label: const Text('SCAN'),
                     style: OutlinedButton.styleFrom(
@@ -914,10 +881,7 @@ class _BinOldToggle extends StatelessWidget {
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            _seg('BIN', useBin),
-            _seg('OLD', !useBin),
-          ],
+          children: [_seg('BIN', useBin), _seg('OLD', !useBin)],
         ),
       ),
     );
