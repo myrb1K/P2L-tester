@@ -120,6 +120,17 @@ flutter build ipa --release        # iOS app
 
 ## Version and Recent Changes
 
-Current version: **2.23** (see `main.dart`)  
-Recent themes: bulk broker/WiFi change (`BulkConfigMenu`), reorderable broker profiles, duplicate-name guard, tučné názvy profilů, tlačítko Kopírovat v info dialogu jednotky.  
+Current version: **2.51** (see `main.dart`)  
+Recent themes:
+- v2.51: Flutter `SplashScreen` widget s plným Smartbox logem (1.8–2.2 s, fade transition); kompaktnější ikony v seznamu profilů (`visualDensity.compact`, `minWidth: 36`); dialog Aplikovat šablonu zjednodušený (jen `displayName`, tučně, `ListView.separated` s `Divider`, `Icon(device_hub) + Badge` s počtem modulů).
+- v2.50: `Listener` na úrovni `Scaffold` v `HomeScreen` → `FocusManager.primaryFocus.unfocus()` na `onPointerDown`, takže klepnutí na libovolné tlačítko/ikonu skryje klávesnici a zruší focus pole pro ID.
+- v2.49: tap-mimo skryje klávesnici, fix klávesnice po Restart akci.
+- v2.48: po restartu jednotky čítač zamrzne na "offline" do návratu ALIVE.
+
 Always increment `appVersion` in `main.dart` when shipping user-facing changes.
+
+## Splash Screen
+- `lib/screens/splash_screen.dart` — Flutter splash s `Image.asset('assets/icons/Smartboxlogo.png')` na bílém pozadí, dole verze aplikace.
+- Asset registrovaný v `pubspec.yaml` (`flutter.assets`).
+- Délka zobrazení: 2200 ms, pak `Navigator.pushReplacement` s `FadeTransition` 300 ms na `_InitialRoute`.
+- Důvod: nativní Android 12+ splash zobrazuje jen kruhovou ikonu uprostřed (oříznuté logo), Flutter splash dává plnou kontrolu na všech platformách.
