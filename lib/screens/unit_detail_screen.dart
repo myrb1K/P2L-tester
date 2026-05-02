@@ -157,7 +157,6 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text('P2L modul ${unit.displayName}'),
             actions: [
               IconButton(
                 icon: const Icon(Icons.refresh),
@@ -265,7 +264,7 @@ class _UnitInfoCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    unit.id,
+                    unit.displayName,
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     overflow: TextOverflow.ellipsis,
                   ),

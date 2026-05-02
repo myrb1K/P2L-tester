@@ -396,7 +396,6 @@ class _UnitListView extends StatelessWidget {
             state.sendGetParam(unit.id);
             state.fetchDevices(unit.id);
           },
-          onToggleBin: () => state.toggleBinMode(unit.id),
           onOpenDetail: () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => UnitDetailScreen(unitId: unit.id),
@@ -414,7 +413,6 @@ class _UnitCard extends StatelessWidget {
   final int? moduleCount;
   final VoidCallback onToggle;
   final VoidCallback onGetParam;
-  final VoidCallback onToggleBin;
   final VoidCallback onOpenDetail;
 
   const _UnitCard({
@@ -423,7 +421,6 @@ class _UnitCard extends StatelessWidget {
     required this.moduleCount,
     required this.onToggle,
     required this.onGetParam,
-    required this.onToggleBin,
     required this.onOpenDetail,
   });
 
@@ -441,39 +438,26 @@ class _UnitCard extends StatelessWidget {
       child: InkWell(
         onTap: onToggle,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+          padding: const EdgeInsets.only(left: 0, right: 8, top: 0, bottom: 0),
           child: Row(
             children: [
               Checkbox(
                 value: isSelected,
                 onChanged: (_) => onToggle(),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               Expanded(
                 child: Row(
                   children: [
                     SizedBox(
-                      width: 80,
-                      child: Row(
-                        children: [
-                          Text(
-                            unit.displayName,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          if (unit.supportsBin) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: Colors.deepPurple.withAlpha(30),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text('BIN', style: TextStyle(fontSize: 10, color: Colors.deepPurple, fontWeight: FontWeight.bold)),
-                            ),
-                          ],
-                        ],
+                      width: 40,
+                      child: Text(
+                        unit.displayName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
                     Container(
@@ -505,11 +489,6 @@ class _UnitCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (unit.supportsBin) ...[
-                const SizedBox(width: 8),
-                _BinOldToggle(useBin: unit.useBin, onToggle: onToggleBin),
-                const SizedBox(width: 8),
-              ],
               Stack(
                 clipBehavior: Clip.none,
                 children: [
@@ -596,29 +575,47 @@ class _UnitCard extends StatelessWidget {
       context: context,
       builder: (dialogCtx) => AlertDialog(
         title: Text('P2L modul ${unit.displayName}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('ID: ${unit.id}'),
-            if (unit.firmware != null) Text('FW: ${unit.firmware}'),
-            if (unit.hwModel != null) Text('HW: ${unit.hwModel}'),
-            if (unit.ip != null) Text('IP: ${unit.ip}'),
-            if (unit.mac != null) Text('MAC: ${unit.mac}'),
-            if (unit.ssid != null) Text('SSID: ${unit.ssid}'),
-            if (unit.mqttServer != null) Text('MQTT: ${unit.mqttServer}:${unit.mqttPort}'),
-            if (unit.battery != null) Text('Bat: ${unit.battery!.toStringAsFixed(1)} V'),
-            Text('Brightness: ${unit.brightness}'),
-            if (unit.ledsPerPort.isNotEmpty)
-              Text('LEDs: ${unit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}'),
-            const SizedBox(height: 8),
-            Text('Devices: $totalDevices'),
-            Text('PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist'),
-            Text('BTN: $btnCount · DISP: $dispCount · LEDS: $ledsCount · DIST: $distCount'),
-            const SizedBox(height: 8),
-            Text('Last seen: ${unit.lastSeenText}'),
-            Text('BIN: ${unit.supportsBin ? "ano" : "ne"}'),
-          ],
+        content: Consumer<AppState>(
+          builder: (_, state, _) {
+            final liveUnit = state.units[unit.id] ?? unit;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('ID: ${liveUnit.id}'),
+                if (liveUnit.firmware != null) Text('FW: ${liveUnit.firmware}'),
+                if (liveUnit.hwModel != null) Text('HW: ${liveUnit.hwModel}'),
+                if (liveUnit.ip != null) Text('IP: ${liveUnit.ip}'),
+                if (liveUnit.mac != null) Text('MAC: ${liveUnit.mac}'),
+                if (liveUnit.ssid != null) Text('SSID: ${liveUnit.ssid}'),
+                if (liveUnit.mqttServer != null) Text('MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'),
+                if (liveUnit.battery != null) Text('Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'),
+                Text('Brightness: ${liveUnit.brightness}'),
+                if (liveUnit.ledsPerPort.isNotEmpty)
+                  Text('LEDs: ${liveUnit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}'),
+                const SizedBox(height: 8),
+                Text('Devices: $totalDevices'),
+                Text('PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist'),
+                Text('BTN: $btnCount · DISP: $dispCount · LEDS: $ledsCount · DIST: $distCount'),
+                const SizedBox(height: 8),
+                Text('Last seen: ${liveUnit.lastSeenText}'),
+                const SizedBox(height: 8),
+                if (liveUnit.supportsBin)
+                  Row(
+                    children: [
+                      const Text('Režim LED příkazů:'),
+                      const SizedBox(width: 8),
+                      _BinOldToggle(
+                        useBin: liveUnit.useBin,
+                        onToggle: () => state.toggleBinMode(liveUnit.id),
+                      ),
+                    ],
+                  )
+                else
+                  const Text('Režim LED příkazů: OLD (BIN nepodporován)'),
+              ],
+            );
+          },
         ),
         actions: [
           OutlinedButton.icon(
