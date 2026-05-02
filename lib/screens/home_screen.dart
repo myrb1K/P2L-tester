@@ -156,21 +156,25 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          body: Column(
-            children: [
-              _StatusBar(state: state),
-              _ManualIdInput(
-                controller: _manualIdController,
-                onSubmit: _sendManualGetParam,
-                isConnected: state.isConnected,
-              ),
-              if (state.units.isNotEmpty) _SelectionBar(state: state),
-              Expanded(
-                child: state.units.isEmpty
-                    ? _EmptyState(isConnected: state.isConnected)
-                    : _UnitListView(state: state),
-              ),
-            ],
+          body: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusScope.of(context).unfocus(),
+            child: Column(
+              children: [
+                _StatusBar(state: state),
+                _ManualIdInput(
+                  controller: _manualIdController,
+                  onSubmit: _sendManualGetParam,
+                  isConnected: state.isConnected,
+                ),
+                if (state.units.isNotEmpty) _SelectionBar(state: state),
+                Expanded(
+                  child: state.units.isEmpty
+                      ? _EmptyState(isConnected: state.isConnected)
+                      : _UnitListView(state: state),
+                ),
+              ],
+            ),
           ),
           bottomNavigationBar: state.isConnected && state.units.isNotEmpty
               ? _ActionBar(state: state)

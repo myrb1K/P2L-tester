@@ -29,6 +29,7 @@ class BulkConfigMenu extends StatelessWidget {
           tooltip: 'Hromadná konfigurace',
           enabled: hasSelection,
           onSelected: (action) async {
+            FocusScope.of(context).unfocus();
             switch (action) {
               case _BulkAction.broker:
                 await _showBrokerDialog(context, state);
