@@ -127,17 +127,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return null;
 
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error), backgroundColor: Colors.red));
       return null;
     }
 
     final savedIndex = originalIndex ?? state.profiles.length - 1;
     setState(_clearForm);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profil uložen')),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil uložen')));
     return savedIndex;
   }
 
@@ -152,8 +150,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              result ? 'Připojení úspěšné!' : 'Chyba: ${state.lastError}'),
+          content: Text(result ? 'Připojení úspěšné!' : 'Chyba: ${state.lastError}'),
           backgroundColor: result ? Colors.green : Colors.red,
         ),
       );
@@ -172,12 +169,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Smazat profil?'),
         content: Text('Opravdu smazat "$name"?'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Zrušit')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Smazat')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Zrušit')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Smazat')),
         ],
       ),
     );
@@ -258,10 +251,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Stávající broker profily, šablony a LED pattern budou nahrazeny obsahem souboru. Pokračovat?',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Zrušit'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Zrušit')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.orange),
@@ -275,9 +265,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final error = await state.importSettingsJson(content);
     if (!mounted) return;
     if (error != null) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: Colors.red),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(error), backgroundColor: Colors.red));
       return;
     }
     setState(() {
@@ -324,9 +312,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               prefixIcon: Icon(Icons.dns),
               border: OutlineInputBorder(),
             ),
-            validator: (v) => v == null || v.trim().isEmpty
-                ? 'Zadejte adresu brokeru'
-                : null,
+            validator: (v) => v == null || v.trim().isEmpty ? 'Zadejte adresu brokeru' : null,
           ),
           const SizedBox(height: 12),
           TextFormField(
@@ -365,11 +351,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               prefixIcon: const Icon(Icons.lock),
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
-                icon: Icon(_obscurePassword
-                    ? Icons.visibility
-                    : Icons.visibility_off),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
+                icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
+                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
               ),
             ),
           ),
@@ -384,9 +367,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           FilledButton.icon(
             onPressed: _save,
             icon: const Icon(Icons.save),
-            label: Text(_editingIndex != null
-                ? 'Uložit změny'
-                : 'Uložit nový profil'),
+            label: Text(_editingIndex != null ? 'Uložit změny' : 'Uložit nový profil'),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -409,12 +390,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             actions: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Center(
-                  child: Text(
-                    'v$appVersion',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ),
+                child: Center(child: Text('v$appVersion', style: const TextStyle(fontSize: 13))),
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.import_export),
@@ -449,16 +425,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Uložené profily',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Uložené profily', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 if (state.profiles.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      'Žádné uložené profily',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
+                    child: Text('Žádné uložené profily', style: TextStyle(color: Colors.grey[600])),
                   )
                 else
                   ReorderableListView.builder(
@@ -482,8 +454,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: isActive ? Colors.blue.withAlpha(20) : null,
                         shape: isEditing
                             ? RoundedRectangleBorder(
-                                side: BorderSide(
-                                    color: scheme.primary, width: 2),
+                                side: BorderSide(color: scheme.primary, width: 2),
                                 borderRadius: BorderRadius.circular(12),
                               )
                             : null,
@@ -491,15 +462,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             ListTile(
                               leading: Icon(
-                                isActive
-                                    ? Icons.check_circle
-                                    : Icons.circle_outlined,
+                                isActive ? Icons.check_circle : Icons.circle_outlined,
                                 color: isActive ? Colors.green : Colors.grey,
                               ),
                               title: Text(
                                 p.name,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
+                                style: const TextStyle(fontWeight: FontWeight.bold),
                               ),
                               subtitle: Text('${p.broker}:${p.port}'),
                               onTap: () => _toggleEdit(p, i),
@@ -508,23 +476,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 children: [
                                   if (!isActive)
                                     IconButton(
-                                      icon: const Icon(Icons.play_arrow,
-                                          size: 20),
+                                      icon: const Icon(Icons.play_arrow, size: 20),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 36,
+                                        minHeight: 32,
+                                      ),
                                       tooltip: 'Připojit',
                                       onPressed: () async {
                                         await state.selectProfile(i);
                                         if (!context.mounted) return;
                                         final result = await state.connect();
                                         if (context.mounted) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
+                                          ScaffoldMessenger.of(context).showSnackBar(
                                             SnackBar(
-                                              content: Text(result
-                                                  ? 'Připojeno k ${p.name}'
-                                                  : 'Chyba: ${state.lastError}'),
-                                              backgroundColor: result
-                                                  ? Colors.green
-                                                  : Colors.red,
+                                              content: Text(
+                                                result
+                                                    ? 'Připojeno k ${p.name}'
+                                                    : 'Chyba: ${state.lastError}',
+                                              ),
+                                              backgroundColor: result ? Colors.green : Colors.red,
                                             ),
                                           );
                                           if (result) {
@@ -535,28 +507,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     ),
                                   IconButton(
                                     icon: Icon(
-                                      isEditing
-                                          ? Icons.close
-                                          : Icons.edit_outlined,
+                                      isEditing ? Icons.close : Icons.edit_outlined,
                                       size: 20,
                                     ),
-                                    tooltip: isEditing
-                                        ? 'Zavřít editaci'
-                                        : 'Upravit',
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
+                                    tooltip: isEditing ? 'Zavřít editaci' : 'Upravit',
                                     onPressed: () => _toggleEdit(p, i),
                                   ),
                                   IconButton(
-                                    icon: const Icon(Icons.delete_outline,
-                                        size: 20),
+                                    icon: const Icon(Icons.delete_outline, size: 20),
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
                                     onPressed: () => _deleteProfile(i),
                                   ),
                                   ReorderableDragStartListener(
                                     index: i,
                                     child: const Padding(
-                                      padding: EdgeInsets.symmetric(
-                                          horizontal: 4),
-                                      child: Icon(Icons.drag_handle,
-                                          color: Colors.grey),
+                                      padding: EdgeInsets.symmetric(horizontal: 4),
+                                      child: Icon(Icons.drag_handle, color: Colors.grey),
                                     ),
                                   ),
                                 ],
@@ -564,8 +535,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             if (isEditing)
                               Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                    16, 0, 16, 16),
+                                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                                 child: _buildProfileForm(state),
                               ),
                           ],
@@ -590,8 +560,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
                 const Divider(height: 32),
                 // LED pattern
-                const Text('Schema LED pasku',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Schema LED pasku', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -661,9 +630,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     final messenger = ScaffoldMessenger.of(context);
                     await appState.saveLedPattern(on, off, _selectedColor);
                     if (!mounted) return;
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('Schema ulozeno')),
-                    );
+                    messenger.showSnackBar(const SnackBar(content: Text('Schema ulozeno')));
                   },
                   icon: const Icon(Icons.save),
                   label: const Text('Uložit schéma'),
