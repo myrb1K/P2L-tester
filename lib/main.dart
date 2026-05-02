@@ -4,8 +4,9 @@ import 'package:provider/provider.dart';
 import 'providers/app_state.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/splash_screen.dart';
 
-const String appVersion = '2.50';
+const String appVersion = '2.51';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +29,7 @@ class P2LTesterApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         themeMode: ThemeMode.light,
-        home: const _InitialRoute(),
+        home: const SplashScreen(next: _InitialRoute()),
       ),
     );
   }
