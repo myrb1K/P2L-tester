@@ -5,7 +5,7 @@ import 'providers/app_state.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 
-const String appVersion = '2.41';
+const String appVersion = '2.42';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

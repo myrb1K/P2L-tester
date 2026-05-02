@@ -464,37 +464,16 @@ class _UnitCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
-                    onPressed: onOpenDetail,
-                    tooltip: 'Seznam zařízení',
-                  ),
-                  if (moduleCount != null)
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.blueGrey,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        constraints: const BoxConstraints(minWidth: 16),
-                        child: Text(
-                          '$moduleCount',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                ],
+              Badge(
+                isLabelVisible: moduleCount != null,
+                backgroundColor: Colors.blueGrey,
+                textColor: Colors.white,
+                label: Text('$moduleCount'),
+                child: IconButton(
+                  icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
+                  onPressed: onOpenDetail,
+                  tooltip: 'Seznam zařízení',
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.info_outline, size: 20),
