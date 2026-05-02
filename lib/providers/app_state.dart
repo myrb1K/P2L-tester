@@ -816,8 +816,19 @@ class AppState extends ChangeNotifier {
     final id = _normUnitId(unitId);
     final cmd = CommandService.buildRestartCommand(id);
     _mqttService.publish(cmd.topic, cmd.payload);
+    _markUnitOfflineUntilAlive(id);
     _deviceActionStatus = 'Restart jednotky $id odeslán';
     notifyListeners();
+  }
+
+  /// Po odeslání RESTART nastaví jednotku do offline stavu (čítač zamrzne na
+  /// "offline"), dokud nedorazí nový ALIVE. ALIVE handler obnoví `lastSeen`
+  /// a `isOnline` automaticky.
+  void _markUnitOfflineUntilAlive(String unitId) {
+    final unit = _units[unitId];
+    if (unit == null) return;
+    unit.lastSeen = DateTime.now().subtract(const Duration(seconds: 700));
+    unit.isOnline = false;
   }
 
   /// Hromadný restart: pošle RESTART všem vybraným jednotkám s 100ms pauzou.
@@ -833,6 +844,7 @@ class AppState extends ChangeNotifier {
       _awaitingAliveAfterRestart.add(id);
       _restartSentAt[id] = DateTime.now();
       _mqttService.publish(cmd.topic, cmd.payload);
+      _markUnitOfflineUntilAlive(id);
       sent++;
       _statusMessage = 'Restart: $sent / ${targets.length}';
       notifyListeners();
