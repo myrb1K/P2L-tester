@@ -29,6 +29,7 @@ Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Při každ�
 - **Hromadná konfigurace**: změna brokera (`set_Mqtt`) a WiFi (`set_WiFi`) na vybraných jednotkách (s 100 ms pauzou mezi publish).
 - **Broker profily** s drag-and-drop řazením, kontrolou duplicit a uložením v `SharedPreferences`.
 - **Filtr offline jednotek**, scanování (`get_param`), restart jednotky.
+- **Vlastní splash screen** ([screens/splash_screen.dart](lib/screens/splash_screen.dart)) s plným Smartbox logem (1.8–2.2 s, fade transition) — nezávislé na nativním Android 12+ kruhovém splashi.
 - **Cross-platform**: Windows, Android, iOS, web.
 
 ---
@@ -82,7 +83,7 @@ Pro web s MQTT broker musí mít povolený **WebSocket listener** (typicky port 
 | Buildery | [lib/services/command_service.dart](lib/services/command_service.dart) | všechny payload buildery: `buildTestCommand`/`buildTestCommandBin`, `buildClearCommand`, `buildGetParamCommand`, `buildSetMqttCommand`, `buildSetWifiCommand`, `buildGetDevicesCommand`, `buildAddDevicesCommand`, `buildRecreateDevicesCommand`, `buildDeleteDevicesCommand`, `buildReplaceFromCommand`, `buildSetDispDataCommand`, `buildSetDistConfigCommand`, `buildRestartCommand` |
 | Logika | [lib/services/module_reconstruction.dart](lib/services/module_reconstruction.dart) | z plochého `GET-DEVICES` (BTN/DISP/LEDS/DIST) skládá fyzické PUM-A/B/C |
 | Modely | [lib/models/](lib/models/) | `unit.dart`, `module.dart` (PumaModule, ModuleType, DistConfig, ButtonSide), `device.dart` (Device, DeviceType), `device_template.dart`, `broker_profile.dart` |
-| Obrazovky | [lib/screens/](lib/screens/) | `home_screen`, `settings_screen`, `unit_detail_screen`, `template_editor_screen`, `templates_screen` |
+| Obrazovky | [lib/screens/](lib/screens/) | `splash_screen`, `home_screen`, `settings_screen`, `unit_detail_screen`, `template_editor_screen`, `templates_screen` |
 | Widgety | [lib/widgets/](lib/widgets/) | `bulk_config_menu` (hromadný set_Mqtt/set_WiFi z AppBar), `add_module_dialog`, `replace_device_dialog`, `apply_template_sheet`, `module_tile` |
 
 ### Datové modely
