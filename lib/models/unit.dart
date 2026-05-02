@@ -101,12 +101,10 @@ class P2LUnit {
 
   String get lastSeenText {
     final diff = DateTime.now().difference(lastSeen);
+    if (diff.inSeconds > 599) return 'offline';
     if (diff.inSeconds < 60) return '${diff.inSeconds}s';
     final min = diff.inMinutes;
     final sec = diff.inSeconds % 60;
-    if (min < 60) return '${min}m${sec.toString().padLeft(2, '0')}s';
-    final hrs = diff.inHours;
-    final remMin = min % 60;
-    return '${hrs}h${remMin.toString().padLeft(2, '0')}m';
+    return '${min}m${sec.toString().padLeft(2, '0')}s';
   }
 }
