@@ -468,7 +468,7 @@ class _UnitCard extends StatelessWidget {
                 isLabelVisible: moduleCount != null,
                 backgroundColor: Colors.blueGrey,
                 textColor: Colors.white,
-                offset: const Offset(-4, 4),
+                offset: const Offset(-2, 2),
                 label: Text('$moduleCount'),
                 child: IconButton(
                   icon: const Icon(Icons.device_hub, size: 20, color: Colors.blueGrey),
