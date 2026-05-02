@@ -108,7 +108,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, state, _) {
-        return Scaffold(
+        return Listener(
+          behavior: HitTestBehavior.deferToChild,
+          onPointerDown: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+          child: Scaffold(
           appBar: AppBar(
             actions: [
               if (state.isConnected)
@@ -179,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
           bottomNavigationBar: state.isConnected && state.units.isNotEmpty
               ? _ActionBar(state: state)
               : null,
+          ),
         );
       },
     );
