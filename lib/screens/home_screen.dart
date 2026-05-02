@@ -375,6 +375,7 @@ class _UnitListView extends StatelessWidget {
           onGetParam: () {
             state.sendGetParam(unit.id);
             state.fetchDevices(unit.id);
+            if (state.filterOffline) state.toggleOfflineFilter();
           },
           onOpenDetail: () => Navigator.of(
             context,
@@ -587,18 +588,27 @@ class _UnitCard extends StatelessWidget {
             );
           },
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
+        actionsAlignment: MainAxisAlignment.spaceEvenly,
         actions: [
-          OutlinedButton.icon(
-            icon: const Icon(Icons.drive_file_rename_outline, size: 18),
-            label: const Text('Změnit ID'),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 36),
+              foregroundColor: Colors.red,
+              side: const BorderSide(color: Colors.red),
+            ),
             onPressed: () {
               Navigator.pop(dialogCtx);
               _showChangeUnitIdDialog(context, unit);
             },
+            child: const Text('Změnit ID'),
           ),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.copy, size: 18),
-            label: const Text('Kopírovat'),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 36),
+            ),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: infoLines.join('\n')));
               if (!dialogCtx.mounted) return;
@@ -609,8 +619,16 @@ class _UnitCard extends StatelessWidget {
                 ),
               );
             },
+            child: const Text('Kopírovat'),
           ),
-          OutlinedButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('OK')),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 36),
+            ),
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
