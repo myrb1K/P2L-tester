@@ -120,8 +120,9 @@ flutter build ipa --release        # iOS app
 
 ## Version and Recent Changes
 
-Current version: **2.51** (see `main.dart`)  
+Current version: **2.52** (see `main.dart`)  
 Recent themes:
+- v2.52: Export / Import šablon — ikony `file_download_outlined` / `file_upload_outlined` v AppBar `TemplatesScreen` (export jen pokud existují šablony) + položka "Exportovat" v PopupMenu řádku. Formát: JSON wrapper `{"format":"p2l-tester.templates","version":1,"exportedAt","appVersion","templates":[...]}` v `lib/services/template_io.dart` (`TemplateBundle.encode/decode`). Při exportu jedné šablony rovnou dialog "Sdílet (`share_plus`) / Uložit (`file_picker.saveFile`)". Při exportu z AppBaru s více šablonami nejdřív checkbox dialog. Import řeší konflikty jmen dialogem `Přepsat / Přejmenovat (auto suffix `(2)`) / Přeskočit` s "Použít pro zbývajících N". Helpery v `AppState`: `hasTemplate(name)`, `suggestUniqueTemplateName(base)`. Závislosti: `share_plus ^10.1.2`, `path_provider ^2.1.4` (temp file pro share). **Pin `path_provider_foundation: 2.5.1` v `dependency_overrides`** — verze 2.6.0 zavedla Dart native build hooks přes `objective_c`, které Flutter tool spouští i na Windows a crashuje na mezerách v cestě k user profilu (`C:\Users\Radek Brym\…`).
 - v2.51: Flutter `SplashScreen` widget s plným Smartbox logem (1.8–2.2 s, fade transition); kompaktnější ikony v seznamu profilů (`visualDensity.compact`, `minWidth: 36`); dialog Aplikovat šablonu zjednodušený (jen `displayName`, tučně, `ListView.separated` s `Divider`, `Icon(device_hub) + Badge` s počtem modulů).
 - v2.50: `Listener` na úrovni `Scaffold` v `HomeScreen` → `FocusManager.primaryFocus.unfocus()` na `onPointerDown`, takže klepnutí na libovolné tlačítko/ikonu skryje klávesnici a zruší focus pole pro ID.
 - v2.49: tap-mimo skryje klávesnici, fix klávesnice po Restart akci.

@@ -28,6 +28,7 @@ Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Při každ�
 - **Správa device topologie**: přidávat/mazat moduly, výměna vadného device (`REPLACE-FROM`), aplikace šablon (`DeviceTemplate`).
 - **Hromadná konfigurace**: změna brokera (`set_Mqtt`) a WiFi (`set_WiFi`) na vybraných jednotkách (s 100 ms pauzou mezi publish).
 - **Broker profily** s drag-and-drop řazením, kontrolou duplicit a uložením v `SharedPreferences`.
+- **Export / Import šablon** — JSON wrapper formát ([template_io.dart](lib/services/template_io.dart)), volba mezi nativním sdílením (`share_plus`) a uložením do souboru (`file_picker.saveFile`); při importu konflikty jmen řeší dialog Přepsat / Přejmenovat / Přeskočit.
 - **Filtr offline jednotek**, scanování (`get_param`), restart jednotky.
 - **Vlastní splash screen** ([screens/splash_screen.dart](lib/screens/splash_screen.dart)) s plným Smartbox logem (1.8–2.2 s, fade transition) — nezávislé na nativním Android 12+ kruhovém splashi.
 - **Cross-platform**: Windows, Android, iOS, web.
