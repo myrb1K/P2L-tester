@@ -36,9 +36,16 @@ dependencies:
   shared_preferences: ^2.3.4
   package_info_plus: ^9.0.1
   file_picker: ^8.1.0
+  share_plus: ^10.1.2
+  path_provider: ^2.1.4
 
 dependency_overrides:
   win32: ^5.5.4
+  # path_provider_foundation 2.6+ používá Dart native build hooks (objective_c),
+  # které Flutter tool na Windows spouští kvůli bugu i když je iOS/macOS, a
+  # crashuje na mezerách v cestě k user profilu. Pin na poslední 2.5.x udrží
+  # klasický plugin bez hooků.
+  path_provider_foundation: 2.5.1
 
 dev_dependencies:
   flutter_test:

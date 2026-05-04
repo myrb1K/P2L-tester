@@ -1044,6 +1044,24 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True, pokud existuje šablona se stejným názvem (case-insensitive, trim).
+  bool hasTemplate(String name) {
+    final needle = name.trim().toLowerCase();
+    return _templates.any((t) => t.name.trim().toLowerCase() == needle);
+  }
+
+  /// Vrátí unikátní název odvozený z [base]. Pokud `base` neexistuje, vrátí
+  /// `base`. Jinak hledá nejnižší volný suffix `(2)`, `(3)`, …
+  String suggestUniqueTemplateName(String base) {
+    final trimmed = base.trim();
+    if (!hasTemplate(trimmed)) return trimmed;
+    for (var i = 2; i < 1000; i++) {
+      final candidate = '$trimmed ($i)';
+      if (!hasTemplate(candidate)) return candidate;
+    }
+    return '$trimmed (${DateTime.now().millisecondsSinceEpoch})';
+  }
+
   Future<void> _persistTemplates() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('device_templates', DeviceTemplate.listToJson(_templates));
