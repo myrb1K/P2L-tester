@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Uživatel a styl komunikace
+
+**Radek** (`r.brym@smartbox4you.com`) — autor a údržbář P2L Testeru, používá appku interně ve firmě Smart Product Solution / Smartbox4you. Pracuje na Windows 11 v Cursoru s rozšířením Claude Code (doma stroj uživatel `Brno`, v práci jiný — projekt cestuje přes git).
+
+**Komunikace:** **česky**. UI texty, commit messages, doc komentáře — vše česky. Terminologie: "P2L modul" = jednotka, "modul" = PUM-A/B/C/DIST na sběrnici.
+
+**Styl práce:** krátké, prakticky zaměřené úkoly. Nechce extra polishing nad rámec zadání. Itruje postupně po malých commitech. Zná hardware (ESP32 firmware P2L_*NT) a MQTT protokol; Flutter zřejmě není hlavní expertíza, takže Flutter-specific patterns dobře vysvětlit.
+
 ## Project Overview
 
 **P2L Tester** is a Flutter application for testing P2L hardware modules via MQTT communication. The app connects to a broker to control LED modules and perform diagnostics on physical units. Version is tracked in `main.dart` as `appVersion = '2.X'`.
@@ -100,6 +108,26 @@ flutter run -d windows           # teprve teď
 
 Není to bug v naší codebase a nesouvisí to s `dependency_overrides` (path_provider_foundation 2.5.1 / win32 5.5.4 jsou správně).
 
+### Android release APK potřebuje INTERNET permission v `main/AndroidManifest.xml`
+
+**Symptom:** `flutter build apk --release` projde, ale po instalaci APK na fyzické Android zařízení selžou všechna síťová volání. `mqtt_client` typicky vyhodí null exception, kterou aplikace zobrazí jako "null" chybu. `flutter run` nebo debug APK funguje normálně.
+
+**Why:** Defaultní Flutter projekt má `<uses-permission android:name="android.permission.INTERNET"/>` jen v `android/app/src/debug/AndroidManifest.xml` (kvůli hot reload), nikoli v `main/`. Release build pak permission nemá. Vyřešeno v rámci v2.38 hotfix (commit `57b2f84`).
+
+**How to apply:** Při Android release buildu vždy ověřit, že `android/app/src/main/AndroidManifest.xml` obsahuje:
+```xml
+<uses-permission android:name="android.permission.INTERNET"/>
+```
+Uvnitř `<manifest>` ale mimo `<application>`.
+
+### Cursor: `.cursorignore` rozbije Claude Code rozšíření
+
+**Symptom:** Po restartu Cursoru se v projektu P2L-TESTER nenačte Claude Code rozšíření ani terminál.
+
+**Why:** Když `.cursorignore` obsahuje `.git`, `*.lock` (nebo jiné runtime metadata), Cursor / rozšíření ztratí přístup k souborům potřebným pro inicializaci extension hostu.
+
+**How to apply:** Pokud uživatel hlásí, že rozšíření po restartu Cursoru nenaběhne, první kontrola je `.cursorignore` — nesmí obsahovat `.git` ani `*.lock`. Bezpečné vzorce jsou jen build artefakty (`build/`, `.dart_tool/`, `*/ephemeral/`, `android/.gradle/`, `android/app/build/`, `coverage/`).
+
 ---
 
 ## Key Implementation Details
@@ -160,7 +188,7 @@ Recent themes:
 - v2.49: tap-mimo skryje klávesnici, fix klávesnice po Restart akci.
 - v2.48: po restartu jednotky čítač zamrzne na "offline" do návratu ALIVE.
 
-Always increment `appVersion` in `main.dart` when shipping user-facing changes.
+**Pozor — nezvedat `appVersion` automaticky.** Po code změnách na něj nesahat; verzi řeší až commit, a to **až poté, co se uživatele zeptám**, jestli má být nová verze (a jaká). Někdy je změna jen WIP / experiment / refactor, kdy se verze nemění. Toto pravidlo přepisuje starší pokyn "Always increment".
 
 ## Splash Screen
 - `lib/screens/splash_screen.dart` — Flutter splash s `Image.asset('assets/icons/Smartboxlogo.png')` na bílém pozadí, dole verze aplikace.
