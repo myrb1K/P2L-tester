@@ -62,6 +62,12 @@ class AppState extends ChangeNotifier {
   // Timestamp posledního stisku BTN. Klíč: "<unitId>:<baseAddr>:<left|right>".
   final Map<String, DateTime> _btnPresses = {};
 
+  // ID jednotek, pro které už se zahrála wave animace v UI seznamu. Vlna
+  // má proběhnout právě jednou — při prvním objevení nebo přechodu offline→online.
+  // Bez tracking-u na úrovni AppState by se animace spouštěla pokaždé, když
+  // ListView.builder zničí a znovu vytvoří kartu (off-screen recyklace).
+  final Set<String> _wavedUnitIds = {};
+
   // Getters
   Map<String, P2LUnit> get units => Map.unmodifiable(_units);
   List<P2LUnit> get unitList {
@@ -550,8 +556,24 @@ class AppState extends ChangeNotifier {
   void clearUnits() {
     _units.clear();
     _selectedUnits.clear();
+    _wavedUnitIds.clear();
     _statusMessage = 'Seznam vycisten';
     notifyListeners();
+  }
+
+  /// Vrací `true` jen jednou pro daný `unitId` — používá `_UnitCard` k tomu,
+  /// aby modrou vlnu spustil právě jednou při prvním objevení jednotky
+  /// (ALIVE / manuální zadání ID). Při remountu karty (scrolování pryč
+  /// a zpět) už vrací `false`.
+  bool consumeFirstAppearAnimation(String unitId) {
+    return _wavedUnitIds.add(_normUnitId(unitId));
+  }
+
+  /// Označí jednotku za "už animovanou" bez kontroly. Volá se z
+  /// `didUpdateWidget` po offline→online přechodu, aby další remount
+  /// karty animaci nezopakoval.
+  void markUnitWaved(String unitId) {
+    _wavedUnitIds.add(_normUnitId(unitId));
   }
 
   void toggleUnit(String unitId) {
