@@ -65,10 +65,40 @@ flutter test --coverage            # Generate coverage report
 
 ### Build Distributions
 ```bash
-flutter build windows --release    # Windows exe
-flutter build apk --release        # Android APK
-flutter build ipa --release        # iOS app
+flutter build windows --release                    # Windows exe
+flutter build apk --release --split-per-abi        # Android APK (3× smaller per ABI)
+flutter build ipa --release                        # iOS app
 ```
+
+**Pro dist v `dist/P2L-Tester-vX.YY/` shippovat pouze `arm64-v8a` APK** (~17 MB pokrývá ~95 % moderních Android zařízení):
+```bash
+cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/P2L-Tester-vX.YY/P2L-Tester-vX.YY.apk
+```
+Default `flutter build apk --release` (bez `--split-per-abi`) vytvoří fat APK ~51 MB se třemi ABI v jednom — to je nad GitHub doporučenou hranicí 50 MB (push warning, navrhuje LFS). App Bundle (`flutter build appbundle`) je jen pro Play Store, sideload nepodporuje.
+
+---
+
+## Build Gotchas
+
+### Flutter Windows: chybějící `cpp_client_wrapper/*.cc`
+
+**Symptom:** Po `flutter build windows --release` (zvlášť po několika v řadě, např. dist pro v2.53 + v2.54) selže následný `flutter run -d windows` s:
+```
+error C1083: Nejde otevřít soubor zdroj: ...\windows\flutter\ephemeral\cpp_client_wrapper\core_implementations.cc
+```
+Adresář `windows/flutter/ephemeral/cpp_client_wrapper/` zůstane jen s `include/`, `.cc` soubory chybí.
+
+**Why:** Flutter tool kopíruje `cpp_client_wrapper/*.cc` z SDK template **lazy** — jen když je adresář prázdný nebo při full `flutter build`. Po release buildu zůstane `generated_config.cmake` (marker), takže Flutter považuje ephemeral za "OK" a kopírování přeskočí. Mix release → debug rozladí CMake cache v `build/`. `flutter pub get` ephemeral neobnovuje (kopírování dělá jen build).
+
+**Fix:**
+```bash
+flutter clean
+flutter pub get
+flutter build windows --debug    # regeneruje ephemeral
+flutter run -d windows           # teprve teď
+```
+
+Není to bug v naší codebase a nesouvisí to s `dependency_overrides` (path_provider_foundation 2.5.1 / win32 5.5.4 jsou správně).
 
 ---
 
