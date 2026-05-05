@@ -112,76 +112,76 @@ class _HomeScreenState extends State<HomeScreen> {
           behavior: HitTestBehavior.deferToChild,
           onPointerDown: (_) => FocusManager.instance.primaryFocus?.unfocus(),
           child: Scaffold(
-          appBar: AppBar(
-            actions: [
-              if (state.isConnected)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Center(
-                    child: Text(
-                      (state.activeProfileIndex >= 0 &&
-                              state.activeProfileIndex < state.profiles.length)
-                          ? state.profiles[state.activeProfileIndex].name
-                          : state.broker,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            appBar: AppBar(
+              actions: [
+                if (state.isConnected)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Center(
+                      child: Text(
+                        (state.activeProfileIndex >= 0 &&
+                                state.activeProfileIndex < state.profiles.length)
+                            ? state.profiles[state.activeProfileIndex].name
+                            : state.broker,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
+                GestureDetector(
+                  onTap: state.isConnected ? state.disconnect : null,
+                  child: _ConnectionIndicator(state: state.connectionState),
                 ),
-              GestureDetector(
-                onTap: state.isConnected ? state.disconnect : null,
-                child: _ConnectionIndicator(state: state.connectionState),
-              ),
-              IconButton(
-                icon: const Icon(Icons.swap_horiz),
-                tooltip: 'Vybrat broker',
-                onPressed: () => _showBrokerPicker(context, state),
-              ),
-              IconButton(
-                icon: const Icon(Icons.folder_special),
-                tooltip: 'Šablony',
-                onPressed: () => Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const TemplatesScreen())),
-              ),
-              const BulkConfigMenu(),
-              if (state.units.isNotEmpty)
                 IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Vymazat seznam',
-                  onPressed: () => state.clearUnits(),
+                  icon: const Icon(Icons.swap_horiz),
+                  tooltip: 'Vybrat broker',
+                  onPressed: () => _showBrokerPicker(context, state),
                 ),
-              IconButton(
-                icon: const Icon(Icons.settings),
-                tooltip: 'Nastavení',
-                onPressed: () => Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
-              ),
-            ],
-          ),
-          body: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: () => FocusScope.of(context).unfocus(),
-            child: Column(
-              children: [
-                _StatusBar(state: state),
-                _ManualIdInput(
-                  controller: _manualIdController,
-                  onSubmit: _sendManualGetParam,
-                  isConnected: state.isConnected,
+                IconButton(
+                  icon: const Icon(Icons.folder_special),
+                  tooltip: 'Šablony',
+                  onPressed: () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const TemplatesScreen())),
                 ),
-                if (state.units.isNotEmpty) _SelectionBar(state: state),
-                Expanded(
-                  child: state.units.isEmpty
-                      ? _EmptyState(isConnected: state.isConnected)
-                      : _UnitListView(state: state),
+                const BulkConfigMenu(),
+                if (state.units.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: 'Vymazat seznam',
+                    onPressed: () => state.clearUnits(),
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  tooltip: 'Nastavení',
+                  onPressed: () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
                 ),
               ],
             ),
-          ),
-          bottomNavigationBar: state.isConnected && state.units.isNotEmpty
-              ? _ActionBar(state: state)
-              : null,
+            body: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () => FocusScope.of(context).unfocus(),
+              child: Column(
+                children: [
+                  _StatusBar(state: state),
+                  _ManualIdInput(
+                    controller: _manualIdController,
+                    onSubmit: _sendManualGetParam,
+                    isConnected: state.isConnected,
+                  ),
+                  if (state.units.isNotEmpty) _SelectionBar(state: state),
+                  Expanded(
+                    child: state.units.isEmpty
+                        ? _EmptyState(isConnected: state.isConnected)
+                        : _UnitListView(state: state),
+                  ),
+                ],
+              ),
+            ),
+            bottomNavigationBar: state.isConnected && state.units.isNotEmpty
+                ? _ActionBar(state: state)
+                : null,
           ),
         );
       },
@@ -376,6 +376,7 @@ class _UnitListView extends StatelessWidget {
         final unit = units[index];
         final isSelected = state.selectedUnits.contains(unit.id);
         return _UnitCard(
+          key: ValueKey(unit.id),
           unit: unit,
           isSelected: isSelected,
           moduleCount: state.modulesForUnit(unit.id)?.length,
@@ -394,7 +395,7 @@ class _UnitListView extends StatelessWidget {
   }
 }
 
-class _UnitCard extends StatelessWidget {
+class _UnitCard extends StatefulWidget {
   final P2LUnit unit;
   final bool isSelected;
   final int? moduleCount;
@@ -403,6 +404,7 @@ class _UnitCard extends StatelessWidget {
   final VoidCallback onOpenDetail;
 
   const _UnitCard({
+    super.key,
     required this.unit,
     required this.isSelected,
     required this.moduleCount,
@@ -412,8 +414,60 @@ class _UnitCard extends StatelessWidget {
   });
 
   @override
+  State<_UnitCard> createState() => _UnitCardState();
+}
+
+class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixin {
+  late final AnimationController _waveController;
+  // P2LUnit je mutable a AppState přepisuje pole `isOnline` na téže instanci,
+  // takže oldWidget.unit a widget.unit v `didUpdateWidget` ukazují na stejný
+  // objekt s už aktualizovanou hodnotou. Proto si držíme předchozí stav
+  // ručně a srovnáváme proti němu.
+  late bool _lastOnline;
+
+  @override
+  void initState() {
+    super.initState();
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    );
+    _lastOnline = widget.unit.isOnline;
+    if (_lastOnline) {
+      // Wave spustit jen při úplně prvním objevení jednotky v listu.
+      // Při remountu karty (scrolování) AppState vrátí false.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (context.read<AppState>().consumeFirstAppearAnimation(widget.unit.id)) {
+          _waveController.forward(from: 0);
+        }
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _UnitCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nowOnline = widget.unit.isOnline;
+    if (!_lastOnline && nowOnline) {
+      _waveController.forward(from: 0);
+      context.read<AppState>().markUnitWaved(widget.unit.id);
+    }
+    _lastOnline = nowOnline;
+  }
+
+  @override
+  void dispose() {
+    _waveController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
+    final unit = widget.unit;
+    final isSelected = widget.isSelected;
+
+    final card = Container(
       decoration: BoxDecoration(
         color: !unit.isOnline
             ? Colors.grey.withAlpha(30)
@@ -422,95 +476,152 @@ class _UnitCard extends StatelessWidget {
             : null,
         border: Border(bottom: BorderSide(color: Colors.grey.withAlpha(50))),
       ),
-      child: InkWell(
-        onTap: onToggle,
-        child: Padding(
-          padding: const EdgeInsets.only(left: 0, right: 8, top: 1, bottom: 1),
-          child: Row(
-            children: [
-              Checkbox(
-                value: isSelected,
-                onChanged: (_) => onToggle(),
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 40,
-                      child: Text(
-                        unit.displayName,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
+      child: Stack(
+        children: [
+          InkWell(
+            onTap: widget.onToggle,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 0, right: 8, top: 1, bottom: 1),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: isSelected,
+                    onChanged: (_) => widget.onToggle(),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 40,
+                          child: Text(
+                            unit.displayName,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                        ),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: unit.isOnline ? Colors.green : Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        SizedBox(
+                          width: 42,
+                          child: Text(
+                            unit.lastSeenText,
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            [
+                              if (unit.firmware != null) unit.firmware!,
+                              if (unit.battery != null) '${unit.battery!.toStringAsFixed(1)} V',
+                            ].join(' | '),
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: unit.isOnline ? Colors.green : Colors.grey,
-                      ),
+                  ),
+                  Badge(
+                    isLabelVisible: widget.moduleCount != null,
+                    backgroundColor: Colors.blueGrey,
+                    textColor: Colors.white,
+                    offset: const Offset(-2, 2),
+                    label: Text('${widget.moduleCount}'),
+                    child: IconButton(
+                      icon: const Icon(Icons.device_hub, size: 28, color: Colors.blueGrey),
+                      onPressed: widget.onOpenDetail,
+                      tooltip: 'Seznam zařízení',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                     ),
-                    const SizedBox(width: 4),
-                    SizedBox(
-                      width: 42,
-                      child: Text(
-                        unit.lastSeenText,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        [
-                          if (unit.firmware != null) unit.firmware!,
-                          if (unit.battery != null) '${unit.battery!.toStringAsFixed(1)} V',
-                        ].join(' | '),
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: const Icon(Icons.info_outline, size: 28),
+                    onPressed: () => _showUnitInfo(context, unit),
+                    tooltip: 'Info',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 28, color: Colors.green),
+                    onPressed: widget.onGetParam,
+                    tooltip: 'Obnovit',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+                ],
               ),
-              Badge(
-                isLabelVisible: moduleCount != null,
-                backgroundColor: Colors.blueGrey,
-                textColor: Colors.white,
-                offset: const Offset(-2, 2),
-                label: Text('$moduleCount'),
-                child: IconButton(
-                  icon: const Icon(Icons.device_hub, size: 28, color: Colors.blueGrey),
-                  onPressed: onOpenDetail,
-                  tooltip: 'Seznam zařízení',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
-              ),
-              const SizedBox(width: 6),
-              IconButton(
-                icon: const Icon(Icons.info_outline, size: 28),
-                onPressed: () => _showUnitInfo(context, unit),
-                tooltip: 'Info',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
-              const SizedBox(width: 6),
-              IconButton(
-                icon: const Icon(Icons.refresh, size: 28, color: Colors.green),
-                onPressed: onGetParam,
-                tooltip: 'Obnovit',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
-            ],
+            ),
           ),
-        ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _waveController,
+                builder: (_, _) {
+                  if (!_waveController.isAnimating) return const SizedBox.shrink();
+                  return ClipRect(
+                    child: LayoutBuilder(
+                      builder: (_, constraints) {
+                        final w = constraints.maxWidth;
+                        final waveW = w * 0.35;
+                        final t = Curves.easeInOut.transform(_waveController.value);
+                        final dx = -waveW + t * (w + waveW);
+                        return Stack(
+                          children: [
+                            Positioned(
+                              left: dx,
+                              top: 0,
+                              bottom: 0,
+                              width: waveW,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                    colors: [
+                                      Colors.lightBlueAccent.withAlpha(0),
+                                      Colors.lightBlueAccent.withAlpha(220),
+                                      Colors.lightBlueAccent.withAlpha(0),
+                                    ],
+                                    stops: const [0.0, 0.5, 1.0],
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.lightBlueAccent.withAlpha(110),
+                                      blurRadius: 18,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
+
+    return card;
   }
 
   void _showUnitInfo(BuildContext context, P2LUnit unit) {
