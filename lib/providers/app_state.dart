@@ -340,7 +340,13 @@ class AppState extends ChangeNotifier {
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (_units.isNotEmpty) {
           for (final unit in _units.values) {
+            final wasOnline = unit.isOnline;
             unit.isOnline = DateTime.now().difference(unit.lastSeen).inSeconds < 360;
+            // Při online→offline odebrat z waved setu, aby návrat (kdykoliv,
+            // i když je karta mimo viewport) zase spustil vlnu.
+            if (wasOnline && !unit.isOnline) {
+              _wavedUnitIds.remove(_normUnitId(unit.id));
+            }
           }
           notifyListeners();
         }
@@ -851,6 +857,8 @@ class AppState extends ChangeNotifier {
     if (unit == null) return;
     unit.lastSeen = DateTime.now().subtract(const Duration(seconds: 700));
     unit.isOnline = false;
+    // Aby další ALIVE jednotku zase animoval (i když je karta mimo viewport).
+    _wavedUnitIds.remove(_normUnitId(unitId));
   }
 
   /// Hromadný restart: pošle RESTART všem vybraným jednotkám s 100ms pauzou.
