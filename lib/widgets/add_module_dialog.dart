@@ -370,7 +370,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
             CheckboxListTile(
               value: _restartAfter,
               onChanged: (v) => setState(() => _restartAfter = v ?? false),
-              title: const Text('Restartovat jednotku po úpravě'),
+              title: const Text('Po úpravě restartovat P2L modul'),
               contentPadding: EdgeInsets.zero,
               controlAffinity: ListTileControlAffinity.leading,
               dense: true,
