@@ -87,8 +87,6 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Typ: ${_type.code} @${widget.module.baseAddress}'),
-          const SizedBox(height: 8),
           if (!supported)
             const Text(
               'Výměna přes REPLACE-FROM není pro tento typ dokumentována v protokolu.',
@@ -96,7 +94,7 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
             )
           else ...[
             const Text(
-              'Osazený nový kus má výchozí adresu (default). Po potvrzení se jednotka pokusí nový přečipovat na ID vadného.',
+              'Osazený nový kus má výchozí adresu (default). Po potvrzení se P2L modul pokusí změnit ID nového device na ID vadného.',
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 12),
@@ -105,7 +103,7 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: InputDecoration(
-                labelText: 'Default adresa nového (obvykle $defaultAddr)',
+                labelText: 'Default adresa nového device (obvykle $defaultAddr)',
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
@@ -119,7 +117,7 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
             CheckboxListTile(
               value: _restartAfter,
               onChanged: (v) => setState(() => _restartAfter = v ?? false),
-              title: const Text('Restartovat jednotku po úpravě'),
+              title: const Text('Po úpravě restartovat P2L modul'),
               contentPadding: EdgeInsets.zero,
               controlAffinity: ListTileControlAffinity.leading,
               dense: true,

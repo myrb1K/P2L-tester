@@ -536,7 +536,7 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                       IconButton(
                         icon: const Icon(Icons.device_hub, size: 28, color: Colors.blueGrey),
                         onPressed: widget.onOpenDetail,
-                        tooltip: 'Seznam zařízení',
+                        tooltip: 'Seznam devices',
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
