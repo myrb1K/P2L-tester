@@ -476,7 +476,7 @@ class AppState extends ChangeNotifier {
       final devices = parseGetDevicesPayload(devicesField);
       _unitModules[unitId] = reconstructModules(devices);
       _unitModulesFetchedAt[unitId] = DateTime.now();
-      _deviceActionStatus = 'Moduly P2L modulu $unitId načteny (${devices.length} entit → ${_unitModules[unitId]!.length} modulů)';
+      _deviceActionStatus = 'Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)';
     } else {
       _deviceActionStatus = 'GET-DEVICES $unitId: neočekávaný formát odpovědi';
     }
@@ -515,7 +515,7 @@ class AppState extends ChangeNotifier {
         _awaitingAliveAfterRestart.remove(unitId);
         _restartSentAt.remove(unitId);
         _initialFetchDone.add(unitId);
-        _deviceActionStatus = 'P2L modul $unitId zpět online — načítám moduly.';
+        _deviceActionStatus = 'P2L modul ${int.tryParse(unitId)?.toString() ?? unitId} zpět online — načítám devices.';
         Future.microtask(() => fetchDevices(unitId));
       }
     } else if (_initialFetchDone.add(unitId)) {
@@ -667,7 +667,7 @@ class AppState extends ChangeNotifier {
         await Future.delayed(const Duration(milliseconds: 100));
       }
     }
-    _statusMessage = 'Broker "${profile.name}" odeslán na $sent P2L modulů';
+    _statusMessage = 'Broker "${profile.name}" odeslán na $sent P2L jednotek';
     notifyListeners();
   }
 
@@ -739,7 +739,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('last_wifi_ssid', ssid);
     await prefs.setString('last_wifi_password', password);
-    _statusMessage = 'WiFi "$ssid" odeslána na $sent P2L modulů';
+    _statusMessage = 'WiFi "$ssid" odeslána na $sent P2L jednotek';
     notifyListeners();
   }
 
@@ -795,7 +795,7 @@ class AppState extends ChangeNotifier {
     // Ruční načtení ruší čekání na post-restart auto-trigger.
     _awaitingAliveAfterRestart.remove(id);
     _restartSentAt.remove(id);
-    _deviceActionStatus = 'Načítám devices jednotky $id…';
+    _deviceActionStatus = 'Načítám devices jednotky ${int.tryParse(id)?.toString() ?? id}…';
     notifyListeners();
 
     final cmd = CommandService.buildGetDevicesCommand(id);
@@ -818,7 +818,7 @@ class AppState extends ChangeNotifier {
     if (modules.isEmpty) return;
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _deviceActionStatus = 'Přidávám moduly do $id…';
+    _deviceActionStatus = 'Přidávám devices do ${int.tryParse(id)?.toString() ?? id}…';
     if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
@@ -845,7 +845,7 @@ class AppState extends ChangeNotifier {
     final cmd = CommandService.buildRestartCommand(id);
     _mqttService.publish(cmd.topic, cmd.payload);
     _markUnitOfflineUntilAlive(id);
-    _deviceActionStatus = 'Restart jednotky $id odeslán';
+    _deviceActionStatus = 'Restart jednotky ${int.tryParse(id)?.toString() ?? id} odeslán';
     notifyListeners();
   }
 
@@ -882,7 +882,7 @@ class AppState extends ChangeNotifier {
         await Future.delayed(const Duration(milliseconds: 100));
       }
     }
-    _statusMessage = 'Restart odeslán na $sent P2L modulů';
+    _statusMessage = 'Restart odeslán na $sent P2L jednotek';
     notifyListeners();
   }
 
@@ -996,7 +996,7 @@ class AppState extends ChangeNotifier {
   Future<void> deleteModule(String unitId, PumaModule module) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _deviceActionStatus = 'Mažu ${module.displayLabel} na $id…';
+    _deviceActionStatus = 'Mažu ${module.displayLabel} na ${int.tryParse(id)?.toString() ?? id}…';
     notifyListeners();
 
     final cmd = CommandService.buildDeleteDevicesCommand(id, [module]);

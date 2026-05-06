@@ -648,7 +648,7 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
 
     final infoLines = <String>[
       'P2L modul ${unit.displayName}',
-      'ID: ${unit.id}',
+      'ID: ${int.tryParse(unit.id)?.toString() ?? unit.id}',
       if (unit.firmware != null) 'FW: ${unit.firmware}',
       if (unit.hwModel != null) 'HW: ${unit.hwModel}',
       if (unit.ip != null) 'IP: ${unit.ip}',
@@ -677,7 +677,7 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('ID: ${liveUnit.id}'),
+                Text('ID: ${int.tryParse(liveUnit.id)?.toString() ?? liveUnit.id}'),
                 if (liveUnit.firmware != null) Text('FW: ${liveUnit.firmware}'),
                 if (liveUnit.hwModel != null) Text('HW: ${liveUnit.hwModel}'),
                 if (liveUnit.ip != null) Text('IP: ${liveUnit.ip}'),
@@ -833,7 +833,7 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                   builder: (confirmCtx) => AlertDialog(
                     title: const Text('Opravdu změnit ID?'),
                     content: Text(
-                      'Jednotka ${unit.displayName} bude přepsána na ID $newKey.\n'
+                      'Jednotka ${unit.displayName} bude přepsána na ID ${int.tryParse(newKey)?.toString() ?? newKey}.\n'
                       'Firmware se po přijetí příkazu restartuje.',
                     ),
                     actions: [

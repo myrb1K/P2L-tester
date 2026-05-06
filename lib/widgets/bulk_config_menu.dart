@@ -170,7 +170,7 @@ class BulkConfigMenu extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Restart bude odeslán na ${state.selectedCount} P2L modulů.'),
+            Text('Restart bude odeslán na ${state.selectedCount} P2L modulech.'),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(8),
@@ -314,7 +314,7 @@ class _BulkBrokerDialogState extends State<_BulkBrokerDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Bude odesláno na ${widget.selectedCount} P2L modulů.'),
+            Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
             const SizedBox(height: 12),
             if (hasSelectable)
               SegmentedButton<_BrokerMode>(
@@ -493,7 +493,7 @@ class _BulkDispBrightnessDialogState extends State<_BulkDispBrightnessDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Bude odesláno na ${widget.selectedCount} P2L modulů.'),
+          Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
           const SizedBox(height: 4),
           const Text(
             'DISP SET-CONFIG broadcast (adresa 050000) — změní jas všech displejů na každé jednotce.',
@@ -563,7 +563,7 @@ class _BulkUnitBrightnessDialogState
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Bude odesláno na ${widget.selectedCount} P2L modulů.'),
+          Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
           const SizedBox(height: 4),
           const Text(
             'set_brightness — hodnota v procentech 0–100.',
@@ -653,7 +653,7 @@ class _BulkWifiDialogState extends State<_BulkWifiDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Bude odesláno na ${widget.selectedCount} P2L modulů.'),
+          Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
           const SizedBox(height: 12),
           TextField(
             controller: _ssidCtrl,

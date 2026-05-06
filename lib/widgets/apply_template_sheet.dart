@@ -114,7 +114,7 @@ class _ApplyTemplateSheetState extends State<ApplyTemplateSheet> {
                         items: templates
                             .map((t) => DropdownMenuItem(
                                   value: t,
-                                  child: Text('${t.name} (${t.chipCount} čipů)'),
+                                  child: Text('${t.name} (${t.chipCount} entit)'),
                                 ))
                             .toList(),
                         onChanged: (v) => setState(() => _selectedTemplate = v),

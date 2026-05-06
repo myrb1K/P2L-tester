@@ -65,8 +65,8 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
     if (result != null) {
       if (_modules.length >= kMaxChipsPerUnit) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Limit 100 čipů dosažen.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Limit $kMaxChipsPerUnit entit dosažen.'),
         ));
         return;
       }
@@ -76,6 +76,10 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
 
   void _removeAt(int index) {
     setState(() => _modules.removeAt(index));
+  }
+
+  int _getTotalEntries() {
+    return _modules.fold<int>(0, (sum, module) => sum + module.toDevices().length);
   }
 
   Future<void> _editAt(int index) async {
@@ -179,7 +183,7 @@ class _TemplateEditorScreenState extends State<TemplateEditorScreen> {
                 child: Row(
                   children: [
                     Text(
-                      'Moduly: ${_modules.length} / $kMaxChipsPerUnit čipů',
+                      'Devices: ${_modules.length} / ${_getTotalEntries()} entit',
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const Spacer(),
