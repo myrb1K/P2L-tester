@@ -157,7 +157,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.initial == null ? 'Přidat modul' : 'Upravit modul'),
+      title: Text(widget.initial == null ? 'Přidat device' : 'Upravit device'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -166,7 +166,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
             DropdownButtonFormField<ModuleType>(
               initialValue: _type,
               decoration: const InputDecoration(
-                labelText: 'Typ modulu',
+                labelText: 'Typ device',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),

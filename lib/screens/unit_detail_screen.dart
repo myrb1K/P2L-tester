@@ -1,9 +1,18 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../main.dart' show appVersion;
+import '../models/device_template.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
+import '../services/template_io.dart';
 import '../widgets/add_module_dialog.dart';
 import '../widgets/apply_template_sheet.dart';
 import '../widgets/replace_device_dialog.dart';
@@ -45,7 +54,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Limit 100 čipů na jednotku dosažen.')));
+        ).showSnackBar(const SnackBar(content: Text('Limit 100 entit na jednotku dosažen.')));
         return;
       }
       await state.addModules(widget.unitId, [result.module], restartAfter: result.restartAfter);
@@ -119,18 +128,134 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     if (modules.isEmpty) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            TemplateEditorScreen(seedModules: modules, seedName: 'Z modulu ${widget.unitId}'),
+        builder: (_) {
+            final displayId = int.tryParse(widget.unitId)?.toString() ?? widget.unitId;
+            return TemplateEditorScreen(seedModules: modules, seedName: 'Z modulu $displayId');
+          },
       ),
     );
+  }
+
+  Future<void> _exportModules(List<PumaModule> modules) async {
+    final template = DeviceTemplate(
+      name: 'Z unit ${widget.unitId}',
+      modules: modules,
+      created: DateTime.now(),
+    );
+    final displayId = int.tryParse(widget.unitId)?.toString() ?? widget.unitId;
+    final json = TemplateBundle.encode([template], appVersion: appVersion);
+    final fileName = 'Devices_${widget.unitId}.json';
+
+    if (!mounted) return;
+    final share = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Exportovat devices v P2L unit $displayId'),
+        content: Text('${modules.length} devices'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Zrušit'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sdílet'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Uložit'),
+          ),
+        ],
+      ),
+    );
+    if (share == null) return;
+
+    if (share) {
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsString(json);
+      await Share.shareXFiles([XFile(file.path)], subject: fileName);
+    } else {
+      if (kIsWeb || Platform.isAndroid || Platform.isIOS) {
+        await FilePicker.platform.saveFile(
+          fileName: fileName,
+          bytes: Uint8List.fromList(json.codeUnits),
+        );
+      } else {
+        final outPath = await FilePicker.platform.saveFile(
+          fileName: fileName,
+          allowedExtensions: ['json'],
+          type: FileType.custom,
+        );
+        if (outPath != null) await File(outPath).writeAsString(json);
+      }
+    }
+  }
+
+  Future<void> _importModules(AppState state) async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['json'],
+      withData: true,
+    );
+    if (picked == null || picked.files.isEmpty) return;
+
+    final file = picked.files.first;
+    final String content;
+    if (file.bytes != null) {
+      content = String.fromCharCodes(file.bytes!);
+    } else if (file.path != null) {
+      content = await File(file.path!).readAsString();
+    } else {
+      return;
+    }
+
+    final parsed = TemplateBundle.decode(content);
+    if (!parsed.isOk) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Import selhal: ${parsed.error}')),
+      );
+      return;
+    }
+
+    final importedModules = parsed.templates![0].modules;
+    final currentCount = state.modulesForUnit(widget.unitId)?.length ?? 0;
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Nahradit devices?'),
+        content: Text(
+          'Importem nahradíš v P2L unit ${int.tryParse(widget.unitId)?.toString() ?? widget.unitId} '
+          '${currentCount == 0 ? 'prázdný seznam' : '$currentCount stávajících devices'} '
+          '${importedModules.length} importovanými. Tato akce je nevratná.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Zrušit'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Nahradit'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await state.wipeDevices(widget.unitId);
+    await state.addModules(widget.unitId, importedModules);
   }
 
   Future<void> _wipeAll(AppState state) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Smazat všechny moduly?'),
-        content: Text('Z jednotky ${widget.unitId} se odstraní všechny moduly. Nelze vrátit.'),
+        title: const Text('Smazat všechny devices?'),
+        content: Text('Z P2L unit ${int.tryParse(widget.unitId)?.toString() ?? widget.unitId} se odstraní všechny devices. Nelze vrátit.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Zrušit')),
           FilledButton(
@@ -160,12 +285,12 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
             actions: [
               IconButton(
                 icon: const Icon(Icons.refresh),
-                tooltip: 'Načíst moduly',
+                tooltip: 'Načíst devices',
                 onPressed: () => state.fetchDevices(widget.unitId),
               ),
               IconButton(
                 icon: const Icon(Icons.add),
-                tooltip: 'Přidat modul',
+                tooltip: 'Přidat device',
                 onPressed: () => _addModule(state, modules),
               ),
               IconButton(
@@ -179,8 +304,18 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 onPressed: modules.isEmpty ? null : () => _saveAsTemplate(modules),
               ),
               IconButton(
+                icon: const Icon(Icons.file_download_outlined),
+                tooltip: 'Exportovat devices do souboru',
+                onPressed: modules.isEmpty ? null : () => _exportModules(modules),
+              ),
+              IconButton(
+                icon: const Icon(Icons.file_upload_outlined),
+                tooltip: 'Importovat devices ze souboru',
+                onPressed: () => _importModules(state),
+              ),
+              IconButton(
                 icon: const Icon(Icons.delete_sweep, color: Colors.red),
-                tooltip: 'Smazat všechny moduly',
+                tooltip: 'Smazat všechny devices',
                 onPressed: modules.isEmpty ? null : () => _wipeAll(state),
               ),
             ],
@@ -454,7 +589,7 @@ class _GroupSection extends StatelessWidget {
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   iconSize: 18,
                   tooltip: ledModules.isEmpty
-                      ? 'Žádné moduly s LEDS'
+                      ? 'Žádné devices s LEDS'
                       : 'Rozsvítit všechny LEDS (${ledModules.length})',
                   icon: Icon(
                     Icons.lightbulb,
@@ -470,7 +605,7 @@ class _GroupSection extends StatelessWidget {
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   iconSize: 18,
                   tooltip: ledModules.isEmpty
-                      ? 'Žádné moduly s LEDS'
+                      ? 'Žádné devices s LEDS'
                       : 'Zhasnout všechny LEDS (${ledModules.length})',
                   icon: const Icon(Icons.lightbulb_outline),
                   onPressed: ledModules.isEmpty
@@ -814,7 +949,7 @@ class _EmptyModules extends StatelessWidget {
           Text(
             pending
                 ? 'Načítám devices…'
-                : 'P2L modul nemá žádné registrované moduly.\nPřidej první modul tlačítkem dole.',
+                : 'P2L modul nemá žádné registrované devices.\nPřidej první device tlačítkem dole.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey[600]),
           ),

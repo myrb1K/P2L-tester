@@ -306,7 +306,7 @@ class TemplatesScreen extends StatelessWidget {
                         title: Text(t.name,
                             style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Text(
-                            '${t.chipCount} modulů · vytvořeno ${_fmtDate(t.created)}'),
+                            '${t.chipCount} devices · vytvořeno ${_fmtDate(t.created)}'),
                         trailing: PopupMenuButton<String>(
                           onSelected: (v) {
                             if (v == 'edit') _edit(context, template: t);
@@ -349,7 +349,7 @@ class TemplatesScreen extends StatelessWidget {
     final safe = templateName
         .trim()
         .replaceAll(RegExp(r'[^A-Za-z0-9ÁČĎÉĚÍŇÓŘŠŤÚŮÝŽáčďéěíňóřšťúůýž _.()-]'), '_');
-    return '${safe.isEmpty ? 'template' : safe}.json';
+    return 'Template-${safe.isEmpty ? 'template' : safe}.json';
   }
 }
 
@@ -435,7 +435,7 @@ class _ExportPickerDialogState extends State<_ExportPickerDialog> {
                   return CheckboxListTile(
                     dense: true,
                     title: Text(t.name),
-                    subtitle: Text('${t.chipCount} modulů'),
+                    subtitle: Text('${t.chipCount} devices'),
                     value: checked,
                     onChanged: (_) => setState(() {
                       if (checked) {
