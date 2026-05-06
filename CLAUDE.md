@@ -178,8 +178,9 @@ Uvnitř `<manifest>` ale mimo `<application>`.
 
 ## Version and Recent Changes
 
-Current version: **2.56** (see `main.dart`)  
+Current version: **2.57** (see `main.dart`)  
 Recent themes:
+- v2.57: Nový formát export/import šablon (TemplateBundle v2) — moduly se shodnou konfigurací se sloučí do jednoho záznamu s CSV `baseAddresses` (`"128,130,134"`) místo jednotlivých `baseAddress` intů. Import expanduje CSV → vytvoří jednotlivé moduly → seřadí podle adresy. Staré v1 soubory jsou odmítnuty s přátelskou zprávou. Validace duplikátních adres během importu. Nové testy v [test/template_io_test.dart](test/template_io_test.dart).
 - v2.56: UI sjednocení — ikona výběru brokeru v `HomeScreen` AppBaru přepsána z `Icons.swap_horiz` na `Icons.dns_outlined` (konzistence s `BulkConfigMenu` a settings, outlined varianta). Port toggle "Vše/Zrušit" v LED ovládací liště přepsán z outline `Container` na `FilledButton` se `StadiumBorder` a `minimumSize: Size(0, 28)`, aby barevně odpovídal `FilledButton`u "Ověřit" (M3 primary, ne `Colors.blue`) a výškově sedl s 28×28 port boxy. Window title nativního Win32 okna v [windows/runner/main.cpp:30](windows/runner/main.cpp#L30) změněn z `"p2l_tester"` na `"P2L Tester"` (Flutter title z `MaterialApp.title` se na Windows automaticky nesynchronizuje, je hardcoded v `window.Create`).
 - v2.55: Fix klikací oblasti ikony "Seznam zařízení" v `_UnitCard` — `Badge` (kolečko s počtem modulů) pohlcoval tap eventy ve své části nad ikonou. Přepsáno na `Stack` s `IconButton` jako tap target a `Badge` v `IgnorePointer` přes `SizedBox(32×32)` jako čistě vizuální overlay. Hit area je teď u všech tří ikon v řádku (Seznam, Info, Obnovit) plnohodnotných 32×32.
 - v2.54: Wave animace se spouští znovu i po offline → online cyklu, kdy uživatel mezi tím odscrolloval kartu pryč. `AppState._wavedUnitIds` se odebírá při přechodu online → offline (jak v `_markUnitOfflineUntilAlive`, tak v tick timeru po překročení lastSeen threshold), takže další ALIVE animaci zase pustí.
