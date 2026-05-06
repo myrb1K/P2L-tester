@@ -132,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: _ConnectionIndicator(state: state.connectionState),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.swap_horiz),
+                  icon: const Icon(Icons.dns_outlined),
                   tooltip: 'Vybrat broker',
                   onPressed: () => _showBrokerPicker(context, state),
                 ),
@@ -933,25 +933,18 @@ class _ActionBar extends StatelessWidget {
                     ),
                   ),
                 const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: state.selectedPorts.length == 8
+                FilledButton(
+                  onPressed: state.selectedPorts.length == 8
                       ? state.deselectAllPorts
                       : state.selectAllPorts,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.blue),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      state.selectedPorts.length == 8 ? 'Zrušit' : 'Vše',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Colors.blue,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    minimumSize: const Size(0, 28),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: const StadiumBorder(),
+                    textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                   ),
+                  child: Text(state.selectedPorts.length == 8 ? 'Zrušit' : 'Vše'),
                 ),
               ],
             ),
