@@ -529,20 +529,29 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                       ],
                     ),
                   ),
-                  Badge(
-                    isLabelVisible: widget.moduleCount != null,
-                    backgroundColor: Colors.blueGrey,
-                    textColor: Colors.white,
-                    offset: const Offset(-2, 2),
-                    label: Text('${widget.moduleCount}'),
-                    child: IconButton(
-                      icon: const Icon(Icons.device_hub, size: 28, color: Colors.blueGrey),
-                      onPressed: widget.onOpenDetail,
-                      tooltip: 'Seznam zařízení',
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    ),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.device_hub, size: 28, color: Colors.blueGrey),
+                        onPressed: widget.onOpenDetail,
+                        tooltip: 'Seznam zařízení',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
+                      if (widget.moduleCount != null)
+                        IgnorePointer(
+                          child: Badge(
+                            backgroundColor: Colors.blueGrey,
+                            textColor: Colors.white,
+                            offset: const Offset(-2, 2),
+                            label: Text('${widget.moduleCount}'),
+                            child: const SizedBox(width: 32, height: 32),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(width: 6),
                   IconButton(

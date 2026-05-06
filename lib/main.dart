@@ -6,7 +6,7 @@ import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 
-const String appVersion = '2.54';
+const String appVersion = '2.55';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
