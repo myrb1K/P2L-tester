@@ -46,6 +46,79 @@ Topics and message formats documented in `MQTT-TOPICS.md` and `README-P2L.md`. K
 - Publish test commands to `I/<unit_id>/P2L/<device_id>/CMD` (new units) or `I/u<4digit>/SERVER/CMD` (old units)
 - Unit responses on topics with prefixes: D (discovery), A (async replies), L (logs)
 
+#### Device topic kódy (P2L32)
+DEVICE_ID v topicu je **2-ciferný kód typu + 4-ciferná adresa** (např. `050246` = DISP @246).
+
+| Kód | Typ |
+|-----|-----|
+| `00` | UNIT (jednotka samotná) |
+| `01` | P2L (LED pásky / test příkazy) |
+| `04` | DIST (senzor vzdálenosti) |
+| `05` | DISP (displej PUMA) |
+| `11` | LEDS (PUMA LED) |
+
+#### Subscribe topicy po connectu
+- `D/+/UNIT/+/ALIVE` — discovery + battery/firmware
+- `A/SERVER/+/CMD` — odpověď na `get_param` (IP, MAC, firmware, ID)
+- `O/+/UNIT/+/GET-DEVICES` — seznam atomických devices (P2L32)
+- `O/+/UNIT/+/{ADD,RECREATE,DELETE}-DEVICES` — potvrzení device-management operací
+- `O/+/{DIST,DISP}/+/REPLACE-FROM` — potvrzení výměny
+
+---
+
+## Hardware topologie a PUMA moduly
+
+**RS485 daisy-chain.** P2L jednotka komunikuje s devices přes jednu sběrnici v sérii. Adresace je podle **chip number** (vypálené v čipu), ne podle fyzické pozice. Pozice v řetězci **z `GET-DEVICES` zjistitelná není** — protokol pracuje jen s čipy. Kapacita: **max 100 čipů na jednotku**.
+
+**1 modul = 1 fyzický čip.** Čip může v `GET-DEVICES` reportovat víc atomických entries (BTN/DISP/LEDS) podle své role. Pojem "modul" je rekonstruovaný čistě v aplikaci — protokol zná jen atomické typy.
+
+### Moduly
+
+| Modul | Popis | Samostatně? | Čipů | MQTT entries |
+|-------|-------|-------------|------|--------------|
+| **PUM-A** @N | displej + 0/1/2 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže |
+| **PUM-B** @N | samostatné tlačítko | ano | 1 | BTN `N` (bez prefixu) |
+| **PUM-C** @M | vždy 2 tlačítka (+/−), jen jako doplněk PUM-A bez 2 tlačítek | NE | 1 | BTN `1000+M` (+), BTN `M` (−) |
+| **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací |
+
+### PUM-A tlačítka
+
+| Počet | MQTT BTN entries |
+|-------|------------------|
+| 0 | žádné |
+| 1 | BTN `N` (pravé) **nebo** BTN `1000+N` (levé) — strana se ukládá v `buttonSide` |
+| 2 | BTN `1000+N` (levé) + BTN `N` (pravé) |
+
+Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný `2000+N` se nepoužívá. Autoritativní zdroj: [`module_reconstruction.dart`](lib/services/module_reconstruction.dart) a `PumaModule.toDevices()` v [`module.dart`](lib/models/module.dart).
+
+### Klíčová pravidla rekonstrukce
+
+- **PUM-B** a **PUM-C mínus** jsou oba holá `N` — rozlišit se dají jen tak, že PUM-C mínus má vždy párového brata `1000+N`.
+- **LEDS** jsou fyzicky vždy součástí PUM-A (nikdy samostatně). V `GET-DEVICES` se ale objeví jen pokud je jednotka "potřebuje znát" — registrace je volitelná.
+- **DISP** vždy znamená PUM-A.
+- **PUM-C** lze zapojit JEN k PUM-A, které má 0 nebo 1 tlačítko (PUM-C dodá chybějící). Kombinace PUM-A se 2 tlačítky + PUM-C vedle je neplatná.
+- Adresy modulů jsou **nezávislé** — PUM-A na 128, PUM-C na 130 je validní.
+
+### Algoritmus rekonstrukce z `GET-DEVICES`
+
+1. Pro každý DISP `N`: vytvoř PUM-A @N. Podle přítomnosti BTN `1000+N` / BTN `N` urči 0/1/2 tlačítek a stranu. LEDS `N` → `hasLeds=true`.
+2. Pro nezabrané dvojice (BTN `1000+M`, BTN `M`) bez DISP `M` → PUM-C @M.
+3. Zbylé osamocené BTN `N` → PUM-B @N.
+4. Každý DIST → samostatný DIST modul s konfigurací.
+
+---
+
+## Workflow výměny vadného device (REPLACE-FROM)
+
+- Vadný device se fyzicky vymění za nový s **default chip adresou**.
+- **DIST default = 127** (rozsah platných adres 0–126).
+- **DISP default = 247** (rozsah 127–246).
+- Aplikace pošle `REPLACE-FROM` na topic vadného device s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
+- Podporováno od FW `P2L_06033101NT+`.
+- Pro BTN a LEDS protokol (ani README) `REPLACE-FROM` nedokumentuje.
+
+V kódu: `AppState.replaceDevice(...)` → `CommandService.buildReplaceFromCommand(...)`. UI dialog: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart).
+
 ---
 
 ## Common Development Tasks
@@ -147,6 +220,25 @@ Uvnitř `<manifest>` ale mimo `<application>`.
 - Stored as JSON in SharedPreferences under `device_templates` key
 - Used to populate unit configuration dialogs without manual setup
 
+### DIST konfigurace
+`DistConfig` ([models/module.dart](lib/models/module.dart)):
+
+| Pole | Význam | Default |
+|------|--------|---------|
+| `measurePeriod` | perioda měření [ms] | 50 |
+| `timeout` | timeout odpovědi [ms]; po vypršení ALIV hlásí poruchu | 10 |
+| `countMeasures` | počet měření v `maxDeviation` pro stabilní hodnotu | 4 |
+| `maxDeviation` | rozsah stabilního měření [mm] | 20 |
+| `offset` | přičte se k naměřené hodnotě [mm] | 0 |
+| `measureType` | 1=Short(<1m), 2=Middle(<2m), 3=Long(<3m) | 2 |
+
+Volitelně `Segments` (segmentový režim) — zatím první iterace posílá prázdný seznam.
+
+### AppState stavová logika
+- **Auto-fetch:** první ALIVE jednotky v rámci připojení → automatický `GET-DEVICES` (`_initialFetchDone`).
+- **Restart-after-config:** po `ADD-DEVICES`/`RECREATE-DEVICES` s `restartAfter=true` se pošle `RESTART`, pak se čeká na první ALIVE mimo grace window 2 s a teprve potom se znovu volá `GET-DEVICES` (`_pendingRestart`, `_awaitingAliveAfterRestart`, `_restartSentAt`, `_restartGrace`).
+- **Fallback pro firmware bez `O/.../*-DEVICES` odpovědi:** po 200 ms od publish se vynutí `GET-DEVICES` (nebo restart, pokud je požadován).
+
 ### Command Formats
 - **Old units** (ID < 1000): JSON only, topic `I/u{4digit}/SERVER/CMD`
 - **New units** (ID ≥ 1000): Both JSON and BIN formats supported, topic `I/{6digit}/P2L/{device_id}/CMD`
@@ -165,6 +257,20 @@ Uvnitř `<manifest>` ale mimo `<application>`.
 - MQTT errors stored in `_lastError` and exposed via AppState
 - Connection state tracked via `AppMqttState` enum (disconnected, connecting, connected, error)
 - Status messages updated in `_statusMessage` for UI feedback
+
+---
+
+## Deployment topology
+
+Aplikace má 3 nasazovací scénáře:
+
+1. **Cloud server + mobil na mobilních datech** — Nginx servíruje Flutter web build, `/ws` proxyuje na Mosquitto (TCP 1883 / WS 9001). Zákazník otevře `https://app.domena.cz`.
+2. **On-premise server + mobil na Wi-Fi** — identické řešení lokálně, HTTPS volitelné (self-signed).
+3. **Notebook jako dev server** — `flutter run -d web-server --web-port 8080 --web-hostname 0.0.0.0`, mobil i notebook na stejné Wi-Fi, firewall musí povolit port 8080.
+
+**Pro web verzi:** broker musí mít povolený **WebSocket listener** (typicky port 9001 nebo 8083). Aplikace detekuje platformu a volí WS klienta místo TCP.
+
+Detail v [README.md §Typy nasazení](README.md).
 
 ---
 
