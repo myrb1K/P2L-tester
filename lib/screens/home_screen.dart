@@ -1,12 +1,22 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../main.dart' show appVersion;
+import '../models/broker_profile.dart';
 import '../models/device.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
 import '../services/mqtt_service.dart';
+import '../services/unit_ids_io.dart';
 import '../widgets/bulk_config_menu.dart';
 import 'settings_screen.dart';
 import 'templates_screen.dart';
@@ -21,6 +31,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _manualIdController = TextEditingController();
+  /// ID, na které jsme právě poslali `get_param` přes "Ověřit". Jakmile se
+  /// jednotka objeví v `state.units`, pole se v build() vyčistí a tento
+  /// indikátor se resetuje. Pokud modul neodpoví (neexistuje na brokeru),
+  /// zůstane vyplněn a pole tedy uživatel může upravit a zkusit znovu.
+  String? _pendingVerifyId;
 
   @override
   void dispose() {
@@ -98,16 +113,167 @@ class _HomeScreenState extends State<HomeScreen> {
   void _sendManualGetParam() {
     final input = _manualIdController.text.trim();
     if (input.isEmpty) return;
-    // Doplní na 6místné ID: 1017 → 001017
-    final id = input.padLeft(6, '0');
-    context.read<AppState>().sendGetParam(id);
+    final canonical = canonicalUnitId(input);
+    if (canonical == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Neplatné ID (zadej 1–6 cifer)')),
+      );
+      return;
+    }
+    setState(() => _pendingVerifyId = canonical);
+    context.read<AppState>().sendGetParam(canonical);
     FocusScope.of(context).unfocus();
+  }
+
+  Future<void> _onLoadList() async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Načíst seznam P2L modulů',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.single;
+    String? content;
+    try {
+      if (file.bytes != null) {
+        content = utf8.decode(file.bytes!);
+      } else if (file.path != null) {
+        content = await File(file.path!).readAsString();
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Nelze přečíst soubor: $e')));
+      return;
+    }
+    if (content == null) {
+      messenger.showSnackBar(const SnackBar(content: Text('Prázdný soubor.')));
+      return;
+    }
+
+    final parsed = UnitIdsBundle.decode(content);
+    if (!parsed.isOk) {
+      messenger.showSnackBar(SnackBar(content: Text(parsed.error!)));
+      return;
+    }
+
+    // Pokud JSON nese broker profile a v uložených profilech ještě není
+    // (podle názvu, case-insensitive), tiše ho přidá bez aktivace —
+    // analogie addProfileWithoutActivating z BulkConfigMenu.
+    var profileAdded = false;
+    final profileJson = parsed.brokerProfile;
+    if (profileJson != null) {
+      try {
+        final profile = BrokerProfile.fromJson(profileJson);
+        if (!state.isProfileNameTaken(profile.name)) {
+          await state.addProfileWithoutActivating(profile);
+          profileAdded = true;
+        }
+      } catch (_) {
+        // Neplatný profile v JSON — ignoruj, pokračuj s ID.
+      }
+    }
+
+    final created = await state.importUnitIds(parsed.ids!);
+    final parts = <String>['Naimportováno $created nových ID'];
+    if (parsed.skipped.isNotEmpty) {
+      parts.add('${parsed.skipped.length} přeskočeno (neplatné)');
+    }
+    if (profileAdded) {
+      parts.add('broker profil přidán');
+    }
+    messenger.showSnackBar(SnackBar(content: Text(parts.join(' · '))));
+  }
+
+  Future<void> _onExportList() async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ids = state.allUnitIds;
+    if (ids.isEmpty) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Žádné P2L moduly k exportu')));
+      return;
+    }
+    final brokerName = state.activeBrokerName ?? 'P2L';
+    final fileName = unitIdsFileName(brokerName, ids.length, DateTime.now());
+    final activeIdx = state.activeProfileIndex;
+    final profileJson =
+        (activeIdx >= 0 && activeIdx < state.profiles.length)
+            ? state.profiles[activeIdx].toJson()
+            : null;
+    final json = UnitIdsBundle.encode(
+      ids,
+      brokerName: brokerName,
+      appVersion: appVersion,
+      brokerProfile: profileJson,
+    );
+
+    final choice = await showDialog<_ExportChoice>(
+      context: context,
+      builder: (_) => const _ExportChoiceDialog(),
+    );
+    if (choice == null) return;
+    if (!mounted) return;
+
+    try {
+      if (choice == _ExportChoice.share) {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsString(json);
+        await Share.shareXFiles(
+          [XFile(file.path, mimeType: 'application/json')],
+          subject: fileName,
+        );
+      } else {
+        final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+        if (isMobile) {
+          final bytes = utf8.encode(json);
+          final path = await FilePicker.platform.saveFile(
+            dialogTitle: 'Uložit seznam P2L modulů',
+            fileName: fileName,
+            type: FileType.custom,
+            allowedExtensions: const ['json'],
+            bytes: Uint8List.fromList(bytes),
+          );
+          if (path == null) return;
+          messenger.showSnackBar(SnackBar(content: Text('Uloženo: $path')));
+        } else {
+          final path = await FilePicker.platform.saveFile(
+            dialogTitle: 'Uložit seznam P2L modulů',
+            fileName: fileName,
+            type: FileType.custom,
+            allowedExtensions: const ['json'],
+          );
+          if (path == null) return;
+          final outPath =
+              path.toLowerCase().endsWith('.json') ? path : '$path.json';
+          await File(outPath).writeAsString(json);
+          messenger.showSnackBar(SnackBar(content: Text('Uloženo: $outPath')));
+        }
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Export selhal: $e')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, state, _) {
+        // Pokud jsme čekali na verify a jednotka se objevila v seznamu
+        // (odpověděla na get_param nebo poslala ALIVE), vyčisti pole.
+        final pending = _pendingVerifyId;
+        if (pending != null && state.units.containsKey(pending)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_pendingVerifyId != pending) return;
+            _manualIdController.clear();
+            setState(() => _pendingVerifyId = null);
+          });
+        }
         return Listener(
           behavior: HitTestBehavior.deferToChild,
           onPointerDown: (_) => FocusManager.instance.primaryFocus?.unfocus(),
@@ -168,7 +334,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   _ManualIdInput(
                     controller: _manualIdController,
                     onSubmit: _sendManualGetParam,
+                    onLoad: _onLoadList,
+                    onExport: _onExportList,
                     isConnected: state.isConnected,
+                    hasUnits: state.units.isNotEmpty,
                   ),
                   if (state.units.isNotEmpty) _SelectionBar(state: state),
                   Expanded(
@@ -251,16 +420,27 @@ class _StatusBar extends StatelessWidget {
 class _ManualIdInput extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSubmit;
+  final VoidCallback onLoad;
+  final VoidCallback onExport;
   final bool isConnected;
+  final bool hasUnits;
 
   const _ManualIdInput({
     required this.controller,
     required this.onSubmit,
+    required this.onLoad,
+    required this.onExport,
     required this.isConnected,
+    required this.hasUnits,
   });
 
   @override
   Widget build(BuildContext context) {
+    final compactStyle = FilledButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      minimumSize: const Size(0, 40),
+    );
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -279,10 +459,56 @@ class _ManualIdInput extends StatelessWidget {
               onSubmitted: (_) => onSubmit(),
             ),
           ),
-          const SizedBox(width: 8),
-          FilledButton(onPressed: isConnected ? onSubmit : null, child: const Text('Ověřit')),
+          IconButton(
+            icon: const Icon(Icons.file_upload_outlined),
+            tooltip: 'Načíst seznam P2L modulů',
+            onPressed: onLoad,
+          ),
+          IconButton(
+            icon: const Icon(Icons.file_download_outlined),
+            tooltip: 'Exportovat seznam P2L modulů',
+            onPressed: hasUnits ? onExport : null,
+          ),
+          const SizedBox(width: 4),
+          FilledButton(
+            onPressed: isConnected ? onSubmit : null,
+            style: compactStyle,
+            child: const Text('Ověřit'),
+          ),
         ],
       ),
+    );
+  }
+}
+
+enum _ExportChoice { share, save }
+
+class _ExportChoiceDialog extends StatelessWidget {
+  const _ExportChoiceDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    return AlertDialog(
+      title: const Text('Exportovat seznam'),
+      content: const Text('Jak chceš soubor uložit?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        if (isMobile)
+          FilledButton.icon(
+            icon: const Icon(Icons.share),
+            label: const Text('Sdílet'),
+            onPressed: () => Navigator.pop(context, _ExportChoice.share),
+          ),
+        FilledButton.icon(
+          icon: const Icon(Icons.save_alt),
+          label: const Text('Uložit'),
+          onPressed: () => Navigator.pop(context, _ExportChoice.save),
+        ),
+      ],
     );
   }
 }
@@ -493,11 +719,29 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                   Expanded(
                     child: Row(
                       children: [
+                        if (unit.isPlaceholder) ...[
+                          Tooltip(
+                            message:
+                                'Čeká na první odpověď — možná není na brokeru',
+                            child: Icon(
+                              Icons.help_outline,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         SizedBox(
                           width: 40,
                           child: Text(
                             unit.displayName,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: unit.isPlaceholder
+                                  ? Theme.of(context).colorScheme.outline
+                                  : null,
+                            ),
                           ),
                         ),
                         Container(
@@ -505,14 +749,16 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                           height: 8,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: unit.isOnline ? Colors.green : Colors.grey,
+                            color: unit.isPlaceholder
+                                ? Colors.grey.shade300
+                                : (unit.isOnline ? Colors.green : Colors.grey),
                           ),
                         ),
                         const SizedBox(width: 4),
                         SizedBox(
                           width: 42,
                           child: Text(
-                            unit.lastSeenText,
+                            unit.isPlaceholder ? '—' : unit.lastSeenText,
                             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                           ),
                         ),
@@ -673,46 +919,48 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
         content: Consumer<AppState>(
           builder: (_, state, _) {
             final liveUnit = state.units[unit.id] ?? unit;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('ID: ${int.tryParse(liveUnit.id)?.toString() ?? liveUnit.id}'),
-                if (liveUnit.firmware != null) Text('FW: ${liveUnit.firmware}'),
-                if (liveUnit.hwModel != null) Text('HW: ${liveUnit.hwModel}'),
-                if (liveUnit.ip != null) Text('IP: ${liveUnit.ip}'),
-                if (liveUnit.mac != null) Text('MAC: ${liveUnit.mac}'),
-                if (liveUnit.ssid != null) Text('SSID: ${liveUnit.ssid}'),
-                if (liveUnit.mqttServer != null)
-                  Text('MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'),
-                if (liveUnit.battery != null)
-                  Text('Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'),
-                Text('Brightness: ${liveUnit.brightness}'),
-                if (liveUnit.ledsPerPort.isNotEmpty)
-                  Text(
-                    'LEDs: ${liveUnit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
-                  ),
-                const SizedBox(height: 8),
-                Text('Devices: $totalDevices'),
-                Text('PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist'),
-                Text('BTN: $btnCount · DISP: $dispCount · LEDS: $ledsCount · DIST: $distCount'),
-                const SizedBox(height: 8),
-                Text('Last seen: ${liveUnit.lastSeenText}'),
-                const SizedBox(height: 8),
-                if (liveUnit.supportsBin)
-                  Row(
-                    children: [
-                      const Text('Režim LED příkazů:'),
-                      const SizedBox(width: 8),
-                      _BinOldToggle(
-                        useBin: liveUnit.useBin,
-                        onToggle: () => state.toggleBinMode(liveUnit.id),
-                      ),
-                    ],
-                  )
-                else
-                  const Text('Režim LED příkazů: OLD (BIN nepodporován)'),
-              ],
+            return SelectionArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('ID: ${int.tryParse(liveUnit.id)?.toString() ?? liveUnit.id}'),
+                  if (liveUnit.firmware != null) Text('FW: ${liveUnit.firmware}'),
+                  if (liveUnit.hwModel != null) Text('HW: ${liveUnit.hwModel}'),
+                  if (liveUnit.ip != null) Text('IP: ${liveUnit.ip}'),
+                  if (liveUnit.mac != null) Text('MAC: ${liveUnit.mac}'),
+                  if (liveUnit.ssid != null) Text('SSID: ${liveUnit.ssid}'),
+                  if (liveUnit.mqttServer != null)
+                    Text('MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'),
+                  if (liveUnit.battery != null)
+                    Text('Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'),
+                  Text('Brightness: ${liveUnit.brightness}'),
+                  if (liveUnit.ledsPerPort.isNotEmpty)
+                    Text(
+                      'LEDs: ${liveUnit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
+                    ),
+                  const SizedBox(height: 8),
+                  Text('Devices: $totalDevices'),
+                  Text('PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist'),
+                  Text('BTN: $btnCount · DISP: $dispCount · LEDS: $ledsCount · DIST: $distCount'),
+                  const SizedBox(height: 8),
+                  Text('Last seen: ${liveUnit.lastSeenText}'),
+                  const SizedBox(height: 8),
+                  if (liveUnit.supportsBin)
+                    Row(
+                      children: [
+                        const Text('Režim LED příkazů:'),
+                        const SizedBox(width: 8),
+                        _BinOldToggle(
+                          useBin: liveUnit.useBin,
+                          onToggle: () => state.toggleBinMode(liveUnit.id),
+                        ),
+                      ],
+                    )
+                  else
+                    const Text('Režim LED příkazů: OLD (BIN nepodporován)'),
+                ],
+              ),
             );
           },
         ),

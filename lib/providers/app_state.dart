@@ -14,6 +14,7 @@ import '../models/unit.dart';
 import '../services/command_service.dart';
 import '../services/module_reconstruction.dart';
 import '../services/mqtt_service.dart';
+import '../services/unit_ids_io.dart';
 
 class AppState extends ChangeNotifier {
   final MqttService _mqttService = MqttService();
@@ -44,6 +45,27 @@ class AppState extends ChangeNotifier {
   // Getters pro profily
   List<BrokerProfile> get profiles => List.unmodifiable(_profiles);
   int get activeProfileIndex => _activeProfileIndex;
+
+  /// Název aktivního brokeru, nebo `null` pokud žádný profil není vybraný.
+  /// Používá se pro pojmenování exportního JSON.
+  String? get activeBrokerName {
+    if (_activeProfileIndex < 0 || _activeProfileIndex >= _profiles.length) {
+      return null;
+    }
+    return _profiles[_activeProfileIndex].name;
+  }
+
+  /// Všechna aktuálně známá ID P2L modulů (zachovává tvar v `_units.keys`).
+  /// Seřazená numericky pro stabilní export.
+  List<String> get allUnitIds {
+    final ids = _units.keys.toList();
+    ids.sort((a, b) {
+      final na = int.tryParse(a.startsWith('u') ? a.substring(1) : a) ?? 0;
+      final nb = int.tryParse(b.startsWith('u') ? b.substring(1) : b) ?? 0;
+      return na.compareTo(nb);
+    });
+    return ids;
+  }
 
   // State
   final Map<String, P2LUnit> _units = {};
@@ -340,6 +362,9 @@ class AppState extends ChangeNotifier {
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (_units.isNotEmpty) {
           for (final unit in _units.values) {
+            // Placeholder (importované ID, ještě neodpovědělo) přeskakujeme —
+            // nemá smysl počítat jeho lastSeen do online/offline výpočtu.
+            if (unit.isPlaceholder) continue;
             final wasOnline = unit.isOnline;
             unit.isOnline = DateTime.now().difference(unit.lastSeen).inSeconds < 360;
             // Při online→offline odebrat z waved setu, aby návrat (kdykoliv,
@@ -494,14 +519,22 @@ class AppState extends ChangeNotifier {
     final unitId = _normUnitId(rawId);
 
     if (_units.containsKey(unitId)) {
-      _units[unitId]!.lastSeen = DateTime.now();
-      _units[unitId]!.isOnline = true;
-      _units[unitId]!.isNewGen = isNewGen;
+      final u = _units[unitId]!;
+      // Placeholder (z importu) → překlopit na plnou jednotku.
+      final wasPlaceholder = u.isPlaceholder;
+      u.lastSeen = DateTime.now();
+      u.isOnline = true;
+      u.isNewGen = isNewGen;
+      u.isPlaceholder = false;
+      if (wasPlaceholder && json['HWModel'] != null) {
+        u.hwModel = json['HWModel'] as String;
+      }
       if (json['battery'] != null) {
-        _units[unitId]!.battery = (json['battery'] as num).toDouble();
+        u.battery = (json['battery'] as num).toDouble();
       }
       if (json['firmware'] != null) {
-        _units[unitId]!.firmware = json['firmware'] as String;
+        u.firmware = json['firmware'] as String;
+        u.useBin = CommandService.firmwareSupportsBin(u.firmware);
       }
     } else {
       _units[unitId] = P2LUnit.fromAlive(unitId, json, isNewGen: isNewGen);
@@ -1176,14 +1209,56 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void scanAll() {
+  /// Pošle `get_param` na všechny známé jednotky s 100 ms pauzou mezi publishi
+  /// (aby se nezahltil broker při desítkách jednotek po importu). Aktualizuje
+  /// `_statusMessage` v každém kroku, takže UI ukazuje progress `X / N`.
+  Future<void> scanAll() async {
     final payload = CommandService.buildGetParamCommand();
-    for (final unitId in _units.keys) {
+    final targets = _units.keys.toList();
+    if (targets.isEmpty) {
+      _statusMessage = 'Žádné P2L moduly k aktualizaci';
+      notifyListeners();
+      return;
+    }
+    var sent = 0;
+    for (final unitId in targets) {
       final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
+      sent++;
+      _statusMessage = 'Scan: $sent / ${targets.length}';
+      notifyListeners();
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
     }
-    _statusMessage = 'Scan odeslan na ${_units.length} jednotek';
+    _statusMessage = 'Scan odeslán na $sent P2L modulů';
     notifyListeners();
+  }
+
+  /// Naimportuje seznam ID P2L modulů. Pro každé neznámé ID vytvoří
+  /// placeholder jednotku (zobrazí se hned se šedou ikonou v UI). Pak pošle
+  /// `get_param` na všechny jednotky (přes `scanAll`). Jednotky, které na
+  /// brokeru reálně existují, odpoví a placeholder se přepne na plnou.
+  /// Vrací počet nově vytvořených placeholderů.
+  Future<int> importUnitIds(List<String> rawIds) async {
+    var created = 0;
+    for (final raw in rawIds) {
+      final canonical = canonicalUnitId(raw);
+      if (canonical == null) continue;
+      if (_units.containsKey(canonical)) continue;
+      final n = int.tryParse(canonical) ?? 0;
+      _units[canonical] = P2LUnit.placeholder(
+        canonical,
+        isNewGen: n >= 1000,
+      );
+      created++;
+    }
+    _statusMessage = created > 0
+        ? 'Importováno $created nových P2L modulů, dotazuji…'
+        : 'Žádné nové ID — všechny už v seznamu';
+    notifyListeners();
+    await scanAll();
+    return created;
   }
 
   @override
