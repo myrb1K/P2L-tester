@@ -20,6 +20,11 @@ class P2LUnit {
   /// příkazy. False = stará jednotka (`I/u<4dig>/SERVER/CMD`). Detekuje se z
   /// formátu příchozího ALIVE topicu (přítomnost prefixu `u`).
   bool isNewGen;
+  /// True = jednotka byla přidána ručně (import seznamu ID) a zatím
+  /// neodpověděla na get_param ani neposlala ALIVE. Tick timer ji přeskakuje
+  /// (neoznačuje "offline po 360s") a v UI dostane šedou ikonu `help_outline`.
+  /// Resetuje se na false v `updateFromGetParam` nebo v `AppState._handleAlive`.
+  bool isPlaceholder;
 
   P2LUnit({
     required this.id,
@@ -38,9 +43,22 @@ class P2LUnit {
     this.isOnline = true,
     this.useBin = false,
     this.isNewGen = false,
+    this.isPlaceholder = false,
   })  : ledsPerPort = ledsPerPort ?? {},
         colors = colors ?? {},
         lastSeen = lastSeen ?? DateTime.now();
+
+  /// Placeholder jednotka vytvořená z importu seznamu ID. Nemá žádné údaje
+  /// kromě `id` a `isNewGen`. Po prvním ALIVE / get_param odpovědi se přepne
+  /// na plnou jednotku (`isPlaceholder = false`).
+  factory P2LUnit.placeholder(String id, {required bool isNewGen}) {
+    return P2LUnit(
+      id: id,
+      isNewGen: isNewGen,
+      isOnline: false,
+      isPlaceholder: true,
+    );
+  }
 
   factory P2LUnit.fromAlive(
     String unitId,
@@ -85,6 +103,7 @@ class P2LUnit {
 
     lastSeen = DateTime.now();
     isOnline = true;
+    isPlaceholder = false;
     useBin = CommandService.firmwareSupportsBin(firmware);
   }
 
