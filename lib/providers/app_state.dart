@@ -355,6 +355,7 @@ class AppState extends ChangeNotifier {
       _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
       _mqttService.subscribe('O/+/DIST/+/REPLACE-FROM');
       _mqttService.subscribe('O/+/DISP/+/REPLACE-FROM');
+      _mqttService.subscribe('O/+/BTN/+/REPLACE-FROM');
       // BTN press notifikace pro vizuální flash na chipech
       _mqttService.subscribe('D/+/BTN/+/UPDATE');
       _statusMessage = 'Připojeno, čekám na ALIVE…';

@@ -256,10 +256,11 @@ Volitelně `Segments` (segmentový režim) — zatím první iterace posílá pr
 - Vadný device se fyzicky vymění za nový s **factory default chip adresou**.
 - **DIST default = 127** (rozsah platných adres 0–126).
 - **DISP default = 246** (PUM-A; rozsah pro provoz 127–247).
-- **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247). REPLACE-FROM zatím nedokumentován pro BTN, hodnota slouží pro UI hinty a budoucí rozšíření.
-- Aplikace pošle `REPLACE-FROM` na topic vadného device s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
-- Podporováno od FW `P2L_06033101NT+` (jen DIST a DISP).
-- Pro LEDS protokol REPLACE-FROM nedokumentuje (LEDS se vyměňují s PUM-A jako celek).
+- **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247).
+- Aplikace pošle `REPLACE-FROM` na primární adresu vadného čipu s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
+- Firmware atomicky přemapuje všechny entries v rámci 1 fyzického čipu (PUM-A: DISP + volitelně LEDS + BTN; PUM-B: BTN + volitelně LEDS; PUM-C: BTN @M + BTN @1000+M). Aplikace tedy posílá 1 REPLACE-FROM na modul.
+- LEDS se v UI samostatně nenabízí — vyměňují se s PUM-A / PUM-B jako celek.
+- Podporováno od FW `P2L_06033101NT+`.
 
 V kódu: `AppState.replaceDevice(...)` → `CommandService.buildReplaceFromCommand(...)`. UI dialog: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart).
 

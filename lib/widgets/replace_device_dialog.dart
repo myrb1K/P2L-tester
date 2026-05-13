@@ -45,11 +45,13 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
   static DeviceType _resolveType(PumaModule m) {
     switch (m.type) {
       case ModuleType.pumA:
-        return DeviceType.disp; // vyměňuje se samotný displej, tělo modulu
+        return DeviceType.disp; // primární device PUM-A; LEDS se přemapují s ním
+      case ModuleType.pumB:
+        return DeviceType.btn; // 1 BTN čip
+      case ModuleType.pumC:
+        return DeviceType.btn; // primární BTN @M; firmware přemapuje i 1000+M
       case ModuleType.dist:
         return DeviceType.dist;
-      default:
-        return DeviceType.btn; // nepodporováno
     }
   }
 
