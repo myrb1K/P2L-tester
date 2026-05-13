@@ -74,12 +74,14 @@ DEVICE_ID v topicu je **2-ciferný kód typu + 4-ciferná adresa** (např. `0502
 
 ### Moduly
 
-| Modul | Popis | Samostatně? | Čipů | MQTT entries |
-|-------|-------|-------------|------|--------------|
-| **PUM-A** @N | displej + 0/1/2 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže |
-| **PUM-B** @N | samostatné tlačítko | ano | 1 | BTN `N` (bez prefixu) |
-| **PUM-C** @M | vždy 2 tlačítka (+/−), jen jako doplněk PUM-A bez 2 tlačítek | NE | 1 | BTN `1000+M` (+), BTN `M` (−) |
-| **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací |
+| Modul | Popis | Samostatně? | Čipů | MQTT entries | Factory default |
+|-------|-------|-------------|------|--------------|-----------------|
+| **PUM-A** @N | displej + 0/1/2 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže | **246** (DISP) |
+| **PUM-B** @N | samostatné tlačítko | ano | 1 | BTN `N` (bez prefixu) | **247** (BTN) |
+| **PUM-C** @M | vždy 2 tlačítka (+/−), jen jako doplněk PUM-A bez 2 tlačítek | NE | 1 | BTN `1000+M` (+), BTN `M` (−) | **247** (BTN) |
+| **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací | **127** |
+
+**Factory default** = adresa, kterou má čip z výroby před přečipováním. Po fyzické výměně vadného kusu aplikace pošle `REPLACE-FROM` s touto adresou → jednotka přečipuje nový kus na ID původního. Autoritativní zdroj: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
 
 ### PUM-A tlačítka
 
@@ -110,14 +112,15 @@ Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný
 
 ## Workflow výměny vadného device (REPLACE-FROM)
 
-- Vadný device se fyzicky vymění za nový s **default chip adresou**.
+- Vadný device se fyzicky vymění za nový s **factory default adresou** (viz tabulka v sekci Moduly).
 - **DIST default = 127** (rozsah platných adres 0–126).
-- **DISP default = 247** (rozsah 127–246).
+- **DISP default = 246** (PUM-A; rozsah pro provoz 127–247).
+- **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247). REPLACE-FROM protokol pro BTN zatím nedokumentuje, hodnota slouží pro UI hinty a budoucí rozšíření.
 - Aplikace pošle `REPLACE-FROM` na topic vadného device s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
-- Podporováno od FW `P2L_06033101NT+`.
-- Pro BTN a LEDS protokol (ani README) `REPLACE-FROM` nedokumentuje.
+- Podporováno od FW `P2L_06033101NT+` (jen pro DIST a DISP).
+- Pro LEDS protokol REPLACE-FROM nedokumentuje vůbec (LEDS se vyměňují s PUM-A jako celek).
 
-V kódu: `AppState.replaceDevice(...)` → `CommandService.buildReplaceFromCommand(...)`. UI dialog: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart).
+V kódu: `AppState.replaceDevice(...)` → `CommandService.buildReplaceFromCommand(...)`. UI dialog: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart). Defaulty: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
 
 ---
 

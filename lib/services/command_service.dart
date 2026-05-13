@@ -435,12 +435,18 @@ class CommandService {
     );
   }
 
-  /// Default (výchozí) adresa nového náhradního kusu podle typu device.
-  /// DIST: 127 (rozsah 0-126 pro provoz), DISP: 247 (rozsah 127-246).
+  /// Factory default adresa nového čipu podle typu device (z výroby).
+  /// Po REPLACE-FROM aplikace přečipuje nový kus na ID původního.
+  ///
+  /// - DIST: 127 (rozsah 0-126 pro provoz)
+  /// - DISP: 246 (PUM-A; rozsah 127-247 pro provoz)
+  /// - BTN: 247 (PUM-B i PUM-C; rozsah 127-247 pro provoz; REPLACE-FROM zatím
+  ///   nepodporován protokolem, hodnota slouží pro UI hinty a budoucí rozšíření)
   static int defaultReplacementAddress(DeviceType type) => switch (type) {
         DeviceType.dist => 127,
-        DeviceType.disp => 247,
-        _ => 0, // BTN/LEDS: REPLACE-FROM není v README dokumentováno
+        DeviceType.disp => 246,
+        DeviceType.btn => 247,
+        _ => 0, // LEDS: REPLACE-FROM není v README dokumentováno
       };
 
   /// Zda je výměna přes REPLACE-FROM podporována protokolem pro daný typ.
