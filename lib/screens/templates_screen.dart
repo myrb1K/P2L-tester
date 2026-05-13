@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../main.dart' show appVersion;
 import '../models/device_template.dart';
+import '../models/module.dart';
 import '../providers/app_state.dart';
 import '../services/template_io.dart';
 import '../widgets/apply_template_sheet.dart';
@@ -24,6 +25,25 @@ class TemplatesScreen extends StatelessWidget {
         builder: (_) => TemplateEditorScreen(initial: template),
       ),
     );
+  }
+
+  Future<void> _duplicate(
+      BuildContext context, AppState state, DeviceTemplate t) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final unique = state.suggestUniqueTemplateName(t.name);
+    final clonedModules =
+        t.modules.map((m) => PumaModule.fromJson(m.toJson())).toList();
+    final copy = DeviceTemplate(
+      name: unique,
+      modules: clonedModules,
+      created: DateTime.now(),
+    );
+    await state.saveTemplate(copy);
+    messenger.showSnackBar(
+      SnackBar(content: Text('Duplikováno jako "$unique"')),
+    );
+    if (!context.mounted) return;
+    await _edit(context, template: copy);
   }
 
   Future<void> _delete(BuildContext context, AppState state, DeviceTemplate t) async {
@@ -310,11 +330,13 @@ class TemplatesScreen extends StatelessWidget {
                         trailing: PopupMenuButton<String>(
                           onSelected: (v) {
                             if (v == 'edit') _edit(context, template: t);
+                            if (v == 'duplicate') _duplicate(context, state, t);
                             if (v == 'export') _exportSingle(context, t);
                             if (v == 'delete') _delete(context, state, t);
                           },
                           itemBuilder: (_) => const [
                             PopupMenuItem(value: 'edit', child: Text('Upravit')),
+                            PopupMenuItem(value: 'duplicate', child: Text('Duplikovat')),
                             PopupMenuItem(value: 'export', child: Text('Exportovat')),
                             PopupMenuItem(
                               value: 'delete',
