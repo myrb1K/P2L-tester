@@ -102,8 +102,8 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     if (_type == ModuleType.dist && (addr < 1 || addr > 126)) {
       return 'DIST adresa musí být 1–126.';
     }
-    if (_type != ModuleType.dist && (addr < 127 || addr > 246)) {
-      return '${_type.label} adresa musí být 127–246.';
+    if (_type != ModuleType.dist && (addr < 127 || addr > 247)) {
+      return '${_type.label} adresa musí být 127–247.';
     }
     if (_type == ModuleType.pumC && !widget.hasPumAWithRoom && widget.initial == null) {
       return 'PUM-C lze přidat jen k PUM-A, které má 0 nebo 1 tlačítko.';
@@ -211,7 +211,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
               decoration: InputDecoration(
                 labelText: _type == ModuleType.dist
                     ? 'Adresa sensoru (1–126)'
-                    : 'Adresa / číslo čipu (127–246)',
+                    : 'Adresa / číslo čipu (127–247)',
                 hintText: _type == ModuleType.pumA
                     ? 'např. 128 (DISP N, tlačítka 1N/2N)'
                     : _type == ModuleType.pumC

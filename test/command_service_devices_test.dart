@@ -34,10 +34,10 @@ void main() {
         unitId: '001001',
         type: DeviceType.disp,
         oldAddress: 128,
-        newDefaultAddress: 247,
+        newDefaultAddress: 246,
       );
       expect(cmd.topic, 'I/001001/DISP/050128/REPLACE-FROM');
-      expect(cmd.payload, '{"Id":247}');
+      expect(cmd.payload, '{"Id":246}');
     });
   });
 
@@ -110,12 +110,18 @@ void main() {
     });
   });
 
-  group('Default addresses', () {
+  group('Factory default addresses', () {
     test('DIST default = 127', () {
       expect(CommandService.defaultReplacementAddress(DeviceType.dist), 127);
     });
-    test('DISP default = 247', () {
-      expect(CommandService.defaultReplacementAddress(DeviceType.disp), 247);
+    test('DISP default = 246 (PUM-A)', () {
+      expect(CommandService.defaultReplacementAddress(DeviceType.disp), 246);
+    });
+    test('BTN default = 247 (PUM-B / PUM-C)', () {
+      expect(CommandService.defaultReplacementAddress(DeviceType.btn), 247);
+    });
+    test('LEDS default = 0 (REPLACE-FROM nedokumentován)', () {
+      expect(CommandService.defaultReplacementAddress(DeviceType.leds), 0);
     });
     test('supportsReplace jen DIST a DISP', () {
       expect(CommandService.supportsReplace(DeviceType.dist), true);
