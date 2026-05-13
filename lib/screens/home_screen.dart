@@ -880,37 +880,14 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
   }
 
   void _showUnitInfo(BuildContext context, P2LUnit unit) {
-    final modules = context.read<AppState>().modulesForUnit(unit.id) ?? const [];
-    final pumA = modules.where((m) => m.type == ModuleType.pumA).length;
-    final pumB = modules.where((m) => m.type == ModuleType.pumB).length;
-    final pumC = modules.where((m) => m.type == ModuleType.pumC).length;
-    final dist = modules.where((m) => m.type == ModuleType.dist).length;
-    final allDevices = modules.expand((m) => m.toDevices()).toList();
-    final totalDevices = allDevices.length;
-    final btnCount = allDevices.where((d) => d.type == DeviceType.btn).length;
-    final dispCount = allDevices.where((d) => d.type == DeviceType.disp).length;
-    final ledsCount = allDevices.where((d) => d.type == DeviceType.leds).length;
-    final distCount = allDevices.where((d) => d.type == DeviceType.dist).length;
-
-    final infoLines = <String>[
-      'P2L modul ${unit.displayName}',
-      'ID: ${int.tryParse(unit.id)?.toString() ?? unit.id}',
-      if (unit.firmware != null) 'FW: ${unit.firmware}',
-      if (unit.hwModel != null) 'HW: ${unit.hwModel}',
-      if (unit.ip != null) 'IP: ${unit.ip}',
-      if (unit.mac != null) 'MAC: ${unit.mac}',
-      if (unit.ssid != null) 'SSID: ${unit.ssid}',
-      if (unit.mqttServer != null) 'MQTT: ${unit.mqttServer}:${unit.mqttPort}',
-      if (unit.battery != null) 'Bat: ${unit.battery!.toStringAsFixed(1)} V',
-      'Brightness: ${unit.brightness}',
-      if (unit.ledsPerPort.isNotEmpty)
-        'LEDs: ${unit.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
-      'Devices: $totalDevices',
-      'PUM-A: $pumA · PUM-B: $pumB · PUM-C: $pumC · DIST: $dist',
-      'BTN: $btnCount · DISP: $dispCount · LEDS: $ledsCount · DIST: $distCount',
-      'Last seen: ${unit.lastSeenText}',
-      'BIN: ${unit.supportsBin ? "ano" : "ne"}',
-    ];
+    final state = context.read<AppState>();
+    // Auto-fetch při otevření Info: pošli get_param + GET-DEVICES, aby se
+    // chybějící údaje (IP/MAC/SSID/MQTT, počty devices) doplnily samy.
+    // Dialog rebuilduje přes Consumer, takže se pole objeví hned po odpovědi.
+    if (state.isConnected && !unit.isPlaceholder) {
+      state.sendGetParam(unit.id);
+      state.fetchDevices(unit.id);
+    }
 
     showDialog(
       context: context,
@@ -919,21 +896,62 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
         content: Consumer<AppState>(
           builder: (_, state, _) {
             final liveUnit = state.units[unit.id] ?? unit;
+            final modules = state.modulesForUnit(liveUnit.id) ?? const [];
+            final pumA = modules.where((m) => m.type == ModuleType.pumA).length;
+            final pumB = modules.where((m) => m.type == ModuleType.pumB).length;
+            final pumC = modules.where((m) => m.type == ModuleType.pumC).length;
+            final dist = modules.where((m) => m.type == ModuleType.dist).length;
+            final allDevices = modules.expand((m) => m.toDevices()).toList();
+            final totalDevices = allDevices.length;
+            final btnCount = allDevices.where((d) => d.type == DeviceType.btn).length;
+            final dispCount = allDevices.where((d) => d.type == DeviceType.disp).length;
+            final ledsCount = allDevices.where((d) => d.type == DeviceType.leds).length;
+            final distCount = allDevices.where((d) => d.type == DeviceType.dist).length;
+            // "Načítání…" pokud kompletní info ještě nedorazilo (klíčové = MAC).
+            // Vlastní waiting indikátor lze schovat, jakmile přijde get_param odpověď.
+            final waiting = liveUnit.mac == null;
             return SelectionArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (waiting)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Načítání podrobností…',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Text('ID: ${int.tryParse(liveUnit.id)?.toString() ?? liveUnit.id}'),
-                  if (liveUnit.firmware != null) Text('FW: ${liveUnit.firmware}'),
-                  if (liveUnit.hwModel != null) Text('HW: ${liveUnit.hwModel}'),
-                  if (liveUnit.ip != null) Text('IP: ${liveUnit.ip}'),
-                  if (liveUnit.mac != null) Text('MAC: ${liveUnit.mac}'),
-                  if (liveUnit.ssid != null) Text('SSID: ${liveUnit.ssid}'),
-                  if (liveUnit.mqttServer != null)
-                    Text('MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'),
-                  if (liveUnit.battery != null)
-                    Text('Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'),
+                  Text('FW: ${liveUnit.firmware ?? '—'}'),
+                  Text('HW: ${liveUnit.hwModel ?? '—'}'),
+                  Text('IP: ${liveUnit.ip ?? '—'}'),
+                  Text('MAC: ${liveUnit.mac ?? '—'}'),
+                  Text('SSID: ${liveUnit.ssid ?? '—'}'),
+                  Text(liveUnit.mqttServer != null
+                      ? 'MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'
+                      : 'MQTT: —'),
+                  Text(liveUnit.battery != null
+                      ? 'Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'
+                      : 'Bat: —'),
                   Text('Brightness: ${liveUnit.brightness}'),
                   if (liveUnit.ledsPerPort.isNotEmpty)
                     Text(
@@ -986,7 +1004,37 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
               minimumSize: const Size(0, 36),
             ),
             onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: infoLines.join('\n')));
+              final live = context.read<AppState>().units[unit.id] ?? unit;
+              final mods = context.read<AppState>().modulesForUnit(live.id) ?? const [];
+              final pA = mods.where((m) => m.type == ModuleType.pumA).length;
+              final pB = mods.where((m) => m.type == ModuleType.pumB).length;
+              final pC = mods.where((m) => m.type == ModuleType.pumC).length;
+              final d = mods.where((m) => m.type == ModuleType.dist).length;
+              final devs = mods.expand((m) => m.toDevices()).toList();
+              final btn = devs.where((x) => x.type == DeviceType.btn).length;
+              final disp = devs.where((x) => x.type == DeviceType.disp).length;
+              final leds = devs.where((x) => x.type == DeviceType.leds).length;
+              final distD = devs.where((x) => x.type == DeviceType.dist).length;
+              final lines = <String>[
+                'P2L modul ${live.displayName}',
+                'ID: ${int.tryParse(live.id)?.toString() ?? live.id}',
+                if (live.firmware != null) 'FW: ${live.firmware}',
+                if (live.hwModel != null) 'HW: ${live.hwModel}',
+                if (live.ip != null) 'IP: ${live.ip}',
+                if (live.mac != null) 'MAC: ${live.mac}',
+                if (live.ssid != null) 'SSID: ${live.ssid}',
+                if (live.mqttServer != null) 'MQTT: ${live.mqttServer}:${live.mqttPort}',
+                if (live.battery != null) 'Bat: ${live.battery!.toStringAsFixed(1)} V',
+                'Brightness: ${live.brightness}',
+                if (live.ledsPerPort.isNotEmpty)
+                  'LEDs: ${live.ledsPerPort.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
+                'Devices: ${devs.length}',
+                'PUM-A: $pA · PUM-B: $pB · PUM-C: $pC · DIST: $d',
+                'BTN: $btn · DISP: $disp · LEDS: $leds · DIST: $distD',
+                'Last seen: ${live.lastSeenText}',
+                'BIN: ${live.supportsBin ? "ano" : "ne"}',
+              ];
+              await Clipboard.setData(ClipboardData(text: lines.join('\n')));
               if (!dialogCtx.mounted) return;
               ScaffoldMessenger.of(dialogCtx).showSnackBar(
                 const SnackBar(
