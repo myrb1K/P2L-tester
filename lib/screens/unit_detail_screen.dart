@@ -348,6 +348,11 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                           dispAddress: m.baseAddress,
                           data: 'AHOJ',
                         ),
+                        onShowAddress: (m) => state.sendDispData(
+                          unitId: widget.unitId,
+                          dispAddress: m.baseAddress,
+                          data: m.baseAddress.toString().padLeft(4, '0'),
+                        ),
                         onClearDisplay: (m) => state.sendDispData(
                           unitId: widget.unitId,
                           dispAddress: m.baseAddress,
@@ -464,6 +469,7 @@ class _ModulesGroupedList extends StatelessWidget {
   final void Function(PumaModule) onEdit;
   final void Function(PumaModule) onDelete;
   final void Function(PumaModule) onTestDisplay;
+  final void Function(PumaModule) onShowAddress;
   final void Function(PumaModule) onClearDisplay;
   final void Function(PumaModule) onLedsOn;
   final void Function(PumaModule) onLedsOff;
@@ -476,6 +482,7 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onTestDisplay,
+    required this.onShowAddress,
     required this.onClearDisplay,
     required this.onLedsOn,
     required this.onLedsOff,
@@ -523,6 +530,7 @@ class _ModulesGroupedList extends StatelessWidget {
               onDelete: onDelete,
               canReplace: canReplace,
               onTestDisplay: type == ModuleType.pumA ? onTestDisplay : null,
+              onShowAddress: type == ModuleType.pumA ? onShowAddress : null,
               onClearDisplay: type == ModuleType.pumA ? onClearDisplay : null,
               onLedsOn: (type == ModuleType.pumA || type == ModuleType.pumB)
                   ? onLedsOn
@@ -545,6 +553,7 @@ class _GroupSection extends StatelessWidget {
   final void Function(PumaModule) onDelete;
   final void Function(PumaModule)? onEdit;
   final void Function(PumaModule)? onTestDisplay;
+  final void Function(PumaModule)? onShowAddress;
   final void Function(PumaModule)? onClearDisplay;
   final void Function(PumaModule)? onLedsOn;
   final void Function(PumaModule)? onLedsOff;
@@ -560,6 +569,7 @@ class _GroupSection extends StatelessWidget {
     required this.canReplace,
     this.onEdit,
     this.onTestDisplay,
+    this.onShowAddress,
     this.onClearDisplay,
     this.onLedsOn,
     this.onLedsOff,
@@ -632,6 +642,15 @@ class _GroupSection extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   iconSize: 18,
+                  tooltip: 'Adresu na každý displej (0130, 0246, …)',
+                  icon: const Icon(Icons.pin, color: Colors.blue),
+                  onPressed: () => _bulkDispAddresses(context),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  iconSize: 18,
                   tooltip: 'Smazat text na všech displejích (broadcast)',
                   icon: const Icon(Icons.format_clear),
                   onPressed: () => _bulkDisp(context, ''),
@@ -653,6 +672,7 @@ class _GroupSection extends StatelessWidget {
                   onEdit: onEdit != null ? () => onEdit!(m) : null,
                   onDelete: () => onDelete(m),
                   onTestDisplay: onTestDisplay != null ? () => onTestDisplay!(m) : null,
+                  onShowAddress: onShowAddress != null ? () => onShowAddress!(m) : null,
                   onClearDisplay: onClearDisplay != null ? () => onClearDisplay!(m) : null,
                   onLedsOn: onLedsOn != null && m.hasLeds ? () => onLedsOn!(m) : null,
                   onLedsOff: onLedsOff != null && m.hasLeds ? () => onLedsOff!(m) : null,
@@ -684,6 +704,18 @@ class _GroupSection extends StatelessWidget {
     // DISP adresa 0 = broadcast na všechny displeje jednotky (1 MQTT zpráva).
     await context.read<AppState>().sendDispData(unitId: unitId, dispAddress: 0, data: text);
   }
+
+  Future<void> _bulkDispAddresses(BuildContext context) async {
+    final state = context.read<AppState>();
+    for (final m in modules) {
+      await state.sendDispData(
+        unitId: unitId,
+        dispAddress: m.baseAddress,
+        data: m.baseAddress.toString().padLeft(4, '0'),
+      );
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+  }
 }
 
 class _AddressChip extends StatelessWidget {
@@ -694,6 +726,7 @@ class _AddressChip extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback onDelete;
   final VoidCallback? onTestDisplay;
+  final VoidCallback? onShowAddress;
   final VoidCallback? onClearDisplay;
   final VoidCallback? onLedsOn;
   final VoidCallback? onLedsOff;
@@ -706,6 +739,7 @@ class _AddressChip extends StatelessWidget {
     required this.onDelete,
     this.onEdit,
     this.onTestDisplay,
+    this.onShowAddress,
     this.onClearDisplay,
     this.onLedsOn,
     this.onLedsOff,
@@ -748,6 +782,7 @@ class _AddressChip extends StatelessWidget {
         if (v == 'edit') onEdit?.call();
         if (v == 'delete') onDelete();
         if (v == 'test_disp') onTestDisplay?.call();
+        if (v == 'show_addr') onShowAddress?.call();
         if (v == 'clear_disp') onClearDisplay?.call();
         if (v == 'leds_on') onLedsOn?.call();
         if (v == 'leds_off') onLedsOff?.call();
@@ -769,6 +804,17 @@ class _AddressChip extends StatelessWidget {
                 Icon(Icons.text_fields, size: 18, color: Colors.blue),
                 SizedBox(width: 8),
                 Text('Test displeje (AHOJ)'),
+              ],
+            ),
+          ),
+        if (onShowAddress != null)
+          PopupMenuItem(
+            value: 'show_addr',
+            child: Row(
+              children: [
+                const Icon(Icons.pin, size: 18, color: Colors.blue),
+                const SizedBox(width: 8),
+                Text('Adresa na displej (${module.baseAddress.toString().padLeft(4, '0')})'),
               ],
             ),
           ),
