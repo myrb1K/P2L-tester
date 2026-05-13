@@ -77,7 +77,7 @@ DEVICE_ID v topicu je **2-ciferný kód typu + 4-ciferná adresa** (např. `0502
 | Modul | Popis | Samostatně? | Čipů | MQTT entries | Factory default |
 |-------|-------|-------------|------|--------------|-----------------|
 | **PUM-A** @N | displej + 0/1/2 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže | **246** (DISP) |
-| **PUM-B** @N | samostatné tlačítko | ano | 1 | BTN `N` (bez prefixu) | **247** (BTN) |
+| **PUM-B** @N | samostatné tlačítko + volit. LEDS | ano | 1 | BTN `N` (bez prefixu) + volit. LEDS `N` | **247** (BTN) |
 | **PUM-C** @M | vždy 2 tlačítka (+/−), jen jako doplněk PUM-A bez 2 tlačítek | NE | 1 | BTN `1000+M` (+), BTN `M` (−) | **247** (BTN) |
 | **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací | **127** |
 
@@ -96,7 +96,7 @@ Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný
 ### Klíčová pravidla rekonstrukce
 
 - **PUM-B** a **PUM-C mínus** jsou oba holá `N` — rozlišit se dají jen tak, že PUM-C mínus má vždy párového brata `1000+N`.
-- **LEDS** jsou fyzicky vždy součástí PUM-A (nikdy samostatně). V `GET-DEVICES` se ale objeví jen pokud je jednotka "potřebuje znát" — registrace je volitelná.
+- **LEDS** jsou fyzicky součástí PUM-A nebo PUM-B (volitelný LED kroužek na tlačítku). V `GET-DEVICES` se objeví jen pokud je jednotka "potřebuje znát" — registrace je volitelná. PUM-B s LEDS = BTN @N + LEDS @N (rekonstrukce: BTN bez DISP páru, LEDS na stejné adrese → PUM-B s LEDS).
 - **DISP** vždy znamená PUM-A.
 - **PUM-C** lze zapojit JEN k PUM-A, které má 0 nebo 1 tlačítko (PUM-C dodá chybějící). Kombinace PUM-A se 2 tlačítky + PUM-C vedle je neplatná.
 - Adresy modulů jsou **nezávislé** — PUM-A na 128, PUM-C na 130 je validní.
@@ -115,10 +115,11 @@ Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný
 - Vadný device se fyzicky vymění za nový s **factory default adresou** (viz tabulka v sekci Moduly).
 - **DIST default = 127** (rozsah platných adres 0–126).
 - **DISP default = 246** (PUM-A; rozsah pro provoz 127–247).
-- **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247). REPLACE-FROM protokol pro BTN zatím nedokumentuje, hodnota slouží pro UI hinty a budoucí rozšíření.
-- Aplikace pošle `REPLACE-FROM` na topic vadného device s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
-- Podporováno od FW `P2L_06033101NT+` (jen pro DIST a DISP).
-- Pro LEDS protokol REPLACE-FROM nedokumentuje vůbec (LEDS se vyměňují s PUM-A jako celek).
+- **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247).
+- Aplikace pošle `REPLACE-FROM` na primární adresu vadného čipu s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
+- **Firmware atomicky přemapuje všechny entries v rámci 1 fyzického čipu.** Pro PUM-A se přemapuje i LEDS @M (pokud osazené) a případná BTN tlačítka; pro PUM-B s LEDS i LEDS @M; pro PUM-C i sekundární BTN @1000+M. Aplikace tedy posílá **1 REPLACE-FROM na modul**, ne víc.
+- LEDS se v UI samostatně nenabízí — vyměňují se s PUM-A / PUM-B jako celek.
+- Podporováno od FW `P2L_06033101NT+`.
 
 V kódu: `AppState.replaceDevice(...)` → `CommandService.buildReplaceFromCommand(...)`. UI dialog: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart). Defaulty: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
 

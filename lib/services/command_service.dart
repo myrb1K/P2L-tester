@@ -297,7 +297,9 @@ class CommandService {
   }
 
   /// REPLACE-FROM: vadný device (typ+oldAddr) se nahradí novým (newDefaultAddr).
-  /// Podporováno pouze pro DIST a DISP (viz README-P2L-32.md).
+  /// Firmware atomicky přečipuje 1 fyzický čip — pro PUM-A přemapuje i LEDS
+  /// (pokud jsou osazené), pro PUM-C i sekundární BTN @1000+M. Aplikace tedy
+  /// pošle 1 REPLACE-FROM na primární adresu modulu (DISP @M nebo BTN @M).
   static ({String topic, String payload}) buildReplaceFromCommand({
     required String unitId,
     required DeviceType type,
@@ -440,17 +442,21 @@ class CommandService {
   ///
   /// - DIST: 127 (rozsah 0-126 pro provoz)
   /// - DISP: 246 (PUM-A; rozsah 127-247 pro provoz)
-  /// - BTN: 247 (PUM-B i PUM-C; rozsah 127-247 pro provoz; REPLACE-FROM zatím
-  ///   nepodporován protokolem, hodnota slouží pro UI hinty a budoucí rozšíření)
+  /// - BTN: 247 (PUM-B i PUM-C; rozsah 127-247 pro provoz)
+  /// - LEDS: 0 (REPLACE-FROM samostatně nepodporován; LEDS se přečipují
+  ///   automaticky s DISP v rámci stejného PUM-A čipu)
   static int defaultReplacementAddress(DeviceType type) => switch (type) {
         DeviceType.dist => 127,
         DeviceType.disp => 246,
         DeviceType.btn => 247,
-        _ => 0, // LEDS: REPLACE-FROM není v README dokumentováno
+        _ => 0,
       };
 
-  /// Zda je výměna přes REPLACE-FROM podporována protokolem pro daný typ.
+  /// Zda je výměna přes REPLACE-FROM podporována pro daný typ. LEDS se
+  /// vyměňují s celým PUM-A čipem (firmware atomicky přemapuje DISP+LEDS).
   static bool supportsReplace(DeviceType type) =>
-      type == DeviceType.dist || type == DeviceType.disp;
+      type == DeviceType.dist ||
+      type == DeviceType.disp ||
+      type == DeviceType.btn;
 }
 

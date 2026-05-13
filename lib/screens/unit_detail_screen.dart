@@ -367,7 +367,11 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     );
   }
 
-  bool _canReplace(PumaModule m) => m.type == ModuleType.pumA || m.type == ModuleType.dist;
+  bool _canReplace(PumaModule m) =>
+      m.type == ModuleType.pumA ||
+      m.type == ModuleType.pumB ||
+      m.type == ModuleType.pumC ||
+      m.type == ModuleType.dist;
 }
 
 class _UnitInfoCard extends StatelessWidget {
