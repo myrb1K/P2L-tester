@@ -181,7 +181,8 @@ class AppState extends ChangeNotifier {
     ledColor = prefs.getInt('led_color') ?? 0;
     _lastWifiSsid = prefs.getString('last_wifi_ssid') ?? '';
     _lastWifiPassword = prefs.getString('last_wifi_password') ?? '';
-    _firmwareBaseUrl = prefs.getString('firmware_base_url') ?? '';
+    _firmwareBaseUrl = prefs.getString('firmware_base_url') ??
+        'http://185.149.129.164/download';
 
     final templatesJson = prefs.getString('device_templates');
     if (templatesJson != null && templatesJson.isNotEmpty) {
