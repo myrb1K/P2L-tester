@@ -163,6 +163,21 @@ class CommandService {
     });
   }
 
+  /// Příkaz `update` – nahrát firmware z dané URL/cesty. Firmware si soubor
+  /// stáhne sám a po flashi se restartuje. Funguje na obou generacích
+  /// jednotek (JSON cmd, topic řeší volající přes `getCommandTopic`).
+  static String buildUpdateCommand({required String fileName}) {
+    return jsonEncode({
+      'request_id': -1,
+      'cmds': [
+        {
+          'cmd': 'update',
+          'args': {'file_name': fileName},
+        },
+      ],
+    });
+  }
+
   /// Příkaz `set_WiFi` – hromadná změna WiFi.
   static String buildSetWifiCommand({
     required String ssid,
