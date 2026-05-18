@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
+import '../services/firmware_listing_service.dart';
 import 'apply_template_sheet.dart';
 
 enum _BulkAction {
@@ -11,6 +12,7 @@ enum _BulkAction {
   dispBrightness,
   unitBrightness,
   applyTemplate,
+  firmwareUpdate,
   restart,
 }
 
@@ -41,6 +43,8 @@ class BulkConfigMenu extends StatelessWidget {
                 await _showUnitBrightnessDialog(context, state);
               case _BulkAction.applyTemplate:
                 _showApplyTemplateSheet(context, state);
+              case _BulkAction.firmwareUpdate:
+                await _showFirmwareDialog(context, state);
               case _BulkAction.restart:
                 await _showRestartDialog(context, state);
             }
@@ -91,6 +95,16 @@ class BulkConfigMenu extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.dashboard_customize),
                 title: const Text('Aplikovat šablonu'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BulkAction.firmwareUpdate,
+              child: ListTile(
+                leading: const Icon(Icons.system_update_alt),
+                title: const Text('Nahrát firmware'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných')
                     : const Text('Nejprve vyberte P2L moduly'),
@@ -222,6 +236,19 @@ class BulkConfigMenu extends StatelessWidget {
     );
     if (result != null && context.mounted) {
       await state.sendBulkWifi(ssid: result.ssid, password: result.password);
+    }
+  }
+
+  Future<void> _showFirmwareDialog(BuildContext context, AppState state) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _BulkFirmwareDialog(
+        initialPath: state.firmwareBaseUrl,
+        selectedCount: state.selectedCount,
+      ),
+    );
+    if (result != null && result.isNotEmpty && context.mounted) {
+      await state.sendBulkFirmwareUpdate(fileName: result);
     }
   }
 }
@@ -690,6 +717,312 @@ class _BulkWifiDialogState extends State<_BulkWifiDialog> {
             Navigator.pop(context, (ssid: ssid, password: _pwdCtrl.text));
           },
           child: const Text('Odeslat'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Dialog pro hromadné nahrání firmware.
+///
+/// Dva módy podle obsahu pole "Cesta":
+/// - Pokud cesta končí na `.bin` → posílá se přesně tak, dropdown se skryje.
+/// - Jinak → cesta = base URL; po kliku "Ověřit" se z ní stáhne autoindex
+///   HTML, parsne `*.bin` linky a naplní dropdown.
+///
+/// Po stisku FLASH dialog vrátí finální `file_name` jako String.
+class _BulkFirmwareDialog extends StatefulWidget {
+  final String initialPath;
+  final int selectedCount;
+
+  const _BulkFirmwareDialog({
+    required this.initialPath,
+    required this.selectedCount,
+  });
+
+  @override
+  State<_BulkFirmwareDialog> createState() => _BulkFirmwareDialogState();
+}
+
+class _BulkFirmwareDialogState extends State<_BulkFirmwareDialog> {
+  late final TextEditingController _pathCtrl;
+  List<FirmwareFile> _files = const [];
+  FirmwareFile? _selected;
+  bool _loading = false;
+  String? _fetchError;
+  String? _fetchedFromUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _pathCtrl = TextEditingController(text: widget.initialPath);
+    _pathCtrl.addListener(_onPathChanged);
+  }
+
+  @override
+  void dispose() {
+    _pathCtrl.removeListener(_onPathChanged);
+    _pathCtrl.dispose();
+    super.dispose();
+  }
+
+  bool get _isDirectFile {
+    return _pathCtrl.text.trim().toLowerCase().endsWith('.bin');
+  }
+
+  String get _resolvedFileName {
+    final path = _pathCtrl.text.trim();
+    if (_isDirectFile) return path;
+    if (_selected == null) return '';
+    return FirmwareListingService.joinPath(path, _selected!.name);
+  }
+
+  bool get _canFlash {
+    if (_pathCtrl.text.trim().isEmpty) return false;
+    if (_isDirectFile) return true;
+    return _selected != null;
+  }
+
+  String _firmwareItemLabel(FirmwareFile f) {
+    final size = f.sizeLabel != null ? ' · ${f.sizeLabel}' : '';
+    final date = f.dateLabel.isNotEmpty ? ' · ${f.dateLabel}' : '';
+    final type = f.typeTag.isNotEmpty ? ' · ${f.typeTag}' : '';
+    return '${f.name}$type$date$size';
+  }
+
+  void _onPathChanged() {
+    if (_fetchedFromUrl != null && _fetchedFromUrl != _pathCtrl.text.trim()) {
+      setState(() {
+        _files = const [];
+        _selected = null;
+        _fetchError = null;
+        _fetchedFromUrl = null;
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _verify() async {
+    final url = _pathCtrl.text.trim();
+    if (url.isEmpty || _isDirectFile) return;
+    setState(() {
+      _loading = true;
+      _fetchError = null;
+    });
+    try {
+      final files = await FirmwareListingService.fetch(url);
+      if (!mounted) return;
+      setState(() {
+        _files = files;
+        _selected = files.isNotEmpty ? files.first : null;
+        _fetchedFromUrl = url;
+        _loading = false;
+      });
+      // ignore: use_build_context_synchronously
+      await context.read<AppState>().setFirmwareBaseUrl(url);
+      if (files.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Na zadané URL nejsou žádné .bin soubory.')),
+        );
+      }
+    } on FirmwareListingException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _fetchError = e.message;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _fetchError = 'Neočekávaná chyba: $e';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _flash() async {
+    final fileName = _resolvedFileName;
+    if (fileName.isEmpty) return;
+    // Uložit base URL i v "direct file" módu — pro příště předvyplnit
+    // poslední adresář.
+    if (_isDirectFile) {
+      final slash = fileName.lastIndexOf('/');
+      if (slash > 0) {
+        await context.read<AppState>().setFirmwareBaseUrl(
+              fileName.substring(0, slash),
+            );
+      }
+    }
+    if (!mounted) return;
+    Navigator.pop(context, fileName);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = _resolvedFileName;
+    return AlertDialog(
+      title: const Text('Hromadné nahrání firmware'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _pathCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Cesta',
+                      hintText: 'http://server/download nebo plná URL k .bin',
+                      border: OutlineInputBorder(),
+                    ),
+                    autofocus: true,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 56,
+                  child: FilledButton.tonal(
+                    onPressed: (_loading || _isDirectFile ||
+                            _pathCtrl.text.trim().isEmpty)
+                        ? null
+                        : _verify,
+                    child: _loading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Ověřit'),
+                  ),
+                ),
+              ],
+            ),
+            if (_fetchError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _fetchError!,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
+            ],
+            if (!_isDirectFile && _files.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<FirmwareFile>(
+                initialValue: _selected,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Firmware',
+                  border: OutlineInputBorder(),
+                ),
+                // Bez podbarvení v poli (zobrazení vybrané položky) — stripe
+                // chceme jen v popup seznamu, ne v collapsed inputu.
+                selectedItemBuilder: (ctx) => _files
+                    .map((f) => Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            _firmwareItemLabel(f),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ))
+                    .toList(),
+                items: [
+                  for (var i = 0; i < _files.length; i++)
+                    DropdownMenuItem(
+                      value: _files[i],
+                      child: Container(
+                        width: double.infinity,
+                        color: i.isOdd
+                            ? Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withAlpha(12)
+                            : Colors.transparent,
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 8),
+                        child: Text(
+                          _firmwareItemLabel(_files[i]),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                ],
+                onChanged: (f) => setState(() => _selected = f),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Načteno ${_files.length} souborů',
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ],
+            if (preview.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blueGrey.withAlpha(20),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Bude odesláno:',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 2),
+                    SelectableText(
+                      preview,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withAlpha(30),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'P2L moduly se po flashi restartují a budou několik '
+                      'minut nedostupné. Neodpojujte napájení.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: _canFlash ? _flash : null,
+          child: const Text('FLASH'),
         ),
       ],
     );

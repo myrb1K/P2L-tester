@@ -181,6 +181,7 @@ class AppState extends ChangeNotifier {
     ledColor = prefs.getInt('led_color') ?? 0;
     _lastWifiSsid = prefs.getString('last_wifi_ssid') ?? '';
     _lastWifiPassword = prefs.getString('last_wifi_password') ?? '';
+    _firmwareBaseUrl = prefs.getString('firmware_base_url') ?? '';
 
     final templatesJson = prefs.getString('device_templates');
     if (templatesJson != null && templatesJson.isNotEmpty) {
@@ -679,6 +680,15 @@ class AppState extends ChangeNotifier {
   String get lastWifiSsid => _lastWifiSsid;
   String get lastWifiPassword => _lastWifiPassword;
 
+  String _firmwareBaseUrl = '';
+  String get firmwareBaseUrl => _firmwareBaseUrl;
+
+  Future<void> setFirmwareBaseUrl(String url) async {
+    _firmwareBaseUrl = url;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('firmware_base_url', url);
+  }
+
   /// Hromadná změna brokera: pošle `set_Mqtt` všem vybraným jednotkám s 100ms pauzou.
   Future<void> sendBulkBroker(BrokerProfile profile) async {
     if (_selectedUnits.isEmpty) return;
@@ -774,6 +784,36 @@ class AppState extends ChangeNotifier {
     await prefs.setString('last_wifi_ssid', ssid);
     await prefs.setString('last_wifi_password', password);
     _statusMessage = 'WiFi "$ssid" odeslána na $sent P2L jednotek';
+    notifyListeners();
+  }
+
+  /// Hromadné nahrání firmware na vybrané jednotky.
+  ///
+  /// [fileName] — kompletní cesta/URL, kterou si firmware downloader stáhne
+  /// (např. `http://185.149.129.164/download/P2L_26033101NT.bin`). Aplikace
+  /// nic na řetězci nemění, pošle ho přesně tak v `update.args.file_name`.
+  ///
+  /// 100ms pauza mezi publishi (analogicky k ostatním bulk operacím).
+  /// Po flashi se jednotka restartuje a několik minut nebude online —
+  /// proto označíme každou jednotku jako offline-until-alive.
+  Future<void> sendBulkFirmwareUpdate({required String fileName}) async {
+    if (_selectedUnits.isEmpty) return;
+    final payload = CommandService.buildUpdateCommand(fileName: fileName);
+    final targets = _selectedUnits.toList();
+    var sent = 0;
+    for (final unitId in targets) {
+      final topic = _topicFor(unitId);
+      _mqttService.publish(topic, payload);
+      final id = _normUnitId(unitId);
+      _markUnitOfflineUntilAlive(id);
+      sent++;
+      _statusMessage = 'FW: $sent / ${targets.length}';
+      notifyListeners();
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    _statusMessage = 'Update odeslán na $sent P2L modulů ($fileName)';
     notifyListeners();
   }
 

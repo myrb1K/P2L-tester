@@ -142,4 +142,30 @@ void main() {
       expect(cmd.payload, '{"Id":247}');
     });
   });
+
+  group('buildUpdateCommand', () {
+    test('produkuje payload podle README-P2L specifikace', () {
+      final payload = CommandService.buildUpdateCommand(
+        fileName: 'http://185.149.129.164/download/P2L_26033101NT.bin',
+      );
+      final decoded = jsonDecode(payload) as Map<String, dynamic>;
+      expect(decoded['request_id'], -1);
+      final cmds = decoded['cmds'] as List;
+      expect(cmds.length, 1);
+      final cmd = cmds.first as Map<String, dynamic>;
+      expect(cmd['cmd'], 'update');
+      expect(
+        (cmd['args'] as Map)['file_name'],
+        'http://185.149.129.164/download/P2L_26033101NT.bin',
+      );
+    });
+
+    test('relativní cesta v file_name se neupravuje', () {
+      final payload = CommandService.buildUpdateCommand(
+        fileName: 'data/P2L_23091201OT.bin',
+      );
+      final cmd = (jsonDecode(payload) as Map)['cmds'][0] as Map;
+      expect((cmd['args'] as Map)['file_name'], 'data/P2L_23091201OT.bin');
+    });
+  });
 }
