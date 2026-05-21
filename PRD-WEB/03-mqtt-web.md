@@ -134,7 +134,7 @@ MQTT WebSocket connect podléhá CORS. Mosquitto sám **CORS hlavičky neumí na
 - **A:** Nginx jako reverse proxy před Mosquitto WS (`/ws` → `ws://localhost:9001/mqtt`) + `add_header Access-Control-Allow-Origin <origin>`.
 - **B:** Když broker servíruje na stejné doméně jako frontend, CORS neřešíme (same-origin).
 
-**Pro Vercel staging:** broker MUSÍ explicitně povolit Vercel preview origin (`*.vercel.app`). To je nejpravděpodobnější místo, kde uvázneme. → otestovat v M2.
+**Pro produkční web (HTTPS):** browser zachází s WebSocket cross-origin volněji než s HTTP fetch (žádný CORS preflight), ale broker přesto vidí `Origin` header a může spojení odmítnout. V produkční topologii bude WS přes Nginx `/ws` na stejné doméně jako frontend → same-origin, CORS neřešíme.
 
 ### 4.3 `dart:io` použití mimo `MqttService`
 
@@ -233,9 +233,9 @@ Stejné platí pro `MqttServerClient` na native, pokud běží přes WS (`useWeb
 ### 9.2 Co dál ověřit u produkčního brokeru
 
 Až bude na `mqtt.config.smartci4.com` (nebo jiném smartci4 brokeru) zapnutý WS listener:
-1. Otestovat connect z Vercel preview (M4) — pravděpodobně narazíme na CORS.
+1. Otestovat connect z lokálního `flutter run -d chrome` proti produkčnímu WS endpointu.
 2. Při WSS s validním Let's Encrypt certem by neměl být cert problém.
-3. Ověřit, že subprotocol `mqtt` projde i přes Nginx reverse proxy (pokud bude WS proxyovaný přes 443).
+3. Při M5 (firemní server deploy) bude WS proxyovaný Nginxem na stejné doméně jako frontend → same-origin, CORS odpadá; ověřit, že subprotocol `mqtt` přes Nginx prochází.
 
 ---
 

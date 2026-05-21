@@ -1,11 +1,18 @@
 # 01 — PRD: P2L Tester Web
 
-> **Status:** Draft v0.2 · **Datum:** 2026-05-21 · **Autor:** Radek Brym · **Branch:** `WEB`
+> **Status:** Draft v0.4 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+>
+> **Změny v v0.4:**
+> - **Vercel jako mezikrok vyřazen** — nasazujeme rovnou na firemní server vedle `ci4gui`. Důvody: jediný vývojář, lokální dev pokrývá iterace, Vercel build pipeline pro Flutter je netriviální, Hobby plán šedá zóna, auth backend by se psal 2× (Vercel Functions vs. Node).
+> - **5 milestones místo 6** (M4 staging deploy spadl).
+> - Placeholder login zrušen — M4 píše rovnou plnohodnotnou auth.
+>
+> **Změny v v0.3 (M1–M3 ✅):**
+> - M1 web build, M2 MQTT WSS, M3 responzivita dokončeny.
 >
 > **Změny v v0.2:**
-> - Pořadí fází přeskupeno — **auth je až jako poslední milestone** (M5 / M6), MQTT a responzivita dřív.
-> - Responzivita zkrácena na verify-only (Android APK i zmenšené Windows okno už fungují skvěle). Viz [04-responzivita.md](04-responzivita.md).
-> - Přidán mezikrok **Vercel built-in ochrana** pro staging deploy bez plné auth. Viz [02-auth-bezpecnost.md](02-auth-bezpecnost.md).
+> - Pořadí fází přeskupeno — auth jako poslední milestone, MQTT a responzivita dřív.
+> - Responzivita zkrácena na verify-only (APK i zmenšené Windows okno už fungují).
 
 Hlavní dokument PRD. Detailní návrhy jsou v sourozeneckých dokumentech:
 - Auth a security → [02-auth-bezpecnost.md](02-auth-bezpecnost.md)
@@ -23,7 +30,7 @@ Rozšířit P2L Tester (dosud Windows / Android) o **webovou variantu**, která:
 2. Je **responzivní** — použitelná jak na desktopu, tak na mobilu.
 3. Je **chráněná uživatelským přihlášením** (admin zakládá účty, žádná self-registrace).
 4. Komunikuje s MQTT brokery přes **WebSockets** (broker už WS endpoint má povolený).
-5. Nasadí se nejprve na **Vercel** (vývoj / staging), finálně na **firemní server** vedle [`ci4gui.smartbox.smartci4.com`](https://ci4gui.smartbox.smartci4.com).
+5. Nasadí se na **firemní server** vedle [`ci4gui.smartbox.smartci4.com`](https://ci4gui.smartbox.smartci4.com).
 
 ### Co tento projekt **není**
 
@@ -33,9 +40,9 @@ Rozšířit P2L Tester (dosud Windows / Android) o **webovou variantu**, která:
 
 ---
 
-## 2. Cílový stav a fázování (v0.2)
+## 2. Cílový stav a fázování (v0.4)
 
-Pořadí je voleno tak, aby **nejvyšší technické riziko (MQTT WSS)** šlo nejdřív a **auth byla naposledy** — staging je mezitím chráněn Vercel built-in ochranou.
+Pořadí je voleno tak, aby **nejvyšší technické riziko (MQTT WSS)** šlo nejdřív a **auth byla naposledy** těsně před produkcí.
 
 ### Fáze 1 — Web build běží lokálně
 - `flutter build web` projde bez chyb.
@@ -57,15 +64,7 @@ Detaily viz [03-mqtt-web.md](03-mqtt-web.md).
 
 Detaily viz [04-responzivita.md](04-responzivita.md).
 
-### Fáze 4 — Vercel staging deploy (chráněný)
-- `vercel.json` + build pipeline (Flutter SDK install).
-- Deploy na Vercel preview URL.
-- **Ochrana proti náhodnému přístupu:** Vercel Authentication (Pro plán) **nebo** minimální placeholder login (1 hardcoded heslo) — žádná plná auth zatím.
-- E2E ověření: WSS connect ze staging URL na produkční broker.
-
-Detaily viz [05-deployment.md](05-deployment.md).
-
-### Fáze 5 — Plnohodnotná auth
+### Fáze 4 — Plnohodnotná auth
 - Login obrazovka (Flutter) před přístupem ke zbytku aplikace.
 - Backend `/api/login`, `/api/logout`, `/api/me` (Node.js + JWT v httpOnly cookie).
 - Session persistence, logout button, admin reset přes DB / CLI script.
@@ -74,10 +73,10 @@ Detaily viz [05-deployment.md](05-deployment.md).
 
 Detaily viz [02-auth-bezpecnost.md](02-auth-bezpecnost.md).
 
-### Fáze 6 — Produkční nasazení na firemní server
-- Migrace z Vercel na server kde běží `ci4gui`.
+### Fáze 5 — Produkční nasazení na firemní server
+- Deploy na server kde běží `ci4gui`.
 - HTTPS s validním certifikátem (Let's Encrypt nebo firemní CA).
-- Reverse proxy (Nginx) pro statický web + proxy `/ws` na Mosquitto.
+- Reverse proxy (Nginx) pro statický web + proxy `/ws` na Mosquitto + `/api/*` na Node backend.
 - Systemd service pro auth backend.
 - Rollback strategie (záloha předchozí verze před deploy).
 
@@ -131,9 +130,9 @@ Krátký souhrn (detaily v [02-auth-bezpecnost.md](02-auth-bezpecnost.md)):
 | MQTT klient | `mqtt_client` — `MqttServerClient` na native, `MqttBrowserClient` na webu (conditional import) |
 | Auth backend | Node.js (Express) + JWT v httpOnly cookie (nebo integrace s ci4gui auth) |
 | DB | SQLite (vývoj) / Postgres (prod) — vlastní `users` tabulka |
-| Hosting (vývoj) | Vercel (frontend) + Vercel Functions / Render / Railway (backend) |
+| Hosting (vývoj) | Lokální (`flutter run -d chrome`) + lokální Mosquitto (viz [.dev/](../.dev/)) |
 | Hosting (prod) | Firemní server (Nginx + Node + Mosquitto WS) |
-| CI/CD | GitHub Actions: na push do `WEB` → `flutter build web` → deploy Vercel preview |
+| CI/CD | GitHub Actions: `flutter build web` → `rsync` na server přes SSH (M5+) |
 
 Detail MQTT klienta na webu viz [03-mqtt-web.md](03-mqtt-web.md).
 Detail deployment topologie viz [05-deployment.md](05-deployment.md).
@@ -168,7 +167,7 @@ Detailní rizika jsou v jednotlivých dokumentech podle oblasti. Zde top 5 např
 
 ## 7. Akceptační kritéria MVP
 
-- [ ] Web build běží na Vercelu pod HTTPS.
+- [ ] Web build běží na firemním serveru pod HTTPS.
 - [ ] Nepřihlášený uživatel vidí jen login obrazovku, žádný jiný route.
 - [ ] Po loginu existuje session, refresh stránky uživatele neodhlásí.
 - [ ] Logout button funguje a invaliduje session.
@@ -186,7 +185,7 @@ Detailní rizika jsou v jednotlivých dokumentech podle oblasti. Zde top 5 např
 
 - Všichni uživatelé vidí to samé (žádné role).
 - Admin zakládá účty manuálně, žádná self-registrace.
-- Vercel pro vývoj/staging, firemní server pro produkci.
+- Nasazení rovnou na firemní server (žádný staging mezikrok).
 
 ---
 
@@ -221,16 +220,15 @@ Má broker zapnutý `allow_anonymous false`? Pokud ano, jsou MQTT credentials pe
 
 ---
 
-## 10. Milestones (v0.3 — M1–M3 ✅)
+## 10. Milestones (v0.4 — M1–M3 ✅, Vercel vyřazen)
 
 | # | Milestone | Stav | Pozn. |
 |---|-----------|:----:|-------|
 | M1 | `flutter build web` projde, app se otevře v Chrome | ✅ | Web build prošel out-of-the-box; `kIsWeb` guards už v kódu; brand polish v `web/index.html` + `manifest.json` |
 | M2 | MQTT WS klient přes `MqttBrowserClient`, connect k lokálnímu brokeru | ✅ | `MqttClientFactory` s conditional importem; klíčový fix: `websocketProtocols = ['mqtt']`; E2E ověřeno proti lokálnímu Mosquitto + ALIVE roundtrip |
 | M3 | Responzivita smoke test | ✅ | Pixel 7 + iPad Mini OK bez úprav; iPhone SE (375px) skipnuto (relevance) |
-| M4 | Vercel staging deploy s placeholder loginem (Hobby plán) | příští | |
-| M5 | Plnohodnotná auth (backend + login screen + session) | čeká M4 | Závislé na rozhodnutí ci4gui integrace |
-| M6 | Migrace na firemní server (Nginx, HTTPS, systemd) | čeká M5 | |
+| **M4** | Plnohodnotná auth (Node backend + LoginScreen + session) | příští | Závislé na rozhodnutí ci4gui integrace ([§9.1](#9-open-questions)) |
+| **M5** | Produkční deploy na firemní server (Nginx, HTTPS, systemd) | čeká M4 | Včetně WS endpointu na brokeru ([§9.4](#9-open-questions)) |
 
 ---
 

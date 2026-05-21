@@ -1,72 +1,14 @@
 # 05 — Deployment topologie
 
-> **Status:** Draft v0.1 · **Datum:** 2026-05-21 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** Draft v0.3 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+>
+> **Update v0.3:** Vercel jako mezikrok vyřazen — nasazení rovnou na firemní server vedle [`ci4gui.smartbox.smartci4.com`](https://ci4gui.smartbox.smartci4.com). Důvody: jediný vývojář (Radek), lokální dev (`flutter run -d chrome` + lokální Mosquitto) pokrývá většinu iterací, mobilní testování přes `flutter run -d web-server --web-hostname 0.0.0.0`, Vercel build pipeline pro Flutter je netriviální, Hobby plán šedá zóna pro komerční use, auth backend by se psal dvakrát (Vercel Functions vs. Node).
 
-Dvě cílové cesty: **Vercel** pro vývoj a staging, **firemní server** pro produkci.
-
----
-
-## 1. Fáze 1–3: Vercel staging
-
-### Topologie
-
-```
-Browser ──HTTPS──> Vercel (Flutter web static)
-   │
-   ├──HTTPS──> Vercel Function /api/login, /api/me, /api/logout
-   │              └── Vercel Postgres (users)
-   │
-   └──WSS──> wss://<broker>.smartbox.smartci4.com:8884/mqtt
-                  (Mosquitto WS listener s TLS)
-```
-
-### Frontend (Flutter Web)
-
-- **Build:** `flutter build web --release --base-href /` (nebo `/p2l-tester/` pokud subpath).
-- **Output:** `build/web/` → Vercel host jako static.
-- **`vercel.json`** (root repa nebo `web/` podsložka):
-  ```json
-  {
-    "buildCommand": "flutter build web --release",
-    "outputDirectory": "build/web",
-    "rewrites": [
-      { "source": "/(.*)", "destination": "/index.html" }
-    ]
-  }
-  ```
-  Rewrite je nutný kvůli SPA routingu (jinak F5 na `/units` vrátí 404).
-
-### Vercel + Flutter — instalace flutter SDK
-
-Vercel buildery defaultně Flutter neumí. Volby:
-
-- **A:** Vercel `buildCommand` instaluje Flutter inline:
-  ```
-  git clone https://github.com/flutter/flutter.git -b stable --depth 1 && \
-    ./flutter/bin/flutter build web --release
-  ```
-- **B:** GitHub Actions build → commit do `gh-pages` branch → Vercel deploy z `gh-pages`.
-- **C:** Použít existující Vercel preset / community starter (např. `cirruslabs/flutter` Docker).
-
-→ rozhodnutí v M5.
-
-### Backend (auth)
-
-Vercel Functions (Node.js) pro `/api/login`, `/api/logout`, `/api/me`. Detail v [02-auth-bezpecnost.md §2](02-auth-bezpecnost.md).
-
-DB:
-- **Vercel Postgres** (free tier 256 MB stačí).
-- nebo **Vercel KV** (Redis) — pro pár uživatelů stačí.
-
-### MQTT broker
-
-Vercel **nehostuje broker**. Broker musí mít WSS endpoint dostupný z internetu s validním certifikátem. CORS musí povolit Vercel preview domény (`*.vercel.app` ideálně + produkční doménu).
+Jeden cíl: **firemní server vedle `ci4gui.smartbox.smartci4.com`**.
 
 ---
 
-## 2. Fáze 4: firemní server (produkce)
-
-### Topologie
+## 1. Cílová topologie
 
 ```
 Browser ──HTTPS──> Nginx na firemním serveru
@@ -85,7 +27,7 @@ Browser ──HTTPS──> Nginx na firemním serveru
 | Path pod ci4gui | `ci4gui.smartbox.smartci4.com/p2l-tester` | Sdílí cert a doménu, jeden login (pokud auth integrace) | `--base-href` build, sdílený CSP |
 | Vlastní doména | `p2l-tester.smartbox.cz` | Nezávislé | Další doména k údržbě |
 
-→ open question — viz [01-PRD.md §9.3](01-PRD.md#93-dom%C3%A9na-pro-produk%C4%8Dn%C3%AD-nasazen%C3%AD).
+→ open question — viz [01-PRD.md §9.3](01-PRD.md#9-open-questions).
 
 ### Nginx config skica
 
@@ -159,21 +101,29 @@ Pokud broker neběží zatím na tomto stroji, je k diskusi, jestli:
 
 ---
 
-## 3. CI/CD
+## 2. Lokální dev workflow
 
-### Vercel (Fáze 1–3)
+Bez Vercel mezikroku zůstává pro vývoj **jen lokální prostředí**:
 
-- Push do `WEB` branch → automatic Vercel deploy do preview URL.
-- Vercel preview URL přijde na PR / Slack.
-- Pro produkci na firemní server: po merge `WEB` → `main` ručně.
+| Účel | Příkaz |
+|------|--------|
+| Desktop iterace | `flutter run -d chrome` |
+| Mobilní real-device test (telefon na stejné WiFi) | `flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8080` → na telefonu `http://<IP-počítače>:8080` |
+| Lokální broker | `& "C:\Program Files\mosquitto\mosquitto.exe" -c .dev\mosquitto.conf -v` (viz [.dev/README.md](../.dev/README.md)) |
+| Build produkce | `flutter build web --release --base-href /` |
 
-### Firemní server (Fáze 4)
+Pro responzivita testing dostačuje **Chrome DevTools mobile emulation** (`Ctrl+Shift+M`).
 
-- **A (preferováno):** GitHub Actions job:
-  - Build `flutter build web` v container.
-  - `rsync` výsledek na server přes SSH (deploy key v GH Secrets).
-  - `systemctl reload nginx`.
-- **B:** ruční deploy přes SSH (pro MVP fáze 4 stačí).
+---
+
+## 3. CI/CD (M5)
+
+GitHub Actions job:
+- Build `flutter build web` v container.
+- `rsync` výsledek na server přes SSH (deploy key v GH Secrets).
+- `systemctl reload nginx`.
+
+Pro MVP fáze 5 stačí ruční deploy přes SSH; CI/CD doladíme až později.
 
 ---
 
@@ -187,12 +137,6 @@ Pokud broker neběží zatím na tomto stroji, je k diskusi, jestli:
 
 ## 5. Rollback strategie
 
-### Vercel
-
-Vercel drží předchozí deploy → 1-click rollback v UI.
-
-### Firemní server
-
 - Před deploy: `cp -r /var/www/p2l-tester /var/www/p2l-tester.bak`.
 - Při potížích: `mv /var/www/p2l-tester.bak /var/www/p2l-tester && systemctl reload nginx`.
 - DB migrations (až budou): vždy backward-compatible.
@@ -201,34 +145,22 @@ Vercel drží předchozí deploy → 1-click rollback v UI.
 
 ## 6. Monitoring (nice-to-have)
 
-- **Vercel:** built-in analytics (free).
-- **Firemní server:**
-  - Nginx access log → standardní.
-  - Backend (Node) → `pm2` logs nebo systemd journal.
-  - MQTT broker → Mosquitto log.
-  - Uptime: jednoduchý health endpoint `/api/health` + externí pinger.
+- Nginx access log → standardní.
+- Backend (Node) → `pm2` logs nebo systemd journal.
+- MQTT broker → Mosquitto log.
+- Uptime: jednoduchý health endpoint `/api/health` + externí pinger.
 
 ---
 
 ## 7. Open questions
 
-- [9.3 v 01-PRD.md — doména](01-PRD.md#93-dom%C3%A9na-pro-produk%C4%8Dn%C3%AD-nasazen%C3%AD)
-- [9.4 v 01-PRD.md — Mosquitto auth](01-PRD.md#94-mosquitto-userpassword-vs-anonymous)
-- Bude broker na stejném serveru jako web, nebo zůstane samostatně? (viz §2 výše)
+- [9.3 v 01-PRD.md — doména](01-PRD.md#9-open-questions)
+- [9.4 v 01-PRD.md — Mosquitto auth](01-PRD.md#9-open-questions)
+- Bude broker na stejném serveru jako web, nebo zůstane samostatně? (viz §1 výše)
 
 ---
 
-## 8. Akceptační kritéria
-
-### Vercel (M5)
-
-- [ ] `flutter build web` projde v Vercel buildu.
-- [ ] Web je dostupný na Vercel preview URL pod HTTPS.
-- [ ] SPA routing funguje (F5 na sub-route nehází 404).
-- [ ] Login přes Vercel Functions funguje.
-- [ ] WSS connect na testovací broker funguje z Vercel preview.
-
-### Firemní server (M6)
+## 8. Akceptační kritéria M5 (firemní server)
 
 - [ ] Nginx servíruje Flutter web static na zvolené doméně.
 - [ ] HTTPS s validním certifikátem (Let's Encrypt).
