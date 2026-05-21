@@ -221,17 +221,16 @@ Má broker zapnutý `allow_anonymous false`? Pokud ano, jsou MQTT credentials pe
 
 ---
 
-## 10. Milestones (v0.2)
+## 10. Milestones (v0.3 — M1–M3 ✅)
 
-| # | Milestone | Odhad | Pozn. |
-|---|-----------|-------|-------|
-| M1 | `flutter build web` projde, app se otevře v Chrome (zatím bez MQTT) | 0.5 dne | Identifikovat `dart:io` použití |
-| M2 | MQTT WS klient přes `MqttBrowserClient`, connect k lokálnímu + produkčnímu brokeru | 1–2 dny | **Highest risk** — pokud zde uvázneme, řešit dřív než cokoli jiného |
-| M3 | Responzivita smoke test + edge case fixy (browser klávesnice apod.) | 0.5 dne | Zkráceno — APK už je responzivní |
-| M4 | Vercel staging deploy s built-in ochranou / placeholder loginem | 1 den | Auth zatím není potřeba |
-| M5 | Plnohodnotná auth (backend + login screen + session) | 2–3 dny | Závislé na rozhodnutí ci4gui integrace |
-| M6 | Migrace na firemní server (Nginx, HTTPS, systemd) | 1–2 dny | |
-| **Celkem MVP** |  | **~6–9 dní** | |
+| # | Milestone | Stav | Pozn. |
+|---|-----------|:----:|-------|
+| M1 | `flutter build web` projde, app se otevře v Chrome | ✅ | Web build prošel out-of-the-box; `kIsWeb` guards už v kódu; brand polish v `web/index.html` + `manifest.json` |
+| M2 | MQTT WS klient přes `MqttBrowserClient`, connect k lokálnímu brokeru | ✅ | `MqttClientFactory` s conditional importem; klíčový fix: `websocketProtocols = ['mqtt']`; E2E ověřeno proti lokálnímu Mosquitto + ALIVE roundtrip |
+| M3 | Responzivita smoke test | ✅ | Pixel 7 + iPad Mini OK bez úprav; iPhone SE (375px) skipnuto (relevance) |
+| M4 | Vercel staging deploy s placeholder loginem (Hobby plán) | příští | |
+| M5 | Plnohodnotná auth (backend + login screen + session) | čeká M4 | Závislé na rozhodnutí ci4gui integrace |
+| M6 | Migrace na firemní server (Nginx, HTTPS, systemd) | čeká M5 | |
 
 ---
 
