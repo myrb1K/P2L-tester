@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:mqtt_client/mqtt_client.dart';
-import 'package:mqtt_client/mqtt_server_client.dart';
+import 'mqtt_client_factory.dart';
 
 enum AppMqttState { disconnected, connecting, connected, error }
 
 class MqttService {
-  MqttServerClient? _client;
+  MqttClient? _client;
   AppMqttState _state = AppMqttState.disconnected;
   String? _lastError;
 
@@ -31,19 +31,23 @@ class MqttService {
     required String username,
     required String password,
     bool useSsl = false,
+    bool useWebsocket = false,
+    String? wsPath,
   }) async {
     if (_state == AppMqttState.connecting) return false;
 
     _setState(AppMqttState.connecting);
     _lastError = null;
 
-    _client = MqttServerClient(broker, 'p2l_tester_${DateTime.now().millisecondsSinceEpoch}');
-    _client!.port = port;
-    _client!.keepAlivePeriod = 60;
-    _client!.autoReconnect = true;
-    _client!.resubscribeOnAutoReconnect = true;
-    _client!.secure = useSsl;
-    _client!.logging(on: false);
+    _client = createMqttClient(
+      broker: broker,
+      port: port,
+      clientIdentifier:
+          'p2l_tester_${DateTime.now().millisecondsSinceEpoch}',
+      useSsl: useSsl,
+      useWebsocket: useWebsocket,
+      wsPath: wsPath,
+    );
 
     _client!.onConnected = () {
       _setState(AppMqttState.connected);

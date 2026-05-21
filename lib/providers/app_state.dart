@@ -30,6 +30,8 @@ class AppState extends ChangeNotifier {
   String username = '';
   String password = '';
   bool useSsl = false;
+  bool useWebsocket = false;
+  String wsPath = '/mqtt';
 
   // LED pattern
   int ledsOn = 3;
@@ -218,6 +220,8 @@ class AppState extends ChangeNotifier {
     username = profile.username;
     password = profile.password;
     useSsl = profile.useSsl;
+    useWebsocket = profile.useWebsocket;
+    wsPath = profile.wsPath;
   }
 
   /// True pokud už existuje profil se stejným názvem (case-insensitive, trim).
@@ -288,6 +292,8 @@ class AppState extends ChangeNotifier {
         username = '';
         password = '';
         useSsl = false;
+        useWebsocket = false;
+        wsPath = '/mqtt';
       }
     } else if (_activeProfileIndex > index) {
       _activeProfileIndex--;
@@ -345,6 +351,8 @@ class AppState extends ChangeNotifier {
       username: username,
       password: password,
       useSsl: useSsl,
+      useWebsocket: useWebsocket,
+      wsPath: wsPath,
     );
 
     if (result) {
