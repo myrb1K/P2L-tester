@@ -1,6 +1,11 @@
 # 03 — MQTT klient na webu
 
-> **Status:** Draft v0.1 · **Datum:** 2026-05-21 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** Draft v0.2 · **Datum:** 2026-05-21 · **Parent:** [01-PRD.md](01-PRD.md)
+>
+> **Update v0.2 (M2 dokončen):**
+> - Conditional factory pattern implementován v [mqtt_client_factory.dart](../lib/services/mqtt_client_factory.dart) + 3 platformní varianty (io / web / stub).
+> - **Klíčový nález:** Mosquitto vyžaduje `Sec-WebSocket-Protocol: mqtt` v WS handshake. Bez něj broker spojení zavře před handshake response (error "Connection closed before receiving a handshake response" v browser console). `MqttBrowserClient` defaultně tento header **NEPOSÍLÁ** — musí se nastavit explicitně přes `client.websocketProtocols = MqttClientConstants.protocolsSingleDefault`. Stejné platí pro `MqttServerClient` s `useWebSocket = true` na native. Detail v §9 níže.
+> - E2E ověřeno z Chrome → lokální Mosquitto (`ws://localhost:9001/mqtt`), connect + subscribe na všechny default topicy funguje.
 
 Technický deep-dive na zprovoznění MQTT komunikace v prohlížeči. Toto je nejtěsnější technické místo celého projektu — pokud tady něco nesedí, web verze nefunguje.
 
@@ -193,7 +198,48 @@ Pokud verze < 10.0, zvážit upgrade — novější verze mají lepší web supp
 
 ---
 
-## 8. Akceptační kritéria
+## 9. Findings z M2 implementace
+
+### 9.1 WebSocket subprotocol header (`mqtt`)
+
+**Problém:** Po prvním connect attemptu z Flutter Web na `ws://localhost:9001/mqtt` (Mosquitto 2.1.2 lokálně, listener `protocol websockets`) browser console vyhodil:
+
+```
+WebSocket connection to 'ws://localhost:9001/mqtt' failed:
+  Connection closed before receiving a handshake response
+WebSocket is already in CLOSING or CLOSED state.
+```
+
+**Příčina:** MQTT-over-WebSocket vyžaduje, aby klient v handshake hlavičkách požádal o subprotocol `mqtt` (přes `Sec-WebSocket-Protocol: mqtt`). Mosquitto brokery (a podle [MQTT-WS spec](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901271) i jiní implementátoři) jinak handshake odmítnou. `MqttBrowserClient` z `mqtt_client` 10.6 **subprotocol defaultně neposílá**.
+
+**Fix:**
+
+```dart
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_browser_client.dart';
+
+final client = MqttBrowserClient.withPort(url, clientId, port)
+  ..websocketProtocols = MqttClientConstants.protocolsSingleDefault;
+//                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//                       = ['mqtt'] — viz mqtt_client_constants.dart
+```
+
+Stejné platí pro `MqttServerClient` na native, pokud běží přes WS (`useWebSocket = true`). Implementováno v obou factory souborech:
+- [mqtt_client_factory_web.dart](../lib/services/mqtt_client_factory_web.dart)
+- [mqtt_client_factory_io.dart](../lib/services/mqtt_client_factory_io.dart) (uvnitř `if (useWebsocket)`)
+
+**Pozn.:** `protocolsSingleDefault` posílá jen `mqtt`. Pro starší brokery, které vyžadují MQTT 3.1.1 specific subprotocol, existuje `protocolsMultipleDefault = ['mqtt', 'mqttv3.1']`. Mosquitto akceptuje obě.
+
+### 9.2 Co dál ověřit u produkčního brokeru
+
+Až bude na `mqtt.config.smartci4.com` (nebo jiném smartci4 brokeru) zapnutý WS listener:
+1. Otestovat connect z Vercel preview (M4) — pravděpodobně narazíme na CORS.
+2. Při WSS s validním Let's Encrypt certem by neměl být cert problém.
+3. Ověřit, že subprotocol `mqtt` projde i přes Nginx reverse proxy (pokud bude WS proxyovaný přes 443).
+
+---
+
+## 10. Akceptační kritéria
 
 - [ ] `MqttClientFactory` s conditional importem funguje na native i web.
 - [ ] Web build se připojí k testovacímu brokeru přes WS i WSS.

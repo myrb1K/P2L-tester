@@ -1,6 +1,11 @@
 # 04 — Responzivita UX
 
-> **Status:** Draft v0.2 · **Datum:** 2026-05-21 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** Draft v0.3 — M3 ✅ dokončeno · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+>
+> **Update v0.3 (M3 hotový):**
+> - Smoke test v Chrome DevTools device emulation: **Pixel 7 (412×915) ✓** a **iPad Mini (768×1024) ✓** — žádné overflow warningy, layout pluje, tap targety OK.
+> - **iPhone SE (375×667)**: LED port bar v `HomeScreen` přetékal o ~12px (`RIGHT_OVERFLOWED BY 12 PIXELS`). Rozhodnuto **neopravovat** — 375px je dnes okrajový viewport, který Smartbox interní uživatelé reálně nemají.
+> - Layout je tedy **funkční na všech relevantních viewportech bez úprav kódu**. APK responzivita se přenesla 1:1 na Flutter Web.
 >
 > **Update v0.2:** Stávající Android APK funguje na mobilu skvěle a Windows EXE při zmenšení okna na mobilní šířku také vypadá OK. Layout je **už responzivní**. Scope této fáze se proto mění z "postavit responzivní layout" na **"ověřit, že existující responzivní chování funguje i v browseru"**. Sekce §4 (Místa k úpravě) je ponechána jako *kontrolní seznam* — žádná z položek pravděpodobně nebude vyžadovat refactor, jen smoke test.
 
