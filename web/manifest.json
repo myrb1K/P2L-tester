@@ -1,11 +1,11 @@
 {
-    "name": "p2l_tester",
-    "short_name": "p2l_tester",
+    "name": "P2L Tester",
+    "short_name": "P2L Tester",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#FFFFFF",
+    "description": "Testování P2L hardware modulů přes MQTT (Smartbox)",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
