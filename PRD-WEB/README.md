@@ -10,7 +10,7 @@ Webová varianta P2L Testeru pro branch `WEB`. Tato složka obsahuje veškerou p
 | [02-auth-bezpecnost.md](02-auth-bezpecnost.md) | Návrh autentizace (vlastní backend vs. integrace s ci4gui), security požadavky |
 | [03-mqtt-web.md](03-mqtt-web.md) | MQTT klient na webu — `MqttBrowserClient`, conditional imports, WSS + CORS rizika |
 | [04-responzivita.md](04-responzivita.md) | Responzivita UX, breakpointy, místa v UI k úpravě |
-| [05-deployment.md](05-deployment.md) | Deployment topologie — Vercel staging + finální firemní server |
+| [05-deployment.md](05-deployment.md) | Deployment topologie — firemní server (Nginx + Node + Mosquitto) |
 
 ## Status
 

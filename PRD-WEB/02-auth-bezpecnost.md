@@ -1,10 +1,13 @@
 # 02 — Auth a bezpečnost
 
-> **Status:** Draft v0.2 · **Datum:** 2026-05-21 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** Draft v0.3 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+>
+> **Změny v v0.3:**
+> - **Vercel mezikrok vyřazen** — nasazujeme rovnou na firemní server, takže placeholder login (`§9` v v0.2) zmizel a píšeme rovnou plnohodnotnou auth (M4 v novém číslování).
+> - Backend cíleně Node.js na firemním serveru, žádné Vercel Functions.
 >
 > **Změny v v0.2:**
-> - Auth se nyní implementuje **jako poslední milestone (M5)**, ne uprostřed. MQTT a responzivita jdou dřív.
-> - Přidaná sekce **§9 Vercel staging protection** — mezikrok pro fázi 4, kdy ještě nemáme plnou auth, ale staging deploy nesmí být veřejný.
+> - Auth se nyní implementuje **jako poslední milestone**, ne uprostřed. MQTT a responzivita jdou dřív.
 
 Návrh autentizace a bezpečnostních požadavků pro webovou variantu P2L Testeru.
 
@@ -33,10 +36,10 @@ Vlastní Node.js (Express / Fastify) backend s těmito vlastnostmi:
 
 | Vrstva | Volba | Důvod |
 |--------|-------|-------|
-| Backend framework | Node.js + Express | Snadno přenositelné mezi Vercel Functions a firemním Node serverem |
-| DB uživatelů | SQLite (vývoj / Vercel KV); Postgres (prod) | Stačí pár uživatelů, není potřeba clustering |
+| Backend framework | Node.js + Express (nebo Fastify) | Standardní, runs as systemd service na firemním serveru |
+| DB uživatelů | SQLite (vývoj) / SQLite nebo Postgres (prod) | Stačí pár uživatelů, není potřeba clustering |
 | Hashing | `bcrypt` (12+ rounds) nebo `argon2` | Standard |
-| Session | **JWT v httpOnly cookie** | Funguje cross-origin (Vercel ↔ broker subdomain), bezpečnější než localStorage token |
+| Session | **JWT v httpOnly cookie** | Bezpečnější než localStorage token, funguje same-origin (frontend i `/api` pod stejnou doménou) |
 | Endpointy | `POST /api/login`, `POST /api/logout`, `GET /api/me` | Minimální plocha |
 
 **API skica:**
@@ -77,10 +80,9 @@ Pokud `ci4gui.smartbox.smartci4.com` poskytuje:
 **Otevřené k zjištění:**
 - Forma auth (cookie session vs. bearer token)?
 - Endpointy?
-- CORS pro Vercel preview origins (pro fázi staging)?
-- Cross-subdomain cookie sharing nebo OAuth flow?
+- Cross-subdomain cookie sharing nebo OAuth flow (pokud bude P2L Tester pod jinou subdoménou než ci4gui)?
 
-→ rozhodnutí blokuje [open question §9.1 v 01-PRD.md](01-PRD.md#91-integrace-s-ci4gui-auth).
+→ rozhodnutí blokuje [open question §9.1 v 01-PRD.md](01-PRD.md#9-open-questions).
 
 ### Varianta C — Mosquitto username/password (zamítnuto)
 
@@ -97,12 +99,12 @@ Necháváme jako orientační poznámku, použijeme **A nebo B**.
 
 ## 3. Doporučení
 
-**Pro fázi 2 (auth MVP):** začít s **Variantou A** (vlastní lehký Node backend), protože:
+**Pro M4:** začít s **Variantou A** (vlastní lehký Node backend), protože:
 - Není závislé na zjišťování ci4gui internals.
-- Snadno se přesune z Vercel Functions na firemní server.
+- Snadno se nasadí jako systemd service vedle ci4gui.
 - Pokud později vyjde najevo, že ci4gui má použitelné API, přepneme na B (Flutter client kód se mění minimálně, jen kam volá `/api/login`).
 
-**Pro fázi 4 (produkce):** vyhodnotit znovu po průzkumu ci4gui.
+**Pokud se ukáže, že ci4gui má použitelnou auth:** v rámci M5 (firemní server deploy) můžeme přepnout na variantu B a vlastní backend vyhodit.
 
 ---
 
@@ -114,7 +116,7 @@ Necháváme jako orientační poznámku, použijeme **A nebo B**.
 | Cookies | `httpOnly`, `Secure`, `SameSite=Lax` pro session cookie. |
 | Passwords | Bcrypt/argon2, min. 12 znaků, žádné password reset přes email v MVP (admin reset). |
 | Rate limiting | Login endpoint: max 5 pokusů / IP / 15 min. |
-| CORS (Varianta A) | Backend povolí jen origin Vercel preview + produkční doménu. |
+| CORS (Varianta A) | Backend běží same-origin (`/api/*` proxyovaný Nginxem) → CORS odpadá. |
 | MQTT WS | Pokud broker podporuje user/password, použít je. ACL: minimálně omezit publish na `I/+/...` topicy. |
 | Brute force MQTT | Mosquitto má `auth_plugin` / fail2ban — out of scope tohoto PRD, ale upozornit IT. |
 | CSP | `Content-Security-Policy` header v Nginx — povolit jen vlastní origin + WSS k brokeru. |
@@ -157,7 +159,6 @@ HTTP interceptor: pokud kterákoli odpověď vrátí 401, smazat lokální stav 
 
 Pro MVP **nemáme admin UI**. Účty zakládá Radek:
 - **Lokální vývoj:** přímo přes SQLite CLI nebo přidání seed skriptu.
-- **Vercel staging:** přes Vercel CLI / DB konzoli.
 - **Produkce:** SQL skript na serveru, nebo malý CLI script `node scripts/add-user.js <username> <password>`.
 
 Admin obrazovka ve Flutter je out-of-scope MVP — když uživatelů přibude, doděláme.
@@ -168,50 +169,13 @@ Admin obrazovka ve Flutter je out-of-scope MVP — když uživatelů přibude, d
 
 | Risk | Mitigation |
 |------|------------|
-| Cookie cross-subdomain (Vercel: app.vercel.app, broker: broker.smartci4.com) | JWT cookie bude vázán na Vercel doménu, MQTT auth (pokud bude) řešit zvlášť přes user/password na MQTT connect |
+| Cookie cross-subdomain (pokud bude P2L Tester pod jinou subdoménou než broker) | JWT cookie bude vázán na frontend doménu; MQTT auth (pokud bude) řešit zvlášť přes user/password na MQTT connect |
 | `SameSite=Lax` nestačí, potřebujeme `None` kvůli iframe? | Nepotřebujeme — appka neběží v iframe. Lax je správně. |
-| Vercel Functions cold start prodlouží login | Akceptovatelné — login je low frequency, pár stovek ms navíc OK |
-| ci4gui auth integrace komplikovanější než vlastní | Začít Variantou A, B vyhodnotit při migraci do produkce |
+| ci4gui auth integrace komplikovanější než vlastní | Začít Variantou A, B vyhodnotit při M5 |
 
 ---
 
-## 9. Vercel staging protection (mezikrok pro M4)
-
-Plnou auth (login screen, backend, DB) implementujeme až v M5. Mezi M4 (staging deploy) a M5 ale musíme zajistit, že **Vercel preview URL není veřejně přístupná** — kdokoli by jinak mohl ovládat brokery / publishnout MQTT příkazy.
-
-### Možnosti podle Vercel plánu
-
-| Plán | Možnost | Cena | Vhodné pro |
-|------|---------|------|------------|
-| **Pro** ($20/měs) | **Vercel Authentication** — preview vyžaduje login do Vercel teamu | 0 navíc | Doporučeno, pokud tým je 1–3 lidi |
-| **Pro** | **Password Protection** — jedno sdílené heslo na deploy | 0 navíc | Pokud chceme dát URL i lidem mimo Vercel team |
-| **Hobby (free)** | Vlastní placeholder login: 1 hardcoded heslo v Flutter app | 0 | Pokud nechceme upgradovat plán |
-| **Hobby** | Upgrade na Pro | $20/měs | Pokud projekt poběží na Vercelu dlouho |
-
-### Placeholder login (varianta pro Hobby plán)
-
-Pokud nechceme upgrade, M4 přidá **minimální Flutter login obrazovku** s těmito vlastnostmi:
-
-- 1 username + password hardcoded v `dart-define` build args (ne v repo).
-- Po úspěšném loginu se uloží flag do `localStorage` (`auth=true`).
-- Při startu appky se flag zkontroluje → buď LoginScreen, nebo HomeScreen.
-- Žádný backend, žádná session validace na server straně.
-
-**Co to NEzajistí:**
-- Nikdo nedrží relaci → kdokoli může nastavit `localStorage.auth=true` v DevTools a obejít login.
-- Heslo je v JS bundlu (decompilable).
-- Není to skutečná autentizace, jen **deterrent proti náhodnému přístupu**.
-
-To je akceptovatelné pro staging, kde URL stejně nikomu nedáváme. Pro produkci ale M5 musí přepsat plnohodnotnou auth (Varianta A nebo B z §2).
-
-### Doporučení
-
-- **Pokud Radek upgraduje Vercel na Pro:** použít Vercel Authentication (žádný kód navíc, hotovo za 5 minut).
-- **Pokud zůstane na Hobby:** udělat placeholder login v M4 a v M5 ho přepsat na plnou auth (kód není mnoho, dá se vyhodit).
-
----
-
-## 10. Akceptační kritéria
+## 9. Akceptační kritéria
 
 - [ ] Nepřihlášený uživatel je vždy přesměrován na `LoginScreen`.
 - [ ] Login s validními credentials zobrazí `HomeScreen` a uloží session cookie.
