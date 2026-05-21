@@ -7,6 +7,8 @@ class BrokerProfile {
   String username;
   String password;
   bool useSsl;
+  bool useWebsocket;
+  String wsPath;
 
   BrokerProfile({
     required this.name,
@@ -15,6 +17,8 @@ class BrokerProfile {
     this.username = '',
     this.password = '',
     this.useSsl = false,
+    this.useWebsocket = false,
+    this.wsPath = '/mqtt',
   });
 
   Map<String, dynamic> toJson() => {
@@ -24,6 +28,8 @@ class BrokerProfile {
         'username': username,
         'password': password,
         'useSsl': useSsl,
+        'useWebsocket': useWebsocket,
+        'wsPath': wsPath,
       };
 
   factory BrokerProfile.fromJson(Map<String, dynamic> json) => BrokerProfile(
@@ -33,6 +39,8 @@ class BrokerProfile {
         username: json['username'] as String? ?? '',
         password: json['password'] as String? ?? '',
         useSsl: json['useSsl'] as bool? ?? false,
+        useWebsocket: json['useWebsocket'] as bool? ?? false,
+        wsPath: json['wsPath'] as String? ?? '/mqtt',
       );
 
   static List<BrokerProfile> listFromJson(String jsonStr) {

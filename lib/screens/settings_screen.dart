@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -25,8 +26,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _passwordController;
   late TextEditingController _ledsOnController;
   late TextEditingController _ledsOffController;
+  late TextEditingController _wsPathController;
   int _selectedColor = 0;
   bool _useSsl = false;
+  bool _useWebsocket = false;
   bool _obscurePassword = true;
   int? _editingIndex;
   bool _addingNew = false;
@@ -39,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _portController = TextEditingController(text: '1883');
     _usernameController = TextEditingController(text: 'smartbox_user');
     _passwordController = TextEditingController(text: 'smartbox2022');
+    _wsPathController = TextEditingController(text: '/mqtt');
 
     final state = context.read<AppState>();
     _ledsOnController = TextEditingController(text: state.ledsOn.toString());
@@ -55,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _passwordController.dispose();
     _ledsOnController.dispose();
     _ledsOffController.dispose();
+    _wsPathController.dispose();
     super.dispose();
   }
 
@@ -67,6 +72,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _usernameController.text = profile.username;
     _passwordController.text = profile.password;
     _useSsl = profile.useSsl;
+    _useWebsocket = profile.useWebsocket;
+    _wsPathController.text = profile.wsPath;
   }
 
   void _clearForm() {
@@ -78,6 +85,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _usernameController.text = 'smartbox_user';
     _passwordController.text = 'smartbox2022';
     _useSsl = false;
+    _useWebsocket = false;
+    _wsPathController.text = '/mqtt';
   }
 
   void _toggleEdit(BrokerProfile profile, int index) {
@@ -102,6 +111,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   BrokerProfile _profileFromForm() {
+    final rawPath = _wsPathController.text.trim();
+    final normalizedPath = rawPath.isEmpty
+        ? '/mqtt'
+        : (rawPath.startsWith('/') ? rawPath : '/$rawPath');
     return BrokerProfile(
       name: _nameController.text.trim(),
       broker: _brokerController.text.trim(),
@@ -109,6 +122,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       username: _usernameController.text.trim(),
       password: _passwordController.text,
       useSsl: _useSsl,
+      useWebsocket: _useWebsocket,
+      wsPath: normalizedPath,
     );
   }
 
@@ -363,6 +378,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => setState(() => _useSsl = v),
             secondary: const Icon(Icons.security),
           ),
+          SwitchListTile(
+            title: const Text('WebSocket'),
+            subtitle: Text(
+              kIsWeb
+                  ? 'Na webu povinné — TCP MQTT z prohlížeče nelze.'
+                  : 'Připojit přes WebSocket místo TCP MQTT.',
+              style: const TextStyle(fontSize: 12),
+            ),
+            value: _useWebsocket,
+            onChanged: (v) => setState(() => _useWebsocket = v),
+            secondary: const Icon(Icons.swap_horiz),
+          ),
+          if (_useWebsocket) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _wsPathController,
+              decoration: const InputDecoration(
+                labelText: 'WebSocket path',
+                hintText: '/mqtt',
+                prefixIcon: Icon(Icons.alternate_email),
+                border: OutlineInputBorder(),
+                helperText: 'Cesta WS endpointu na brokeru (typicky /mqtt)',
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: _save,
