@@ -9,6 +9,8 @@ import 'package:provider/provider.dart';
 import '../main.dart';
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
+import 'admin_users_screen.dart';
+import 'auth_gate.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -465,6 +467,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (kIsWeb && (AuthScope.userOf(context)?.isAdmin ?? false)) ...[
+                  Card(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      leading: const Icon(Icons.admin_panel_settings,
+                          color: Colors.blue),
+                      title: const Text('Administrace uživatelů'),
+                      subtitle: const Text(
+                          'Spravovat účty pro přístup k webové variantě'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const AdminUsersScreen()),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 const Text('Uložené profily', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 if (state.profiles.isEmpty)

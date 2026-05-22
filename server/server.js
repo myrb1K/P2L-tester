@@ -1,5 +1,5 @@
 // Hlavní entry point auth backendu.
-// V M4 = login + logout + me. Admin endpointy přijdou v M4.5.
+// M4 = login + logout + me; M4.5 = admin endpointy pro správu uživatelů.
 
 require('dotenv').config();
 
@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const { openDb } = require('./db');
 const { seedInitialAdmin } = require('./db/init');
 const authRoutes = require('./routes/auth');
+const adminRoutes = require('./routes/admin');
 
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 
@@ -45,10 +46,14 @@ if (process.env.NODE_ENV !== 'production' && process.env.DEV_CORS_ORIGIN) {
   console.log(`[cors] Dev CORS enabled for ${process.env.DEV_CORS_ORIGIN}`);
 }
 
-// Rate limit: 5 pokusů / IP / 15 min na /api/login (akceptační kritérium M4).
+// Rate limit: 50 pokusů / IP / 15 min na /api/login. Volnější práh než
+// striktních 5 z PRD §4 — v devu se 5 ukázalo jako neprakticky málo
+// (typo + zapomenuté heslo a zamknuto). 50/15min stále chrání proti
+// rychlému brute force (proti bcrypt-12 je to ~3.5 pokusů/s strop),
+// ale netrestá běžné chyby uživatele.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 50,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'too_many_attempts' },
@@ -56,6 +61,7 @@ const loginLimiter = rateLimit({
 app.use('/api/login', loginLimiter);
 
 app.use('/api', authRoutes.makeRouter(db));
+app.use('/api/admin', adminRoutes.makeRouter(db));
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });

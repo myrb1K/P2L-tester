@@ -1,6 +1,9 @@
 # 02 — Auth a bezpečnost
 
-> **Status:** Draft v0.5 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** Draft v0.6 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+>
+> **Změny v v0.6:**
+> - **M4.5 ✅ dokončeno 2026-05-22** — admin endpointy v [server/routes/admin.js](../server/routes/admin.js), sdílená knihovna [server/db/users.js](../server/db/users.js), [lib/screens/admin_users_screen.dart](../lib/screens/admin_users_screen.dart). Strukturální fix `AuthGate` přes `MaterialApp.builder` (řeší route isolation pro InheritedWidget). Všech 7 akceptačních kritérií §9.2 odškrtnutých. Rate limit zvolněn z 5 na 50/IP/15min po praktické zkušenosti.
 >
 > **Změny v v0.5:**
 > - **M4 ✅ dokončeno 2026-05-22** — backend `server/`, Flutter `lib/services/auth_*` + `lib/screens/{auth_gate,login_screen}.dart`, CLI skripty. Všech 11 akceptačních kritérií §9.1 odškrtnutých. Commits `93874d0`, `6a14043`, `a747ea9`.
@@ -294,12 +297,19 @@ Všechny chráněné middleware `requireAdmin` (kontroluje JWT claim `isAdmin ==
 
 Implementační commits: `93874d0` (backend), `6a14043` (gitignore fix), `a747ea9` (Flutter).
 
-### 9.2 M4.5 (Admin UI)
+### 9.2 M4.5 (Admin UI) — ✅ DOKONČENO 2026-05-22
 
-- [ ] Uživatel s `isAdmin=true` vidí v `SettingsScreen` položku "Administrace uživatelů".
-- [ ] Uživatel bez admin role tu položku NEVIDÍ.
-- [ ] `AdminUsersScreen` umí: seznam, přidání, reset hesla, smazání.
-- [ ] Admin nemůže smazat sám sebe (UI disabled + backend 400).
-- [ ] Backend odmítne smazat / odebrat admin status posledního admina (vrátí 400).
-- [ ] Všechny admin endpointy chráněné middleware `requireAdmin` — non-admin user dostane 403.
-- [ ] Žádná DB migrace nebyla potřeba (schéma už bylo připravené z M4).
+- [x] Uživatel s `isAdmin=true` vidí v `SettingsScreen` položku "Administrace uživatelů".
+- [x] Uživatel bez admin role tu položku NEVIDÍ.
+- [x] `AdminUsersScreen` umí: seznam, přidání, reset hesla, smazání.
+- [x] Admin nemůže smazat sám sebe (UI: tlačítko disabled + šedá ikona; backend 400).
+- [x] Backend odmítne smazat posledního admina (vrátí 400 `last_admin`). Stejný guard sdílen s CLI přes [server/db/users.js](../server/db/users.js).
+- [x] Všechny admin endpointy chráněné middleware `requireAdmin` — non-admin dostane 403.
+- [x] Žádná DB migrace nebyla potřeba (`is_admin` sloupec už z M4).
+
+#### Implementační poznámky
+
+- **Strukturální fix `AuthGate` v widget tree**: přesunut **nad** `MaterialApp.Navigator` přes `builder:` parametr ([lib/main.dart](../lib/main.dart)). Důvod: `_AuthScope` jako InheritedWidget je teď viditelný pro **všechny pushnuté routy** (Settings, AdminUsersScreen), nejen pro home route. Routy pushnuté přes `Navigator.push` jsou v Overlay **sourozenci** root route, takže InheritedWidget uvnitř root route je jim neviditelný. Pre-fix: admin karta v Settings se nikdy nezobrazila, protože `AuthScope.userOf(context)` v Settings vracel `null`.
+- **UX**: na webu vyřazen `SplashScreen` (LoginScreen už má branding s logem a verzí); na nativu (APK/EXE) splash zůstává kvůli Android 12+ ikoně.
+- **Sdílená user-management knihovna**: [server/db/users.js](../server/db/users.js) s `createUser` / `deleteUser` / `resetPassword` / `listUsers` + `UserOpError` třídou. Používají ji jak admin endpointy ([server/routes/admin.js](../server/routes/admin.js)), tak CLI skripty ([server/scripts/](../server/scripts/)) — guardy (duplicate, last-admin, self-delete) jsou tím DRY.
+- **Rate limit**: práh zvýšen z 5 na 50 pokusů / IP / 15 min po praktické zkušenosti v devu — striktních 5 zamykalo i běžné typo a zapomenutí hesla. 50 stále efektivně chrání proti rychlému brute force proti bcrypt-12 (~3.5 pokusů/s strop).
