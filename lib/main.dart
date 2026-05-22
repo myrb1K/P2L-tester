@@ -31,24 +31,25 @@ class P2LTesterApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         themeMode: ThemeMode.light,
-        home: const SplashScreen(next: _AppEntry()),
+        // Na webu obalíme celý Navigator AuthGate-em přes builder.
+        // Důvod: _AuthScope musí být ABOVE MaterialApp.Navigator, aby ho
+        // viděly i pushnuté routy (Settings → AdminUsersScreen). Kdyby byl
+        // uvnitř jedné route (jako home child), inherited widget by byl
+        // sourozeneckým routám neviditelný.
+        // Na nativu (APK/EXE) builder = null → pass-through.
+        builder: kIsWeb
+            ? (context, child) =>
+                AuthGate(child: child ?? const SizedBox.shrink())
+            : null,
+        // Na webu přeskakujeme splash (branding má LoginScreen), aby se po
+        // každém přihlášení nezobrazovala 2s splash animace. Na nativu
+        // (APK/EXE) splash zůstává — Android 12+ má jen kruhovou ikonku,
+        // Flutter splash dává plné logo.
+        home: kIsWeb
+            ? const _InitialRoute()
+            : const SplashScreen(next: _InitialRoute()),
       ),
     );
-  }
-}
-
-/// Vstupní bod po splashi. Na webu se obaluje [AuthGate] (login před
-/// přístupem k aplikaci); na nativu (APK/EXE) jde rovnou na [_InitialRoute].
-class _AppEntry extends StatelessWidget {
-  const _AppEntry();
-
-  @override
-  Widget build(BuildContext context) {
-    const inner = _InitialRoute();
-    if (kIsWeb) {
-      return const AuthGate(child: inner);
-    }
-    return inner;
   }
 }
 

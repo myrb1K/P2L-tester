@@ -32,7 +32,26 @@ class AuthUser {
       );
 }
 
+/// Záznam ze seznamu uživatelů z admin endpointu (M4.5).
+class AdminUserRow {
+  final String username;
+  final bool isAdmin;
+  final String createdAt;
+  const AdminUserRow({
+    required this.username,
+    required this.isAdmin,
+    required this.createdAt,
+  });
+
+  factory AdminUserRow.fromJson(Map<String, dynamic> json) => AdminUserRow(
+        username: json['username'] as String,
+        isAdmin: json['isAdmin'] as bool? ?? false,
+        createdAt: json['createdAt'] as String? ?? '',
+      );
+}
+
 /// Vyhozeno z [AuthApi.login] při neplatných credentials nebo rate-limitu.
+/// Také z admin metod při guardech (duplicate / not_found / self_delete / last_admin).
 class AuthException implements Exception {
   final String code;
   final String message;
@@ -97,5 +116,82 @@ class AuthApi {
 
   Future<void> logout() async {
     await _client.post(_u('/logout'));
+  }
+
+  // ─── M4.5 admin endpointy ────────────────────────────────────────
+  //
+  // Všechny vyžadují session s claim `isAdmin: true`. 403 = chybí role,
+  // 401 = neplatná/chybějící session. Volání mapujeme na AuthException
+  // s code z backend payloadu (duplicate / not_found / self_delete /
+  // last_admin / invalid_*), aby UI mohlo zobrazit konkrétní hlášku.
+
+  Future<List<AdminUserRow>> listUsers() async {
+    final res = await _client.get(_u('/admin/users'));
+    _throwIfNotOk(res);
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    final users = (json['users'] as List).cast<Map<String, dynamic>>();
+    return users.map(AdminUserRow.fromJson).toList();
+  }
+
+  Future<void> createUser({
+    required String username,
+    required String password,
+    bool isAdmin = false,
+  }) async {
+    final res = await _client.post(
+      _u('/admin/users'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'username': username,
+        'password': password,
+        'isAdmin': isAdmin,
+      }),
+    );
+    _throwIfNotOk(res, expected: 201);
+  }
+
+  Future<void> deleteUser(String username) async {
+    final res = await _client.delete(_u('/admin/users/$username'));
+    _throwIfNotOk(res, expected: 204);
+  }
+
+  Future<void> resetUserPassword(String username, String newPassword) async {
+    final res = await _client.post(
+      _u('/admin/users/$username/reset'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'newPassword': newPassword}),
+    );
+    _throwIfNotOk(res);
+  }
+
+  void _throwIfNotOk(http.Response res, {int expected = 200}) {
+    if (res.statusCode == expected) return;
+    // Pokus o JSON s code/message; fallback na status code.
+    String code = 'http_${res.statusCode}';
+    String message = res.body;
+    try {
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      code = json['error'] as String? ?? code;
+      message = json['message'] as String? ?? code;
+    } catch (_) {
+      // nebudeme cpát do message celé HTML/empty body
+      message = _humanForStatus(res.statusCode);
+    }
+    throw AuthException(code, message);
+  }
+
+  String _humanForStatus(int s) {
+    switch (s) {
+      case 401:
+        return 'Nepřihlášený.';
+      case 403:
+        return 'Chybí admin oprávnění.';
+      case 404:
+        return 'Uživatel nenalezen.';
+      case 409:
+        return 'Uživatel s tímto jménem už existuje.';
+      default:
+        return 'Chyba serveru ($s).';
+    }
   }
 }
