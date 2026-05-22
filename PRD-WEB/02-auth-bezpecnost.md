@@ -1,6 +1,9 @@
 # 02 — Auth a bezpečnost
 
-> **Status:** Draft v0.4 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** Draft v0.5 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+>
+> **Změny v v0.5:**
+> - **M4 ✅ dokončeno 2026-05-22** — backend `server/`, Flutter `lib/services/auth_*` + `lib/screens/{auth_gate,login_screen}.dart`, CLI skripty. Všech 11 akceptačních kritérií §9.1 odškrtnutých. Commits `93874d0`, `6a14043`, `a747ea9`.
 >
 > **Změny v v0.4:**
 > - **Varianta A (vlastní Node backend) ROZHODNUTA** — viz §2.A a §3. Varianta B (ci4gui integrace) zůstává jako fallback, pokud později vyjde najevo, že má ci4gui použitelnou auth.
@@ -274,20 +277,22 @@ Všechny chráněné middleware `requireAdmin` (kontroluje JWT claim `isAdmin ==
 
 ## 9. Akceptační kritéria
 
-### 9.1 M4 (login + CLI správa)
+### 9.1 M4 (login + CLI správa) — ✅ DOKONČENO 2026-05-22
 
-- [ ] Nepřihlášený uživatel je vždy přesměrován na `LoginScreen`.
-- [ ] Login s validními credentials zobrazí `HomeScreen` a uloží session cookie.
-- [ ] Refresh stránky uživatele neodhlašuje.
-- [ ] Logout invaliduje session (následné `GET /api/me` vrátí 401).
-- [ ] Špatný login zobrazí chybovou zprávu, žádné session se nezaloží.
-- [ ] Rate limit po 5 pokusech / IP / 15 min funguje.
-- [ ] Cookies mají `Secure`, `HttpOnly`, `SameSite=Lax`.
-- [ ] DB schéma obsahuje `is_admin BOOLEAN` od první migrace.
-- [ ] JWT payload obsahuje claim `isAdmin` (i když Flutter v M4 zatím neční).
-- [ ] Initial admin user se vytvoří při prvním startu z env (`INITIAL_ADMIN_USER` / `INITIAL_ADMIN_PASSWORD`), pokud je `users` tabulka prázdná.
-- [ ] CLI skripty `add-user.js`, `del-user.js`, `reset-pwd.js`, `list-users.js` fungují a manipulují přímo se SQLite souborem.
-- [ ] **Native APK / Windows EXE auth NEPOUŽÍVAJÍ** (login obrazovka guardovaná `kIsWeb`, mobilní/desktop user pokračuje rovnou do HomeScreen jako dnes).
+- [x] Nepřihlášený uživatel je vždy přesměrován na `LoginScreen`.
+- [x] Login s validními credentials zobrazí `HomeScreen` a uloží session cookie.
+- [x] Refresh stránky uživatele neodhlašuje.
+- [x] Logout invaliduje session (následné `GET /api/me` vrátí 401).
+- [x] Špatný login zobrazí chybovou zprávu, žádné session se nezaloží.
+- [x] Rate limit po 5 pokusech / IP / 15 min funguje (potvrzeno `RateLimit-Limit: 5` headery).
+- [x] Cookies mají `HttpOnly`, `SameSite=Lax`. **`Secure` se zapne automaticky v produkci** přes `NODE_ENV=production` (v dev běží přes HTTP a Secure by spojení rozbilo).
+- [x] DB schéma obsahuje `is_admin BOOLEAN` od první migrace ([server/db/schema.sql](../server/db/schema.sql)).
+- [x] JWT payload obsahuje claim `isAdmin` ([server/routes/auth.js](../server/routes/auth.js) `signToken`).
+- [x] Initial admin user se vytvoří při prvním startu z env, pokud je `users` tabulka prázdná ([server/db/init.js](../server/db/init.js) `seedInitialAdmin`).
+- [x] CLI skripty `add-user.js`, `del-user.js`, `reset-pwd.js`, `list-users.js` fungují a manipulují přímo se SQLite souborem ([server/scripts/](../server/scripts/)). `del-user` má guard proti smazání posledního admina.
+- [x] **Native APK / Windows EXE auth NEPOUŽÍVAJÍ** (`kIsWeb` guard v [lib/main.dart](../lib/main.dart) `_AppEntry`).
+
+Implementační commits: `93874d0` (backend), `6a14043` (gitignore fix), `a747ea9` (Flutter).
 
 ### 9.2 M4.5 (Admin UI)
 

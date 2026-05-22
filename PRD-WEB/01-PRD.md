@@ -1,6 +1,9 @@
 # 01 — PRD: P2L Tester Web
 
-> **Status:** Draft v0.6 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+> **Status:** Draft v0.7 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+>
+> **Změny v v0.7:**
+> - **M4 ✅ kód hotový a lokálně ověřený** (commits `93874d0`, `6a14043`, `a747ea9` na `web` větvi). Node + SQLite + JWT backend v `server/`, LoginScreen + AuthGate ve Flutteru, CLI skripty pro správu uživatelů. Všech 11 akceptačních kritérií [02-auth-bezpecnost.md §9.1](02-auth-bezpecnost.md#91-m4-login--cli-správa) odškrtnutých. Produkční deploy (Secure cookie flag, Nginx, systemd) řeší až M5.
 >
 > **Změny v v0.6:**
 > - **Varianta A pro auth ROZHODNUTA** (vlastní Node + SQLite + JWT v httpOnly cookie). Detaily viz [02-auth-bezpecnost.md §3](02-auth-bezpecnost.md#3-rozhodnutí-2026-05-22).
@@ -248,10 +251,10 @@ Má broker zapnutý `allow_anonymous false`? Pokud ano, jsou MQTT credentials pe
 | M1 | `flutter build web` projde, app se otevře v Chrome | ✅ | Web build prošel out-of-the-box; `kIsWeb` guards už v kódu; brand polish v `web/index.html` + `manifest.json` |
 | M2 | MQTT WS klient přes `MqttBrowserClient`, connect k lokálnímu **i produkčnímu** brokeru | ✅ | `MqttClientFactory` s conditional importem; klíčový fix: `websocketProtocols = ['mqtt']`; E2E ověřeno proti lokálnímu Mosquitto + ALIVE roundtrip; **2026-05-22 dokončeno i proti `wss://mqtt.smartbox.smartci4.com:443/mqtt` — discovery 3 jednotek, refresh reconnect, network-drop reconnect (viz [03-mqtt-web.md §9.0](03-mqtt-web.md#90-ověření-proti-produkčnímu-brokeru-2026-05-22))** |
 | M3 | Responzivita smoke test | ✅ | Pixel 7 + iPad Mini OK bez úprav; iPhone SE (375px) skipnuto (relevance) |
-| **M4** | Login (Varianta A) — Node backend + SQLite + LoginScreen + session + CLI správa uživatelů | příští | Effort 2–3 dny. Schéma DB i JWT už obsahují `is_admin` / `isAdmin` pro budoucí M4.5. Detail v [02-auth-bezpecnost.md](02-auth-bezpecnost.md) |
+| **M4** | Login (Varianta A) — Node backend + SQLite + LoginScreen + session + CLI správa uživatelů | ✅ | **Kód hotový a lokálně ověřený 2026-05-22** (commits `93874d0`, `6a14043`, `a747ea9`). Backend v `server/`, Flutter v `lib/services/auth_*` + `lib/screens/{auth_gate,login_screen}.dart`, kIsWeb guard v `main.dart`. Initial admin `radek` seed z env funguje, CLI skripty fungují vč. last-admin guardu. Smoke test: login → /api/me → logout → MQTT WSS discovery dál funguje. Detail v [02-auth-bezpecnost.md](02-auth-bezpecnost.md) |
 | **M4.5** | Admin UI ve Flutteru — `AdminUsersScreen` + admin endpointy v backendu | volitelně později | Effort +1 den. Pure additive change. Dělat až M4 běží v produkci a CLI workflow přestane dostačovat |
 | **M5** | Produkční deploy na firemní server (Nginx, HTTPS, systemd) | čeká M4 | Včetně WS endpointu na brokeru ([§9.4](#9-open-questions)) |
 
 ---
 
-**Příští krok:** začít implementaci M4 podle [02-auth-bezpecnost.md](02-auth-bezpecnost.md). Open questions 9.1 (ci4gui auth) a 9.3/9.4 (doména, MQTT credentials) zůstávají otevřené, ale neblokují M4 — varianta A je samostatná. Před M5 (produkční deploy) je dořešit.
+**Příští krok:** M4 hotový → buď začít M5 (produkční deploy na firemní server) nebo M4.5 (admin UI ve Flutteru). M5 čeká na dořešení open questions §9.3 (doména) a §9.4 (Mosquitto credentials). M4.5 nemá závislosti, ale dělat ho má smysl až M4 reálně poběží v produkci a CLI workflow přestane dostačovat.
