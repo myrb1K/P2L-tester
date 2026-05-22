@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/app_state.dart';
+import 'screens/auth_gate.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
@@ -29,9 +31,24 @@ class P2LTesterApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         themeMode: ThemeMode.light,
-        home: const SplashScreen(next: _InitialRoute()),
+        home: const SplashScreen(next: _AppEntry()),
       ),
     );
+  }
+}
+
+/// Vstupní bod po splashi. Na webu se obaluje [AuthGate] (login před
+/// přístupem k aplikaci); na nativu (APK/EXE) jde rovnou na [_InitialRoute].
+class _AppEntry extends StatelessWidget {
+  const _AppEntry();
+
+  @override
+  Widget build(BuildContext context) {
+    const inner = _InitialRoute();
+    if (kIsWeb) {
+      return const AuthGate(child: inner);
+    }
+    return inner;
   }
 }
 
