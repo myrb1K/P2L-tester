@@ -1,0 +1,28 @@
+{
+  "name": "p2l-tester-auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Auth backend pro webovou variantu P2L Testeru (M4)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "add-user": "node scripts/add-user.js",
+    "del-user": "node scripts/del-user.js",
+    "reset-pwd": "node scripts/reset-pwd.js",
+    "list-users": "node scripts/list-users.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

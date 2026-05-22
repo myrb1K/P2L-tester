@@ -1,0 +1,30 @@
+// Initial admin seed — spouští se při startu server.js.
+// Vytvoří admin uživatele z env, pokud je tabulka users prázdná.
+
+const bcrypt = require('bcrypt');
+
+const BCRYPT_ROUNDS = 12;
+
+function seedInitialAdmin(db) {
+  const count = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  if (count > 0) return { seeded: false, reason: 'users table not empty' };
+
+  const username = (process.env.INITIAL_ADMIN_USER || '').trim();
+  const password = process.env.INITIAL_ADMIN_PASSWORD || '';
+
+  if (!username || !password) {
+    return {
+      seeded: false,
+      reason: 'INITIAL_ADMIN_USER / INITIAL_ADMIN_PASSWORD not set — manual user creation required',
+    };
+  }
+
+  const hash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+  db.prepare(
+    'INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)'
+  ).run(username, hash);
+
+  return { seeded: true, username };
+}
+
+module.exports = { seedInitialAdmin, BCRYPT_ROUNDS };
