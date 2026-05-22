@@ -1,6 +1,10 @@
 # 01 — PRD: P2L Tester Web
 
-> **Status:** Draft v0.4 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+> **Status:** Draft v0.5 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+>
+> **Změny v v0.5:**
+> - **M2 plně dokončeno i proti produkčnímu brokeru** `wss://mqtt.smartbox.smartci4.com:443/mqtt` (WSS na 443, SSL/TLS + WebSocket s path `/mqtt`). Všech 6 akceptačních kritérií [03-mqtt-web.md §10](03-mqtt-web.md#10-akceptační-kritéria) odškrtnutých — discovery, refresh reconnect i network-drop reconnect ověřeny live.
+> - Open question [§9.2](#9-open-questions) (broker pro web testing) tím dořešená — produkční broker s WSS je živý.
 >
 > **Změny v v0.4:**
 > - **Vercel jako mezikrok vyřazen** — nasazujeme rovnou na firemní server vedle `ci4gui`. Důvody: jediný vývojář, lokální dev pokrývá iterace, Vercel build pipeline pro Flutter je netriviální, Hobby plán šedá zóna, auth backend by se psal 2× (Vercel Functions vs. Node).
@@ -199,9 +203,9 @@ Má `ci4gui.smartbox.smartci4.com` REST API / JWT endpoint, který by P2L Tester
 
 **Akce:** zjistit s kolegou, jak je `ci4gui` postavený a jestli má SSO-friendly auth.
 
-### 9.2 Konkrétní broker pro web testing
+### 9.2 Konkrétní broker pro web testing — ✅ DOŘEŠENO (2026-05-22)
 
-Které brokery už mají WSS endpoint živý a s validním certifikátem? Pro fázi 1 stačí jeden testovací (může být i self-signed na localhost s `mkcert`).
+Produkční broker `mqtt.smartbox.smartci4.com:443` má WSS endpoint na path `/mqtt` s validním certem. Profil `SM-SMARTBOX-WSS` (SSL/TLS + WebSocket) připojení potvrdil, discovery jednotek funguje.
 
 ### 9.3 Doména pro produkční nasazení
 
@@ -225,7 +229,7 @@ Má broker zapnutý `allow_anonymous false`? Pokud ano, jsou MQTT credentials pe
 | # | Milestone | Stav | Pozn. |
 |---|-----------|:----:|-------|
 | M1 | `flutter build web` projde, app se otevře v Chrome | ✅ | Web build prošel out-of-the-box; `kIsWeb` guards už v kódu; brand polish v `web/index.html` + `manifest.json` |
-| M2 | MQTT WS klient přes `MqttBrowserClient`, connect k lokálnímu brokeru | ✅ | `MqttClientFactory` s conditional importem; klíčový fix: `websocketProtocols = ['mqtt']`; E2E ověřeno proti lokálnímu Mosquitto + ALIVE roundtrip |
+| M2 | MQTT WS klient přes `MqttBrowserClient`, connect k lokálnímu **i produkčnímu** brokeru | ✅ | `MqttClientFactory` s conditional importem; klíčový fix: `websocketProtocols = ['mqtt']`; E2E ověřeno proti lokálnímu Mosquitto + ALIVE roundtrip; **2026-05-22 dokončeno i proti `wss://mqtt.smartbox.smartci4.com:443/mqtt` — discovery 3 jednotek, refresh reconnect, network-drop reconnect (viz [03-mqtt-web.md §9.0](03-mqtt-web.md#90-ověření-proti-produkčnímu-brokeru-2026-05-22))** |
 | M3 | Responzivita smoke test | ✅ | Pixel 7 + iPad Mini OK bez úprav; iPhone SE (375px) skipnuto (relevance) |
 | **M4** | Plnohodnotná auth (Node backend + LoginScreen + session) | příští | Závislé na rozhodnutí ci4gui integrace ([§9.1](#9-open-questions)) |
 | **M5** | Produkční deploy na firemní server (Nginx, HTTPS, systemd) | čeká M4 | Včetně WS endpointu na brokeru ([§9.4](#9-open-questions)) |

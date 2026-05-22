@@ -200,6 +200,18 @@ Pokud verze < 10.0, zvážit upgrade — novější verze mají lepší web supp
 
 ## 9. Findings z M2 implementace
 
+### 9.0 Ověření proti produkčnímu brokeru (2026-05-22)
+
+E2E test z `flutter run -d chrome` proti `wss://mqtt.smartbox.smartci4.com:443/mqtt` (profil `SM-SMARTBOX-WSS`, SSL/TLS + WebSocket + path `/mqtt`):
+
+- ✅ **WS handshake prošel** — Chrome DevTools → Network → Socket filter ukazuje entry `mqtt` (initiator `mqtt_client_mqtt_browser_ws_connection.dart:54`) se statusem **101 Switching Protocols**.
+- ✅ **Discovery funguje** — během cca 1 minuty se objevily 3 P2L moduly (1014, 1209, 1248) s online tečkou, čerstvými ALIVE timestamps a firmware verzemi.
+- ✅ **Refresh stránky → automatický reconnect** — po `F5` se klient znovu připojí bez user akce ("Připojeno, čekám na ALIVE…"), seznam se zaplní novými ALIVE zprávami.
+- ✅ **Network drop → reconnect** — vypnutí a opětovné zapnutí síťového připojení vede k automatické obnově MQTT spojení (`autoReconnect = true` v `MqttBrowserClient`).
+- ✅ Console bez red errorů; jediný warning `Intl.v8BreakIterator is deprecated` pochází z Dart SDK, není naše.
+
+Tím jsou splněna **všechna akceptační kritéria M2** (viz §10).
+
 ### 9.1 WebSocket subprotocol header (`mqtt`)
 
 **Problém:** Po prvním connect attemptu z Flutter Web na `ws://localhost:9001/mqtt` (Mosquitto 2.1.2 lokálně, listener `protocol websockets`) browser console vyhodil:
@@ -241,9 +253,11 @@ Až bude na `mqtt.config.smartci4.com` (nebo jiném smartci4 brokeru) zapnutý W
 
 ## 10. Akceptační kritéria
 
-- [ ] `MqttClientFactory` s conditional importem funguje na native i web.
-- [ ] Web build se připojí k testovacímu brokeru přes WS i WSS.
-- [ ] Subscribe + publish funguje, ALIVE zprávy přicházejí.
-- [ ] Reconnect po network drop funguje.
-- [ ] Po refresh stránky se aplikace připojí znovu bez user akce.
-- [ ] Žádné `dart:io` runtime erroru ve web buildu (zkontrolovat browser console).
+- [x] `MqttClientFactory` s conditional importem funguje na native i web.
+- [x] Web build se připojí k testovacímu i **produkčnímu** brokeru přes WSS (`wss://mqtt.smartbox.smartci4.com:443/mqtt`).
+- [x] Subscribe + publish funguje, ALIVE zprávy přicházejí (3 jednotky discovered live).
+- [x] Reconnect po network drop funguje (vypnuto/zapnuto Wi-Fi → klient sám obnoví spojení).
+- [x] Po refresh stránky se aplikace připojí znovu bez user akce.
+- [x] Žádné `dart:io` runtime erroru ve web buildu (Issues panel čistý kromě upstream Dart SDK warningu).
+
+**M2 dokončeno proti produkčnímu brokeru 2026-05-22.**
