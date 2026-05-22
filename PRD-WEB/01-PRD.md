@@ -1,6 +1,13 @@
 # 01 — PRD: P2L Tester Web
 
-> **Status:** Draft v0.5 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+> **Status:** Draft v0.6 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+>
+> **Změny v v0.6:**
+> - **Varianta A pro auth ROZHODNUTA** (vlastní Node + SQLite + JWT v httpOnly cookie). Detaily viz [02-auth-bezpecnost.md §3](02-auth-bezpecnost.md#3-rozhodnutí-2026-05-22).
+> - **M4 rozdělen na M4 + M4.5**:
+>   - **M4** = login pro běžné uživatele, správa přes CLI skripty na serveru. `is_admin` sloupec + `isAdmin` JWT claim už od první migrace.
+>   - **M4.5** = volitelně později; `AdminUsersScreen` ve Flutteru pro správu uživatelů z UI. Pure additive change, žádná DB migrace.
+> - Detailní spec v [02-auth-bezpecnost.md §6](02-auth-bezpecnost.md#6-admin-správa-uživatelů--m4--m45).
 >
 > **Změny v v0.5:**
 > - **M2 plně dokončeno i proti produkčnímu brokeru** `wss://mqtt.smartbox.smartci4.com:443/mqtt` (WSS na 443, SSL/TLS + WebSocket s path `/mqtt`). Všech 6 akceptačních kritérií [03-mqtt-web.md §10](03-mqtt-web.md#10-akceptační-kritéria) odškrtnutých — discovery, refresh reconnect i network-drop reconnect ověřeny live.
@@ -68,14 +75,24 @@ Detaily viz [03-mqtt-web.md](03-mqtt-web.md).
 
 Detaily viz [04-responzivita.md](04-responzivita.md).
 
-### Fáze 4 — Plnohodnotná auth
+### Fáze 4 — Plnohodnotná auth (rozdělená na M4 + M4.5)
+
+**M4 — login pro běžné uživatele (povinné pro produkci):**
 - Login obrazovka (Flutter) před přístupem ke zbytku aplikace.
 - Backend `/api/login`, `/api/logout`, `/api/me` (Node.js + JWT v httpOnly cookie).
-- Session persistence, logout button, admin reset přes DB / CLI script.
-- Rate limiting na login endpoint.
-- **Rozhodnutí o ci4gui integraci** — zjištěné v rámci open question §9.1, buď zapojit na ci4gui auth, nebo dokončit vlastní backend.
+- Session persistence, logout button, rate limiting na login endpoint.
+- Schéma DB obsahuje `is_admin` od první migrace; JWT obsahuje `isAdmin` claim.
+- Initial admin se zakládá z env při prvním startu (`INITIAL_ADMIN_USER` / `INITIAL_ADMIN_PASSWORD`).
+- Správa uživatelů v M4 = CLI skripty na serveru (`add-user.js`, `del-user.js`, `reset-pwd.js`).
+- Native APK / Windows EXE login NEPOUŽÍVAJÍ (`kIsWeb` guard).
 
-Detaily viz [02-auth-bezpecnost.md](02-auth-bezpecnost.md).
+**M4.5 — Admin UI ve Flutteru (volitelné, dělané později):**
+- `AdminUsersScreen` se seznamem + dialogy pro přidat / reset hesla / smazat.
+- Backend admin endpointy `/api/admin/users` (CRUD) chráněné middleware `requireAdmin`.
+- Položka "Administrace uživatelů" v Settings, viditelná jen pro `isAdmin=true` uživatele.
+- Pure additive change — žádná DB migrace, existující uživatelé / session se nemění.
+
+Detaily a kompletní akceptační kritéria viz [02-auth-bezpecnost.md](02-auth-bezpecnost.md).
 
 ### Fáze 5 — Produkční nasazení na firemní server
 - Deploy na server kde běží `ci4gui`.
@@ -224,16 +241,17 @@ Má broker zapnutý `allow_anonymous false`? Pokud ano, jsou MQTT credentials pe
 
 ---
 
-## 10. Milestones (v0.4 — M1–M3 ✅, Vercel vyřazen)
+## 10. Milestones (v0.6 — M1–M3 ✅, M4 rozdělen na M4 + M4.5)
 
 | # | Milestone | Stav | Pozn. |
 |---|-----------|:----:|-------|
 | M1 | `flutter build web` projde, app se otevře v Chrome | ✅ | Web build prošel out-of-the-box; `kIsWeb` guards už v kódu; brand polish v `web/index.html` + `manifest.json` |
 | M2 | MQTT WS klient přes `MqttBrowserClient`, connect k lokálnímu **i produkčnímu** brokeru | ✅ | `MqttClientFactory` s conditional importem; klíčový fix: `websocketProtocols = ['mqtt']`; E2E ověřeno proti lokálnímu Mosquitto + ALIVE roundtrip; **2026-05-22 dokončeno i proti `wss://mqtt.smartbox.smartci4.com:443/mqtt` — discovery 3 jednotek, refresh reconnect, network-drop reconnect (viz [03-mqtt-web.md §9.0](03-mqtt-web.md#90-ověření-proti-produkčnímu-brokeru-2026-05-22))** |
 | M3 | Responzivita smoke test | ✅ | Pixel 7 + iPad Mini OK bez úprav; iPhone SE (375px) skipnuto (relevance) |
-| **M4** | Plnohodnotná auth (Node backend + LoginScreen + session) | příští | Závislé na rozhodnutí ci4gui integrace ([§9.1](#9-open-questions)) |
+| **M4** | Login (Varianta A) — Node backend + SQLite + LoginScreen + session + CLI správa uživatelů | příští | Effort 2–3 dny. Schéma DB i JWT už obsahují `is_admin` / `isAdmin` pro budoucí M4.5. Detail v [02-auth-bezpecnost.md](02-auth-bezpecnost.md) |
+| **M4.5** | Admin UI ve Flutteru — `AdminUsersScreen` + admin endpointy v backendu | volitelně později | Effort +1 den. Pure additive change. Dělat až M4 běží v produkci a CLI workflow přestane dostačovat |
 | **M5** | Produkční deploy na firemní server (Nginx, HTTPS, systemd) | čeká M4 | Včetně WS endpointu na brokeru ([§9.4](#9-open-questions)) |
 
 ---
 
-**Příští krok:** projít open questions s kolegou (hlavně 9.1 — ci4gui auth a 9.4 — MQTT credentials), pak začít M1.
+**Příští krok:** začít implementaci M4 podle [02-auth-bezpecnost.md](02-auth-bezpecnost.md). Open questions 9.1 (ci4gui auth) a 9.3/9.4 (doména, MQTT credentials) zůstávají otevřené, ale neblokují M4 — varianta A je samostatná. Před M5 (produkční deploy) je dořešit.

@@ -1,6 +1,11 @@
 # 02 — Auth a bezpečnost
 
-> **Status:** Draft v0.3 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** Draft v0.4 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+>
+> **Změny v v0.4:**
+> - **Varianta A (vlastní Node backend) ROZHODNUTA** — viz §2.A a §3. Varianta B (ci4gui integrace) zůstává jako fallback, pokud později vyjde najevo, že má ci4gui použitelnou auth.
+> - **Admin UI rozděleno na M4 a M4.5** — M4 dodá jen login (uživatelé spravováni přes CLI skripty na serveru), M4.5 přidá `AdminUsersScreen` ve Flutteru. Klíčové: schéma DB i JWT už od M4 obsahují `is_admin` / `isAdmin`, aby M4.5 byla čistá additive změna bez migrace.
+> - §6 přepsáno: detailní specifikace M4 (CLI správa) vs. M4.5 (Admin UI).
 >
 > **Změny v v0.3:**
 > - **Vercel mezikrok vyřazen** — nasazujeme rovnou na firemní server, takže placeholder login (`§9` v v0.2) zmizel a píšeme rovnou plnohodnotnou auth (M4 v novém číslování).
@@ -97,14 +102,32 @@ Necháváme jako orientační poznámku, použijeme **A nebo B**.
 
 ---
 
-## 3. Doporučení
+## 3. Rozhodnutí (2026-05-22)
 
-**Pro M4:** začít s **Variantou A** (vlastní lehký Node backend), protože:
-- Není závislé na zjišťování ci4gui internals.
+**Pro M4 jdeme cestou Varianty A** — vlastní lehký Node backend + SQLite + JWT v httpOnly cookie. Důvody:
+- Nezávisíme na zjišťování ci4gui internals (B blokované [§9.1 v 01-PRD.md](01-PRD.md#9-open-questions)).
 - Snadno se nasadí jako systemd service vedle ci4gui.
-- Pokud později vyjde najevo, že ci4gui má použitelné API, přepneme na B (Flutter client kód se mění minimálně, jen kam volá `/api/login`).
+- Pokud později vyjde najevo, že ci4gui má použitelné API, přepnutí na B je nízkonákladová refaktor (mění se jen URL, kam Flutter klient volá).
 
-**Pokud se ukáže, že ci4gui má použitelnou auth:** v rámci M5 (firemní server deploy) můžeme přepnout na variantu B a vlastní backend vyhodit.
+### Stack
+
+| Vrstva | Volba |
+|--------|-------|
+| Runtime | Node.js 20 LTS |
+| Framework | Express |
+| DB | SQLite přes `better-sqlite3` (jeden soubor, žádný server) |
+| Hashing | `bcrypt` (12 rounds) |
+| Session | JWT (`jsonwebtoken`) v httpOnly + Secure + SameSite=Lax cookie |
+| Rate limit | `express-rate-limit` (5 pokusů / IP / 15 min na `/api/login`) |
+| Service management | systemd unit, běží jako neprivilegovaný user |
+
+### Fázování M4 / M4.5
+
+**M4 (jako součást této etapy):** Plnohodnotný login pro běžné uživatele. Správa uživatelů přes CLI skripty na serveru přes SSH. Detail v §6.
+
+**M4.5 (volitelně později, samostatný milestone):** `AdminUsersScreen` ve Flutteru — uživatel s `isAdmin=true` může z UI spravovat účty. Detail v §6.
+
+**Pokud se ukáže, že ci4gui má použitelnou auth:** v rámci M5 můžeme přepnout na variantu B a vlastní backend vyhodit.
 
 ---
 
@@ -155,13 +178,87 @@ HTTP interceptor: pokud kterákoli odpověď vrátí 401, smazat lokální stav 
 
 ---
 
-## 6. Admin správa uživatelů (MVP)
+## 6. Admin správa uživatelů — M4 + M4.5
 
-Pro MVP **nemáme admin UI**. Účty zakládá Radek:
-- **Lokální vývoj:** přímo přes SQLite CLI nebo přidání seed skriptu.
-- **Produkce:** SQL skript na serveru, nebo malý CLI script `node scripts/add-user.js <username> <password>`.
+Rozděleno na dvě etapy. **M4 ship-uje login pro běžné uživatele se správou přes CLI**; **M4.5 přidá Admin UI ve Flutteru** jako čistě aditivní změnu, pokud reálné používání ukáže, že je potřeba.
 
-Admin obrazovka ve Flutter je out-of-scope MVP — když uživatelů přibude, doděláme.
+### 6.1 Klíčový princip — co musí být v M4 správně od začátku
+
+Aby M4.5 byla bezbolestná (žádná migrace, žádná breaking change), **M4 už musí obsahovat**:
+
+1. **Schéma `users` tabulky obsahuje `is_admin BOOLEAN NOT NULL DEFAULT 0`** od první migrace.
+2. **JWT payload obsahuje claim `isAdmin: true/false`** — i když ho Flutter v M4 zatím nevyužívá.
+3. **Initial admin user** se vytváří automaticky při prvním startu Node service z env proměnných:
+   ```
+   INITIAL_ADMIN_USER=radek
+   INITIAL_ADMIN_PASSWORD=<heslo, které admin po prvním loginu změní>
+   ```
+   Skript pro initial seed se spustí jen pokud je tabulka `users` prázdná.
+
+Pokud na cokoli z těchto tří zapomeneme, M4.5 vyžaduje DB migraci nebo invalidaci existujících session → ztráta minimalistické čistoty fázování.
+
+### 6.2 M4 — Správa uživatelů přes CLI
+
+V M4 admin UI ve Flutteru NENÍ. Účty spravuje Radek z příkazové řádky na serveru:
+
+```bash
+ssh smartbox-server
+cd /opt/p2l-tester-auth
+
+# Přidat uživatele
+node scripts/add-user.js <username> <password> [--admin]
+
+# Smazat uživatele
+node scripts/del-user.js <username>
+
+# Reset hesla
+node scripts/reset-pwd.js <username> <new-password>
+
+# Seznam uživatelů
+node scripts/list-users.js
+```
+
+Skripty otevřou `data/users.db` přímo (synchronně přes `better-sqlite3`), provedou operaci, vypíší výsledek. **Žádné HTTP, žádná dependence na běžícím backend procesu** — funguje, i když Node service neběží.
+
+Tyto skripty jsou nutnou součástí M4 deliveru — bez nich se uživatelé spravovat nedají.
+
+### 6.3 M4.5 — Admin UI ve Flutteru (později)
+
+Doplnění poté, co M4 běží v produkci a má smysl admin UI doplnit (typicky: uživatelů přibývá, nebo někdo jiný než Radek má spravovat účty).
+
+**Backend přibyde:**
+
+```
+GET    /api/admin/users                  → seznam uživatelů { username, isAdmin, createdAt }
+POST   /api/admin/users                  → { username, password, isAdmin? } → 201 / 409 (duplikát)
+DELETE /api/admin/users/:username        → 204 / 404
+POST   /api/admin/users/:username/reset  → { newPassword } → 200
+```
+
+Všechny chráněné middleware `requireAdmin` (kontroluje JWT claim `isAdmin === true`). Backend zároveň brání:
+- Smazat sebe sama (vrátí 400).
+- Odebrat admin status / smazat **posledního** admina (vrátí 400) — DB nesmí zůstat bez admina.
+
+**Flutter přibyde:**
+
+- `AdminUsersScreen` v [lib/screens/](../lib/screens/) — seznam uživatelů + tlačítka [+ Nový], [🔑 Reset], [🗑 Smazat], badge "admin" u uživatelů s rolí.
+- Položka **"Administrace uživatelů"** v `SettingsScreen` — viditelná **jen pokud aktuální user má `isAdmin: true`** (čte z `/api/me` response).
+- Dialogy pro vytvoření / reset / potvrzení smazání.
+
+**Žádná změna v existujícím LoginScreen / AuthGate / běžných endpointech.** M4.5 je čistá additive změna.
+
+### 6.4 Effort
+
+| Etapa | Effort |
+|-------|--------|
+| M4 (login + CLI skripty) | 2–3 dny |
+| M4.5 (Admin UI: backend endpointy + Flutter screen + dialogy + testy) | +1 den |
+
+### 6.5 Kdy M4.5 reálně dělat
+
+- Pokud Radek přidává/mění uživatele ≤ 1× měsíčně → CLI stačí, M4.5 odkládat.
+- Pokud frekvence vyroste, nebo má někdo jiný než Radek spravovat účty → M4.5 zahájit.
+- M4.5 lze klidně nikdy nezahájit, pokud SSH workflow vyhovuje.
 
 ---
 
@@ -177,6 +274,8 @@ Admin obrazovka ve Flutter je out-of-scope MVP — když uživatelů přibude, d
 
 ## 9. Akceptační kritéria
 
+### 9.1 M4 (login + CLI správa)
+
 - [ ] Nepřihlášený uživatel je vždy přesměrován na `LoginScreen`.
 - [ ] Login s validními credentials zobrazí `HomeScreen` a uloží session cookie.
 - [ ] Refresh stránky uživatele neodhlašuje.
@@ -184,3 +283,18 @@ Admin obrazovka ve Flutter je out-of-scope MVP — když uživatelů přibude, d
 - [ ] Špatný login zobrazí chybovou zprávu, žádné session se nezaloží.
 - [ ] Rate limit po 5 pokusech / IP / 15 min funguje.
 - [ ] Cookies mají `Secure`, `HttpOnly`, `SameSite=Lax`.
+- [ ] DB schéma obsahuje `is_admin BOOLEAN` od první migrace.
+- [ ] JWT payload obsahuje claim `isAdmin` (i když Flutter v M4 zatím neční).
+- [ ] Initial admin user se vytvoří při prvním startu z env (`INITIAL_ADMIN_USER` / `INITIAL_ADMIN_PASSWORD`), pokud je `users` tabulka prázdná.
+- [ ] CLI skripty `add-user.js`, `del-user.js`, `reset-pwd.js`, `list-users.js` fungují a manipulují přímo se SQLite souborem.
+- [ ] **Native APK / Windows EXE auth NEPOUŽÍVAJÍ** (login obrazovka guardovaná `kIsWeb`, mobilní/desktop user pokračuje rovnou do HomeScreen jako dnes).
+
+### 9.2 M4.5 (Admin UI)
+
+- [ ] Uživatel s `isAdmin=true` vidí v `SettingsScreen` položku "Administrace uživatelů".
+- [ ] Uživatel bez admin role tu položku NEVIDÍ.
+- [ ] `AdminUsersScreen` umí: seznam, přidání, reset hesla, smazání.
+- [ ] Admin nemůže smazat sám sebe (UI disabled + backend 400).
+- [ ] Backend odmítne smazat / odebrat admin status posledního admina (vrátí 400).
+- [ ] Všechny admin endpointy chráněné middleware `requireAdmin` — non-admin user dostane 403.
+- [ ] Žádná DB migrace nebyla potřeba (schéma už bylo připravené z M4).
