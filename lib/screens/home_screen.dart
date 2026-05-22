@@ -15,9 +15,11 @@ import '../models/device.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
+import '../services/auth_api.dart';
 import '../services/mqtt_service.dart';
 import '../services/unit_ids_io.dart';
 import '../widgets/bulk_config_menu.dart';
+import 'auth_gate.dart';
 import 'settings_screen.dart';
 import 'templates_screen.dart';
 import 'unit_detail_screen.dart';
@@ -323,6 +325,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     context,
                   ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
                 ),
+                if (kIsWeb && AuthScope.userOf(context) != null)
+                  _UserMenu(user: AuthScope.userOf(context)!),
               ],
             ),
             body: GestureDetector(
@@ -1329,6 +1333,61 @@ class _BinOldToggle extends StatelessWidget {
           color: active ? Colors.blue.shade800 : Colors.grey.shade600,
         ),
       ),
+    );
+  }
+}
+
+class _UserMenu extends StatelessWidget {
+  final AuthUser user;
+  const _UserMenu({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Účet',
+      icon: const Icon(Icons.account_circle_outlined),
+      onSelected: (value) async {
+        if (value == 'logout') {
+          await AuthScope.logout(context);
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Row(
+            children: [
+              const Icon(Icons.person_outline, size: 18, color: Colors.grey),
+              const SizedBox(width: 8),
+              Text(user.username,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              if (user.isAdmin) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text('admin',
+                      style: TextStyle(fontSize: 10, color: Colors.blue)),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'logout',
+          child: Row(
+            children: [
+              Icon(Icons.logout, size: 18),
+              SizedBox(width: 8),
+              Text('Odhlásit'),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
