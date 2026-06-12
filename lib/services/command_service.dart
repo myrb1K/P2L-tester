@@ -478,9 +478,11 @@ class CommandService {
   /// Po DEVICE-REPLACE aplikace přečipuje nový kus na ID původního (`From` =
   /// tato default adresa, `To` = adresa vadného kusu).
   ///
-  /// - DIST: 127 (rozsah 0-126 pro provoz)
-  /// - DISP: 246 (PUM-A; rozsah 127-247 pro provoz)
-  /// - BTN: 247 (PUM-B i PUM-C; rozsah 127-247 pro provoz)
+  /// Hodnoty = horní mez provozního rozsahu daného modulu (viz
+  /// `ModuleTypeExt.addressRange`):
+  /// - DIST: 127 (PUM = DIST, rozsah 1–127)
+  /// - DISP: 246 (PUM-A, rozsah 128–246)
+  /// - BTN: 247 (PUM-B i PUM-C, rozsah 128–247)
   /// - LEDS: 0 (DEVICE-REPLACE samostatně nepodporován; LEDS se přečipují
   ///   automaticky s DISP v rámci stejného PUM-A čipu)
   static int defaultReplacementAddress(DeviceType type) => switch (type) {

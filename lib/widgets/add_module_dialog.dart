@@ -82,28 +82,19 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
 
   int _suggestFor(ModuleType t) {
     final taken = widget.existingAddresses;
-    if (t == ModuleType.dist) {
-      for (var i = 1; i <= 126; i++) {
-        if (!taken.contains(i)) return i;
-      }
-      return 1;
+    final range = t.addressRange;
+    for (var i = range.min; i <= range.max; i++) {
+      if (!taken.contains(i)) return i;
     }
-    var i = 128;
-    while (taken.contains(i)) {
-      i++;
-    }
-    return i;
+    return range.min;
   }
 
   String? _validate() {
     final addr = int.tryParse(_addrCtrl.text);
     if (addr == null) return 'Zadej adresu (číslo).';
-    if (addr <= 0) return 'Adresa musí být > 0.';
-    if (_type == ModuleType.dist && (addr < 1 || addr > 126)) {
-      return 'DIST adresa musí být 1–126.';
-    }
-    if (_type != ModuleType.dist && (addr < 127 || addr > 247)) {
-      return '${_type.label} adresa musí být 127–247.';
+    final range = _type.addressRange;
+    if (addr < range.min || addr > range.max) {
+      return '${_type.label} adresa musí být ${range.min}–${range.max}.';
     }
     if (_type == ModuleType.pumC && !widget.hasPumAWithRoom && widget.initial == null) {
       return 'PUM-C lze přidat jen k PUM-A, které má 0 nebo 1 tlačítko.';
@@ -210,8 +201,8 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: InputDecoration(
                 labelText: _type == ModuleType.dist
-                    ? 'Adresa sensoru (1–126)'
-                    : 'Adresa / číslo čipu (127–247)',
+                    ? 'Adresa sensoru (${_type.addressRange.min}–${_type.addressRange.max})'
+                    : 'Adresa / číslo čipu (${_type.addressRange.min}–${_type.addressRange.max})',
                 hintText: _type == ModuleType.pumA
                     ? 'např. 128 (DISP N, tlačítka 1N/2N)'
                     : _type == ModuleType.pumC
