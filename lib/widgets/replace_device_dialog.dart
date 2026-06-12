@@ -22,7 +22,17 @@ class ReplaceResult {
 /// Dialog pro výměnu vadného device v modulu. Podporováno pro PUM-A (DISP) a DIST.
 class ReplaceDeviceDialog extends StatefulWidget {
   final PumaModule module;
-  const ReplaceDeviceDialog({super.key, required this.module});
+
+  /// Adresy modulů, které už v jednotce existují (včetně vyměňovaného).
+  /// Slouží ke kontrole, že default adresa nového kusu nekoliduje s jiným
+  /// reálným modulem na sběrnici.
+  final Set<int> existingAddresses;
+
+  const ReplaceDeviceDialog({
+    super.key,
+    required this.module,
+    this.existingAddresses = const {},
+  });
 
   @override
   State<ReplaceDeviceDialog> createState() => _ReplaceDeviceDialogState();
@@ -65,6 +75,20 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
     final newAddr = int.tryParse(_newCtrl.text);
     if (newAddr == null || newAddr <= 0) {
       setState(() => _error = 'Zadej platnou default adresu nového kusu.');
+      return;
+    }
+    if (newAddr == widget.module.baseAddress) {
+      setState(() => _error =
+          'Default adresa nového kusu je shodná s adresou vyměňovaného device.');
+      return;
+    }
+    // Default adresa nového kusu nesmí kolidovat s jiným reálným modulem —
+    // jinak by se přečísloval (sebral) ten existující modul, ne nový kus.
+    if (widget.existingAddresses
+        .where((a) => a != widget.module.baseAddress)
+        .contains(newAddr)) {
+      setState(() => _error =
+          'Adresa $newAddr je už v jednotce obsazená jiným modulem — vyber default adresu nového kusu, ne adresu existujícího modulu.');
       return;
     }
     Navigator.pop(

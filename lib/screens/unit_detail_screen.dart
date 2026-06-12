@@ -16,6 +16,7 @@ import '../services/template_io.dart';
 import '../widgets/add_module_dialog.dart';
 import '../widgets/apply_template_sheet.dart';
 import '../widgets/replace_device_dialog.dart';
+import '../widgets/set_device_id_dialog.dart';
 import 'template_editor_screen.dart';
 
 const int kMaxChipsPerUnit = 100;
@@ -80,9 +81,12 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
   }
 
   Future<void> _replaceModule(AppState state, PumaModule module) async {
+    final existing = (state.modulesForUnit(widget.unitId) ?? const [])
+        .map((m) => m.baseAddress)
+        .toSet();
     final result = await showDialog<ReplaceResult>(
       context: context,
-      builder: (_) => ReplaceDeviceDialog(module: module),
+      builder: (_) => ReplaceDeviceDialog(module: module, existingAddresses: existing),
     );
     if (result != null) {
       await state.replaceDevice(
@@ -90,6 +94,25 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         type: result.type,
         oldAddress: result.oldAddress,
         newDefaultAddress: result.newDefaultAddress,
+        restartAfter: result.restartAfter,
+      );
+    }
+  }
+
+  Future<void> _setIdModule(AppState state, PumaModule module) async {
+    final existing = (state.modulesForUnit(widget.unitId) ?? const [])
+        .map((m) => m.baseAddress)
+        .toSet();
+    final result = await showDialog<SetDeviceIdResult>(
+      context: context,
+      builder: (_) => SetDeviceIdDialog(module: module, existingAddresses: existing),
+    );
+    if (result != null) {
+      await state.setDeviceId(
+        unitId: widget.unitId,
+        type: result.type,
+        oldAddress: result.oldAddress,
+        newAddress: result.newAddress,
         restartAfter: result.restartAfter,
       );
     }
@@ -341,6 +364,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                         unitId: widget.unitId,
                         modules: modules,
                         onReplace: (m) => _replaceModule(state, m),
+                        onSetId: (m) => _setIdModule(state, m),
                         onEdit: (m) => _editModule(state, m),
                         onDelete: (m) => _deleteModule(state, m),
                         onTestDisplay: (m) => state.sendDispData(
@@ -466,6 +490,7 @@ class _ModulesGroupedList extends StatelessWidget {
   final String unitId;
   final List<PumaModule> modules;
   final void Function(PumaModule) onReplace;
+  final void Function(PumaModule) onSetId;
   final void Function(PumaModule) onEdit;
   final void Function(PumaModule) onDelete;
   final void Function(PumaModule) onTestDisplay;
@@ -479,6 +504,7 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.unitId,
     required this.modules,
     required this.onReplace,
+    required this.onSetId,
     required this.onEdit,
     required this.onDelete,
     required this.onTestDisplay,
@@ -526,6 +552,7 @@ class _ModulesGroupedList extends StatelessWidget {
               color: _color(type),
               modules: byType[type]!,
               onReplace: onReplace,
+              onSetId: onSetId,
               onEdit: type == ModuleType.dist ? onEdit : null,
               onDelete: onDelete,
               canReplace: canReplace,
@@ -550,6 +577,7 @@ class _GroupSection extends StatelessWidget {
   final Color color;
   final List<PumaModule> modules;
   final void Function(PumaModule) onReplace;
+  final void Function(PumaModule) onSetId;
   final void Function(PumaModule) onDelete;
   final void Function(PumaModule)? onEdit;
   final void Function(PumaModule)? onTestDisplay;
@@ -565,6 +593,7 @@ class _GroupSection extends StatelessWidget {
     required this.color,
     required this.modules,
     required this.onReplace,
+    required this.onSetId,
     required this.onDelete,
     required this.canReplace,
     this.onEdit,
@@ -669,6 +698,7 @@ class _GroupSection extends StatelessWidget {
                   module: m,
                   color: color,
                   onReplace: canReplace(m) ? () => onReplace(m) : null,
+                  onSetId: () => onSetId(m),
                   onEdit: onEdit != null ? () => onEdit!(m) : null,
                   onDelete: () => onDelete(m),
                   onTestDisplay: onTestDisplay != null ? () => onTestDisplay!(m) : null,
@@ -723,6 +753,7 @@ class _AddressChip extends StatelessWidget {
   final PumaModule module;
   final Color color;
   final VoidCallback? onReplace;
+  final VoidCallback? onSetId;
   final VoidCallback? onEdit;
   final VoidCallback onDelete;
   final VoidCallback? onTestDisplay;
@@ -736,6 +767,7 @@ class _AddressChip extends StatelessWidget {
     required this.module,
     required this.color,
     required this.onReplace,
+    required this.onSetId,
     required this.onDelete,
     this.onEdit,
     this.onTestDisplay,
@@ -779,6 +811,7 @@ class _AddressChip extends StatelessWidget {
       offset: const Offset(0, 32),
       onSelected: (v) {
         if (v == 'replace') onReplace?.call();
+        if (v == 'set_id') onSetId?.call();
         if (v == 'edit') onEdit?.call();
         if (v == 'delete') onDelete();
         if (v == 'test_disp') onTestDisplay?.call();
@@ -867,6 +900,17 @@ class _AddressChip extends StatelessWidget {
             value: 'replace',
             child: Row(
               children: [Icon(Icons.swap_horiz, size: 18), SizedBox(width: 8), Text('Vyměnit')],
+            ),
+          ),
+        if (onSetId != null)
+          const PopupMenuItem(
+            value: 'set_id',
+            child: Row(
+              children: [
+                Icon(Icons.tag, size: 18),
+                SizedBox(width: 8),
+                Text('Přečíslovat'),
+              ],
             ),
           ),
         const PopupMenuItem(

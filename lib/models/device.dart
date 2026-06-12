@@ -8,9 +8,12 @@ extension DeviceTypeExt on DeviceType {
         DeviceType.dist => 'DIST',
       };
 
-  /// 2-ciferný prefix pro zařízení v topicu (00 UNIT, 01 P2L, 04 DIST, 05 DISP, 11 LEDS)
+  /// 2-ciferný prefix pro zařízení v topicu (00 UNIT, 01 P2L, 04 DIST, 05 DISP,
+  /// 06 BTN, 11 LEDS). DISP a BTN jsou obě z rodiny PUMA, ale mají vlastní
+  /// prefix: DISP `05`, BTN `06` (potvrzeno firmwarem — viz BTN ALIVE topicy
+  /// `D/<unit>/BTN/06<addr>/ALIVE`).
   String? get addressPrefix => switch (this) {
-        DeviceType.btn => null,
+        DeviceType.btn => '06',
         DeviceType.disp => '05',
         DeviceType.leds => '11',
         DeviceType.dist => '04',

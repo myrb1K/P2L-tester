@@ -18,26 +18,35 @@ void main() {
       expect(cmd.topic, 'I/001001/UNIT/001001/GET-DEVICES');
     });
 
-    test('REPLACE-FROM topic pro DIST', () {
-      final cmd = CommandService.buildReplaceFromCommand(
+    test('DEVICE-REPLACE — UNIT topic, payload From/To', () {
+      // From = factory default nového kusu, To = adresa vadného.
+      final cmd = CommandService.buildDeviceReplaceCommand(
         unitId: '001001',
-        type: DeviceType.dist,
-        oldAddress: 1,
-        newDefaultAddress: 127,
+        fromAddress: 127,
+        toAddress: 1,
       );
-      expect(cmd.topic, 'I/001001/DIST/040001/REPLACE-FROM');
-      expect(cmd.payload, '{"Id":127}');
+      expect(cmd.topic, 'I/001001/UNIT/001001/DEVICE-REPLACE');
+      expect(cmd.payload, '{"From":127,"To":1}');
     });
 
-    test('REPLACE-FROM topic pro DISP', () {
-      final cmd = CommandService.buildReplaceFromCommand(
-        unitId: '001001',
-        type: DeviceType.disp,
-        oldAddress: 128,
-        newDefaultAddress: 246,
+    test('DEVICE-REPLACE padding 4-digit ID na 6-digit', () {
+      final cmd = CommandService.buildDeviceReplaceCommand(
+        unitId: '1017',
+        fromAddress: 246,
+        toAddress: 128,
       );
-      expect(cmd.topic, 'I/001001/DISP/050128/REPLACE-FROM');
-      expect(cmd.payload, '{"Id":246}');
+      expect(cmd.topic, 'I/001017/UNIT/001017/DEVICE-REPLACE');
+      expect(cmd.payload, '{"From":246,"To":128}');
+    });
+
+    test('DEVICE-SET-ID — UNIT topic, payload From/To', () {
+      final cmd = CommandService.buildDeviceSetIdCommand(
+        unitId: '001001',
+        fromAddress: 128,
+        toAddress: 130,
+      );
+      expect(cmd.topic, 'I/001001/UNIT/001001/DEVICE-SET-ID');
+      expect(cmd.payload, '{"From":128,"To":130}');
     });
   });
 
@@ -120,7 +129,7 @@ void main() {
     test('BTN default = 247 (PUM-B / PUM-C)', () {
       expect(CommandService.defaultReplacementAddress(DeviceType.btn), 247);
     });
-    test('LEDS default = 0 (REPLACE-FROM nedokumentován)', () {
+    test('LEDS default = 0 (DEVICE-REPLACE samostatně nepodporován)', () {
       expect(CommandService.defaultReplacementAddress(DeviceType.leds), 0);
     });
     test('supportsReplace pro DIST, DISP a BTN — LEDS ne', () {
@@ -128,18 +137,6 @@ void main() {
       expect(CommandService.supportsReplace(DeviceType.disp), true);
       expect(CommandService.supportsReplace(DeviceType.btn), true);
       expect(CommandService.supportsReplace(DeviceType.leds), false);
-    });
-
-    test('REPLACE-FROM topic pro BTN', () {
-      final cmd = CommandService.buildReplaceFromCommand(
-        unitId: '001001',
-        type: DeviceType.btn,
-        oldAddress: 130,
-        newDefaultAddress: 247,
-      );
-      // BTN nemá addressPrefix → holá 6-místná adresa v topicu
-      expect(cmd.topic, 'I/001001/BTN/000130/REPLACE-FROM');
-      expect(cmd.payload, '{"Id":247}');
     });
   });
 

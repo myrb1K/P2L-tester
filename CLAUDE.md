@@ -54,15 +54,19 @@ DEVICE_ID v topicu je **2-ciferný kód typu + 4-ciferná adresa** (např. `0502
 | `00` | UNIT (jednotka samotná) |
 | `01` | P2L (LED pásky / test příkazy) |
 | `04` | DIST (senzor vzdálenosti) |
-| `05` | DISP (displej PUMA) |
+| `05` | DISP (PUM-A displej) |
+| `06` | BTN (tlačítko rodiny PUMA) |
 | `11` | LEDS (PUMA LED) |
+
+**DISP a BTN jsou obě z rodiny PUMA, ale mají vlastní prefix:** DISP `05`, BTN `06` (potvrzeno firmwarem — BTN ALIVE topicy `D/<unit>/BTN/06<addr>/ALIVE`). Konkrétní typ rozlišuje i textový segment topicu (`/DISP/` vs `/BTN/`). Zdroj: [`DeviceTypeExt.addressPrefix`](lib/models/device.dart) — používá se pro adresné device příkazy (SET-DATA, SET-CONFIG, SET-LEDS atd.). **Pozn.:** výměna a přečíslování device už device-topic nepoužívají — nový FW je řeší UNIT-level příkazy (viz níže).
 
 #### Subscribe topicy po connectu
 - `D/+/UNIT/+/ALIVE` — discovery + battery/firmware
 - `A/SERVER/+/CMD` — odpověď na `get_param` (IP, MAC, firmware, ID)
 - `O/+/UNIT/+/GET-DEVICES` — seznam atomických devices (P2L32)
 - `O/+/UNIT/+/{ADD,RECREATE,DELETE}-DEVICES` — potvrzení device-management operací
-- `O/+/{DIST,DISP}/+/REPLACE-FROM` — potvrzení výměny
+- `O/+/UNIT/+/DEVICE-REPLACE` — potvrzení výměny vadného device (nový FW)
+- `O/+/UNIT/+/DEVICE-SET-ID` — potvrzení přečíslování device (nový FW)
 
 ---
 
@@ -81,7 +85,7 @@ DEVICE_ID v topicu je **2-ciferný kód typu + 4-ciferná adresa** (např. `0502
 | **PUM-C** @M | vždy 2 tlačítka (+/−), jen jako doplněk PUM-A bez 2 tlačítek | NE | 1 | BTN `1000+M` (+), BTN `M` (−) | **247** (BTN) |
 | **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací | **127** |
 
-**Factory default** = adresa, kterou má čip z výroby před přečipováním. Po fyzické výměně vadného kusu aplikace pošle `REPLACE-FROM` s touto adresou → jednotka přečipuje nový kus na ID původního. Autoritativní zdroj: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
+**Factory default** = adresa, kterou má čip z výroby před přečipováním. Po fyzické výměně vadného kusu aplikace pošle `DEVICE-REPLACE` s touto default adresou v poli `From` a adresou vadného kusu v poli `To` → jednotka přečipuje nový kus na ID původního. Autoritativní zdroj: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
 
 ### PUM-A tlačítka
 
@@ -110,18 +114,28 @@ Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný
 
 ---
 
-## Workflow výměny vadného device (REPLACE-FROM)
+## Workflow výměny a přečíslování device (nový FW)
 
+Nový FW (kolegův přepis, od v2.67) řeší obě operace **UNIT-level příkazy** na topicu `I/<unit>/UNIT/<unit>/<CMD>` s payloadem `{"From": <z>, "To": <na>}`. Typ device ani per-device topic se už neřeší — firmware přemapuje podle adres.
+
+### DEVICE-REPLACE — výměna vadného kusu
 - Vadný device se fyzicky vymění za nový s **factory default adresou** (viz tabulka v sekci Moduly).
 - **DIST default = 127** (rozsah platných adres 0–126).
 - **DISP default = 246** (PUM-A; rozsah pro provoz 127–247).
 - **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247).
-- Aplikace pošle `REPLACE-FROM` na primární adresu vadného čipu s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
-- **Firmware atomicky přemapuje všechny entries v rámci 1 fyzického čipu.** Pro PUM-A se přemapuje i LEDS @M (pokud osazené) a případná BTN tlačítka; pro PUM-B s LEDS i LEDS @M; pro PUM-C i sekundární BTN @1000+M. Aplikace tedy posílá **1 REPLACE-FROM na modul**, ne víc.
+- Aplikace pošle `DEVICE-REPLACE` s `{"From": <default_nového>, "To": <adresa_vadného>}` → jednotka přečipuje nový na ID původního.
 - LEDS se v UI samostatně nenabízí — vyměňují se s PUM-A / PUM-B jako celek.
-- Podporováno od FW `P2L_06033101NT+`.
 
-V kódu: `AppState.replaceDevice(...)` → `CommandService.buildReplaceFromCommand(...)`. UI dialog: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart). Defaulty: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
+### DEVICE-SET-ID — přečíslování existujícího device
+- Změna adresy funkčního device na jinou: `{"From": <stará>, "To": <nová>}`.
+- V UI: položka „Přečíslovat" v menu modulu (ikona `tag`), dostupná pro všechny typy modulů.
+- Validace nové adresy: DIST 0–126, PUMA (DISP/BTN) 127–247; kontrola kolize s obsazenou adresou.
+
+### Společné
+- **Firmware atomicky přemapuje všechny entries v rámci 1 fyzického čipu.** Pro PUM-A se přemapuje i LEDS @M (pokud osazené) a případná BTN tlačítka; pro PUM-B s LEDS i LEDS @M; pro PUM-C i sekundární BTN @1000+M. Aplikace tedy posílá **1 příkaz na modul**, ne víc. Ověřeno tracem: jeden `DEVICE-SET-ID` z 128 na 168 vyvolal ALIVE na `DISP/050168`, `LEDS/110168` i `BTN/06x168`.
+- Odpověď chodí na zrcadlový topic `O/<unit>/UNIT/<unit>/<CMD>` s `{"Code":0,"Message":"OK"}`; po OK aplikace automaticky pošle `GET-DEVICES`.
+
+V kódu: `AppState.replaceDevice(...)` → `CommandService.buildDeviceReplaceCommand(...)`, `AppState.setDeviceId(...)` → `CommandService.buildDeviceSetIdCommand(...)`. UI dialogy: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart), [widgets/set_device_id_dialog.dart](lib/widgets/set_device_id_dialog.dart). Defaulty: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
 
 ---
 
@@ -291,8 +305,9 @@ Detail v [README.md §Typy nasazení](README.md).
 
 ## Version and Recent Changes
 
-Current version: **2.66** (see `main.dart`)  
+Current version: **2.67** (see `main.dart`)  
 Recent themes:
+- v2.67: **Nový FW protokol pro výměnu a přečíslování device — `DEVICE-REPLACE` + `DEVICE-SET-ID`.** Kolegův přepis FW nahradil per-device `REPLACE-FROM` UNIT-level příkazy na `I/<unit>/UNIT/<unit>/<CMD>` s payloadem `{"From": <z>, "To": <na>}`. `CommandService.buildReplaceFromCommand` → přejmenováno na `buildDeviceReplaceCommand` (From = factory default nového, To = adresa vadného); nový `buildDeviceSetIdCommand` pro přečíslování funkčního device. `AppState`: subscribe zrušeny tři `O/+/{DIST,DISP,BTN}/+/REPLACE-FROM`, nahrazeny `O/+/UNIT/+/DEVICE-REPLACE` a `O/+/UNIT/+/DEVICE-SET-ID`; `replaceDevice` mapuje From/To; nová metoda `setDeviceId(...)`. UI: nová akce „Přečíslovat" (ikona `tag`) v menu modulu + dialog [widgets/set_device_id_dialog.dart](lib/widgets/set_device_id_dialog.dart) (rozsah validace DIST 0–126 / PUMA 127–247, kontrola kolize). Ověřeno reálným tracem na unit 1209: `DEVICE-SET-ID {"From":128,"To":168}` atomicky přemapoval celý PUM-A čip (DISP+LEDS+BTN), odpověď `O/.../UNIT/.../DEVICE-SET-ID {"Code":0}`, poté auto `GET-DEVICES`. **Pouze nový formát** — staré FW s per-device REPLACE-FROM už appka neobsluhuje. Testy v `command_service_devices_test.dart` přepsány na nový formát. Zároveň opraven `DeviceTypeExt.addressPrefix` pro BTN z `05` na `06` (potvrzeno kolegou + reálným tracem — BTN má vlastní prefix, ne sdílený s DISP). Validace v obou dialozích: `SetDeviceIdDialog` i `ReplaceDeviceDialog` dostávají seznam obsazených adres a odmítnou cílovou/default adresu, která koliduje s jiným existujícím modulem nebo je shodná se zdrojovou (`ReplaceDeviceDialog` dříve nevalidoval nic). (Pozn.: README-P2L-32.md zatím popisuje starý protokol — čeká se na aktualizaci od kolegy.)
 - v2.66: **MQTT přes WebSocket — volitelný flag v `BrokerProfile`.** Nová pole `useWebsocket: bool` a `wsPath: String` (default `/mqtt`) v [models/broker_profile.dart](lib/models/broker_profile.dart) + UI switch a path field v `SettingsScreen` profile editoru. `MqttService` používá conditional-import factory ([services/mqtt_client_factory.dart](lib/services/mqtt_client_factory.dart) → `_io.dart` / `_web.dart` / `_stub.dart`): native (`MqttServerClient` s `useWebSocket=true` + `websocketProtocols=['mqtt']`) i web (`MqttBrowserClient`) sdílí stejnou cestu. Klíčový fix: Mosquitto vyžaduje `Sec-WebSocket-Protocol: mqtt` v handshake, bez něj spojení padne s "Connection closed before handshake response" — `MqttClientConstants.protocolsSingleDefault` to nastaví. APK/EXE existující profily s `useWebsocket=false` (default) jedou TCP přesně jako dřív (backwards compatible). Užitečné pro zákazníky za firewallem co blokuje 1883, nebo když broker poslouchá jen na 443/WSS. Lokální dev s Mosquitto WS listenerem viz [.dev/README.md](.dev/README.md). Branding `web/index.html` + `web/manifest.json` srovnán pod "P2L Tester" (M1 polish).
 - v2.65: Předvyplněná default URL `http://185.149.129.164/download` v `firmware_base_url` při prvním spuštění (fallback v `loadSettings` pokud klíč v `SharedPreferences` chybí). Existující instalace s uloženou vlastní URL zůstanou nedotčené — jen čisté instalace dostanou default.
 - v2.64: **Hromadné nahrání firmware** — nová položka "Nahrát firmware" v `BulkConfigMenu` (ikona `system_update_alt`, mezi "Aplikovat šablonu" a "Restart"). Dialog `_BulkFirmwareDialog`: pole "Cesta" + tlačítko "Ověřit", dropdown s detekovanými `*.bin` soubory (zebra-stripe podbarvení lichých řádků, sort sestupně podle `YYMMDDVV`, label `<file> · <type> · <date> · <size>`), live preview "Bude odesláno" v monospace, červené FLASH tlačítko. Pokud cesta končí `.bin` → posílá se přímo, dropdown skryt. Auto-discovery z Apache/nginx autoindex HTML přes nový `lib/services/firmware_listing_service.dart` (regex `href="P2L_(\d+)([A-Za-z]+)\.bin"`, žádný hardcoded filter typů). Persistence base URL v `SharedPreferences` (`firmware_base_url`). `CommandService.buildUpdateCommand({fileName})` produkuje `{"request_id":-1,"cmds":[{"cmd":"update","args":{"file_name":"<url>"}}]}`. `AppState.sendBulkFirmwareUpdate` posílá s 100ms pauzou + označí jednotky offline-until-alive (flash způsobí restart). Dependencies: `http: ^1.2.2`. Android: `android:usesCleartextTraffic="true"` v `AndroidManifest.xml` (firmware server běží na HTTP). Ověřeno na novém FW na unit 1209 (`I/001209/P2L/011209/CMD`).

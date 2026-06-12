@@ -25,7 +25,7 @@ Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Při každ�
 - **Automatické objevování jednotek** přes ALIVE topic (`D/+/UNIT/+/ALIVE`).
 - **Testovací LED pattern** (volitelné porty, barva, doba on/off) — JSON i BIN formát.
 - **Detail jednotky** s rekonstruovaným seznamem fyzických modulů PUM-A/B/C/DIST z `GET-DEVICES`.
-- **Správa device topologie**: přidávat/mazat moduly, výměna vadného device (`REPLACE-FROM`), aplikace šablon (`DeviceTemplate`).
+- **Správa device topologie**: přidávat/mazat moduly, výměna vadného device (`DEVICE-REPLACE`), přečíslování device (`DEVICE-SET-ID`), aplikace šablon (`DeviceTemplate`).
 - **Hromadná konfigurace**: změna brokera (`set_Mqtt`) a WiFi (`set_WiFi`) na vybraných jednotkách (s 100 ms pauzou mezi publish).
 - **Broker profily** s drag-and-drop řazením, kontrolou duplicit a uložením v `SharedPreferences`.
 - **Export / Import šablon** — JSON wrapper formát ([template_io.dart](lib/services/template_io.dart)), volba mezi nativním sdílením (`share_plus`) a uložením do souboru (`file_picker.saveFile`); při importu konflikty jmen řeší dialog Přepsat / Přejmenovat / Přeskočit.
@@ -81,7 +81,7 @@ Pro web s MQTT broker musí mít povolený **WebSocket listener** (typicky port 
 |--------|--------|-------|
 | State | [lib/providers/app_state.dart](lib/providers/app_state.dart) | jednotky, profily, vybrané porty, device management flow, restart-after-config logika |
 | MQTT | [lib/services/mqtt_service.dart](lib/services/mqtt_service.dart) | wrapper nad mqtt_client (autoReconnect, streamy, publish/subscribe) |
-| Buildery | [lib/services/command_service.dart](lib/services/command_service.dart) | všechny payload buildery: `buildTestCommand`/`buildTestCommandBin`, `buildClearCommand`, `buildGetParamCommand`, `buildSetMqttCommand`, `buildSetWifiCommand`, `buildGetDevicesCommand`, `buildAddDevicesCommand`, `buildRecreateDevicesCommand`, `buildDeleteDevicesCommand`, `buildReplaceFromCommand`, `buildSetDispDataCommand`, `buildSetDistConfigCommand`, `buildRestartCommand` |
+| Buildery | [lib/services/command_service.dart](lib/services/command_service.dart) | všechny payload buildery: `buildTestCommand`/`buildTestCommandBin`, `buildClearCommand`, `buildGetParamCommand`, `buildSetMqttCommand`, `buildSetWifiCommand`, `buildGetDevicesCommand`, `buildAddDevicesCommand`, `buildRecreateDevicesCommand`, `buildDeleteDevicesCommand`, `buildDeviceReplaceCommand`, `buildDeviceSetIdCommand`, `buildSetDispDataCommand`, `buildSetDistConfigCommand`, `buildRestartCommand` |
 | Logika | [lib/services/module_reconstruction.dart](lib/services/module_reconstruction.dart) | z plochého `GET-DEVICES` (BTN/DISP/LEDS/DIST) skládá fyzické PUM-A/B/C |
 | Modely | [lib/models/](lib/models/) | `unit.dart`, `module.dart` (PumaModule, ModuleType, DistConfig, ButtonSide), `device.dart` (Device, DeviceType), `device_template.dart`, `broker_profile.dart` |
 | Obrazovky | [lib/screens/](lib/screens/) | `splash_screen`, `home_screen`, `settings_screen`, `unit_detail_screen`, `template_editor_screen`, `templates_screen` |
@@ -125,7 +125,8 @@ Aplikace podporuje **dvě generace** P2L zařízení:
 | `A/SERVER/+/CMD` | odpověď na `get_param` (IP, MAC, firmware, ID) |
 | `O/+/UNIT/+/GET-DEVICES` | seznam atomických devices (P2L32) |
 | `O/+/UNIT/+/{ADD,RECREATE,DELETE}-DEVICES` | potvrzení device-management operací |
-| `O/+/{DIST,DISP}/+/REPLACE-FROM` | potvrzení výměny |
+| `O/+/UNIT/+/DEVICE-REPLACE` | potvrzení výměny vadného device (nový FW) |
+| `O/+/UNIT/+/DEVICE-SET-ID` | potvrzení přečíslování device (nový FW) |
 
 ### Logika volby formátu testovacího příkazu
 
@@ -251,18 +252,27 @@ Volitelně `Segments` (segmentový režim) — zatím první iterace posílá pr
 
 ---
 
-## Workflow výměny vadného device
+## Workflow výměny a přečíslování device (nový FW)
 
+Nový FW řeší obě operace **UNIT-level příkazy** na topicu `I/<unit>/UNIT/<unit>/<CMD>` s payloadem `{"From": <z>, "To": <na>}`. Typ device ani per-device topic se už neřeší.
+
+**DEVICE-REPLACE — výměna vadného kusu:**
 - Vadný device se fyzicky vymění za nový s **factory default chip adresou**.
 - **DIST default = 127** (rozsah platných adres 0–126).
 - **DISP default = 246** (PUM-A; rozsah pro provoz 127–247).
 - **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247).
-- Aplikace pošle `REPLACE-FROM` na primární adresu vadného čipu s `{"Id": <default_adresa_nového>}` → jednotka přečipuje nový na ID původního.
-- Firmware atomicky přemapuje všechny entries v rámci 1 fyzického čipu (PUM-A: DISP + volitelně LEDS + BTN; PUM-B: BTN + volitelně LEDS; PUM-C: BTN @M + BTN @1000+M). Aplikace tedy posílá 1 REPLACE-FROM na modul.
-- LEDS se v UI samostatně nenabízí — vyměňují se s PUM-A / PUM-B jako celek.
-- Podporováno od FW `P2L_06033101NT+`.
+- Aplikace pošle `DEVICE-REPLACE` s `{"From": <default_nového>, "To": <adresa_vadného>}` → jednotka přečipuje nový na ID původního.
 
-V kódu: `AppState.replaceDevice(...)` → `CommandService.buildReplaceFromCommand(...)`. UI dialog: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart).
+**DEVICE-SET-ID — přečíslování funkčního device:**
+- Změna adresy existujícího device: `{"From": <stará>, "To": <nová>}`.
+- V UI položka „Přečíslovat" v menu modulu (ikona `tag`).
+
+**Společné:**
+- Firmware atomicky přemapuje všechny entries v rámci 1 fyzického čipu (PUM-A: DISP + volitelně LEDS + BTN; PUM-B: BTN + volitelně LEDS; PUM-C: BTN @M + BTN @1000+M). Aplikace tedy posílá 1 příkaz na modul.
+- LEDS se v UI samostatně nenabízí — vyměňují se s PUM-A / PUM-B jako celek.
+- Odpověď na zrcadlovém topicu `O/<unit>/UNIT/<unit>/<CMD>`; po `{"Code":0}` aplikace automaticky pošle `GET-DEVICES`.
+
+V kódu: `AppState.replaceDevice(...)` → `CommandService.buildDeviceReplaceCommand(...)`, `AppState.setDeviceId(...)` → `CommandService.buildDeviceSetIdCommand(...)`. UI dialogy: [widgets/replace_device_dialog.dart](lib/widgets/replace_device_dialog.dart), [widgets/set_device_id_dialog.dart](lib/widgets/set_device_id_dialog.dart).
 
 ---
 
