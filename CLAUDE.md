@@ -179,6 +179,23 @@ Default `flutter build apk --release` (bez `--split-per-abi`) vytvoří fat APK 
 
 **Pozn.:** Od commitu `e8fdc84` je `dist/` v `.gitignore` (build outputy nepatří do gitu). Adresář se používá lokálně pro packaging release artefaktů; pokud je potřeba je sdílet, jdou přes GitHub Releases, ne přes commit.
 
+#### Distribuční zip (APK + EXE pohromadě)
+
+Po buildu APK + EXE vždy sestavit **jeden** archiv `P2L-Tester-v<VER>.zip` (`<VER>` = `appVersion` z `main.dart`, např. `2.67`) s touto strukturou:
+
+```
+P2L-Tester-v<VER>.zip
+├── P2L-Tester-v<VER>.apk          ← Android (arm64-v8a)
+└── P2L-Tester-v<VER>/             ← Windows složka
+    ├── p2l_tester v<VER>.exe       ← přejmenovaný z p2l_tester.exe (POZOR: mezera před v<VER>)
+    ├── *.dll
+    └── data/
+```
+
+- Windows složka `P2L-Tester-v<VER>/` obsahuje **celý obsah** `build\windows\x64\runner\Release\` (DLLs + `data\`) — jen `p2l_tester.exe` se přejmenuje na `p2l_tester v<VER>.exe` (s mezerou). Samotný exe se bez okolních DLL a `data\` nespustí, proto celá Release složka.
+- APK uvnitř zipu: arm64-v8a, pojmenovaný `P2L-Tester-v<VER>.apk`.
+- Zip se tvoří typicky do `dist/` (které je v `.gitignore`).
+
 ---
 
 ## Build Gotchas
