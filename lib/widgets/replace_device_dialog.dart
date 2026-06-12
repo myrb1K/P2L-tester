@@ -77,6 +77,12 @@ class _ReplaceDeviceDialogState extends State<ReplaceDeviceDialog> {
       setState(() => _error = 'Zadej platnou default adresu nového kusu.');
       return;
     }
+    final range = widget.module.type.addressRange;
+    if (newAddr < range.min || newAddr > range.max) {
+      setState(() => _error =
+          'Adresa mimo rozsah ${range.min}–${range.max} pro ${widget.module.type.label}.');
+      return;
+    }
     if (newAddr == widget.module.baseAddress) {
       setState(() => _error =
           'Default adresa nového kusu je shodná s adresou vyměňovaného device.');

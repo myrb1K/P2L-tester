@@ -9,6 +9,23 @@ extension ModuleTypeExt on ModuleType {
         ModuleType.pumC => 'PUM-C',
         ModuleType.dist => 'DIST',
       };
+
+  /// Platný rozsah adres podle typu modulu (včetně obou mezí). Horní mez je
+  /// zároveň factory default ([defaultAddress]).
+  ///
+  /// - PUM-A: 128–246 (246 = default)
+  /// - PUM-B: 128–247 (247 = default)
+  /// - PUM-C: 128–247 (247 = default)
+  /// - DIST:  1–127  (127 = default)
+  ({int min, int max}) get addressRange => switch (this) {
+        ModuleType.pumA => (min: 128, max: 246),
+        ModuleType.pumB => (min: 128, max: 247),
+        ModuleType.pumC => (min: 128, max: 247),
+        ModuleType.dist => (min: 1, max: 127),
+      };
+
+  /// Factory default adresa (= horní mez [addressRange]).
+  int get defaultAddress => addressRange.max;
 }
 
 /// Strana tlačítka PUM-A s 1 tlačítkem.

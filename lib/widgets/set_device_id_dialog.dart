@@ -58,9 +58,9 @@ class _SetDeviceIdDialogState extends State<SetDeviceIdDialog> {
     }
   }
 
-  // Provozní rozsah adres: DIST 0–126, PUMA (DISP/BTN) 127–247.
-  ({int min, int max}) get _range =>
-      _type == DeviceType.dist ? (min: 0, max: 126) : (min: 127, max: 247);
+  // Platný rozsah adres podle typu modulu (PUM-A 128–246, PUM-B/C 128–247,
+  // DIST 1–127). Zdroj pravdy: ModuleTypeExt.addressRange.
+  ({int min, int max}) get _range => widget.module.type.addressRange;
 
   void _submit() {
     final newAddr = int.tryParse(_newCtrl.text);
@@ -75,7 +75,7 @@ class _SetDeviceIdDialogState extends State<SetDeviceIdDialog> {
     }
     if (newAddr < range.min || newAddr > range.max) {
       setState(() => _error =
-          'Adresa mimo rozsah ${range.min}–${range.max} pro ${_type.code}.');
+          'Adresa mimo rozsah ${range.min}–${range.max} pro ${widget.module.type.label}.');
       return;
     }
     if (widget.existingAddresses.contains(newAddr)) {

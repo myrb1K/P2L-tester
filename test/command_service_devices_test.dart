@@ -140,6 +140,25 @@ void main() {
     });
   });
 
+  group('ModuleType.addressRange', () {
+    test('PUM-A: 128–246, default 246', () {
+      expect(ModuleType.pumA.addressRange, (min: 128, max: 246));
+      expect(ModuleType.pumA.defaultAddress, 246);
+    });
+    test('PUM-B: 128–247, default 247', () {
+      expect(ModuleType.pumB.addressRange, (min: 128, max: 247));
+      expect(ModuleType.pumB.defaultAddress, 247);
+    });
+    test('PUM-C: 128–247, default 247', () {
+      expect(ModuleType.pumC.addressRange, (min: 128, max: 247));
+      expect(ModuleType.pumC.defaultAddress, 247);
+    });
+    test('DIST: 1–127, default 127', () {
+      expect(ModuleType.dist.addressRange, (min: 1, max: 127));
+      expect(ModuleType.dist.defaultAddress, 127);
+    });
+  });
+
   group('buildUpdateCommand', () {
     test('produkuje payload podle README-P2L specifikace', () {
       final payload = CommandService.buildUpdateCommand(
