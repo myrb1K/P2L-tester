@@ -77,7 +77,8 @@ class MqttService {
     try {
       await _client!.connect();
     } catch (e) {
-      _lastError = e.toString();
+      final msg = e.toString().trim();
+      _lastError = msg.isEmpty ? 'Chyba připojení (${e.runtimeType})' : msg;
       _setState(AppMqttState.error);
       _client?.disconnect();
       return false;

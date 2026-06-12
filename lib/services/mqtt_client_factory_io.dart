@@ -17,7 +17,9 @@ MqttClient createMqttClient({
   final client = MqttServerClient(host, clientIdentifier)
     ..port = port
     ..useWebSocket = useWebsocket
-    ..secure = useSsl
+    // `secure` je v mqtt_client jen pro TCP (MQTTS). U WebSocketu TLS řeší
+    // schéma `wss://` v URL — nastavovat secure pro WS je špatně (a ignoruje se).
+    ..secure = useWebsocket ? false : useSsl
     ..keepAlivePeriod = 60
     ..autoReconnect = true
     ..resubscribeOnAutoReconnect = true

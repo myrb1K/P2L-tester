@@ -387,6 +387,12 @@ class AppState extends ChangeNotifier {
           notifyListeners();
         }
       });
+    } else {
+      // Chybu vezmeme synchronně z MqttService — stateStream listener ji
+      // doručí až v microtasku, takže UI (čte lastError hned po awaitu) by
+      // jinak viděla starou hodnotu (typicky null = "Chyba: null").
+      _lastError = _mqttService.lastError ??
+          'Připojení k brokeru selhalo (neznámá chyba)';
     }
 
     notifyListeners();
