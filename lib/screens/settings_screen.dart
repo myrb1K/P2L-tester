@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../main.dart';
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
+import '../services/file_export.dart';
 import 'admin_users_screen.dart';
 import 'auth_gate.dart';
 
@@ -207,21 +208,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final defaultName = 'p2l_tester_settings_$stamp.json';
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final path = await FilePicker.platform.saveFile(
-        dialogTitle: 'Uložit nastavení',
+      final res = await saveTextFile(
         fileName: defaultName,
-        type: FileType.custom,
-        allowedExtensions: const ['json'],
-        bytes: utf8.encode(json),
+        content: json,
+        dialogTitle: 'Uložit nastavení',
       );
-      if (path == null) return;
-      // Na desktopech `saveFile` ne vždy zapíše obsah — udělej to ručně.
-      final file = File(path);
-      if (!await file.exists() || await file.length() == 0) {
-        await file.writeAsString(json);
-      }
+      if (res.cancelled) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('Exportováno do $path'), backgroundColor: Colors.green),
+        SnackBar(
+          content: Text(res.path != null ? 'Exportováno do ${res.path}' : 'Staženo: $defaultName'),
+          backgroundColor: Colors.green,
+        ),
       );
     } catch (e) {
       messenger.showSnackBar(

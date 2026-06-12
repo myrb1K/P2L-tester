@@ -12,6 +12,7 @@ import '../main.dart' show appVersion;
 import '../models/device_template.dart';
 import '../models/module.dart';
 import '../providers/app_state.dart';
+import '../services/file_export.dart';
 import '../services/template_io.dart';
 import '../widgets/apply_template_sheet.dart';
 import 'template_editor_screen.dart';
@@ -120,7 +121,9 @@ class TemplatesScreen extends StatelessWidget {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      if (choice == _ExportChoice.share) {
+      // Sdílení (přes dočasný soubor) jen nativně — na webu path_provider
+      // a Share API nefungují, tak vždy stáhneme.
+      if (choice == _ExportChoice.share && !kIsWeb) {
         final dir = await getTemporaryDirectory();
         final file = File('${dir.path}/$defaultFileName');
         await file.writeAsString(json);
@@ -129,36 +132,15 @@ class TemplatesScreen extends StatelessWidget {
           subject: defaultFileName,
         );
       } else {
-        final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-        if (isMobile) {
-          // Android/iOS: saveFile() vyžaduje bytes a vrátí cestu kam SAF uložil.
-          final bytes = utf8.encode(json);
-          final path = await FilePicker.platform.saveFile(
-            dialogTitle: 'Uložit šablony',
-            fileName: defaultFileName,
-            type: FileType.custom,
-            allowedExtensions: const ['json'],
-            bytes: Uint8List.fromList(bytes),
-          );
-          if (path == null) return;
-          messenger.showSnackBar(
-            SnackBar(content: Text('Uloženo: $path')),
-          );
-        } else {
-          // Desktop (Windows/Linux/macOS): saveFile vrátí cestu, soubor zapíšeme sami.
-          final path = await FilePicker.platform.saveFile(
-            dialogTitle: 'Uložit šablony',
-            fileName: defaultFileName,
-            type: FileType.custom,
-            allowedExtensions: const ['json'],
-          );
-          if (path == null) return;
-          final outPath = path.toLowerCase().endsWith('.json') ? path : '$path.json';
-          await File(outPath).writeAsString(json);
-          messenger.showSnackBar(
-            SnackBar(content: Text('Uloženo: $outPath')),
-          );
-        }
+        final res = await saveTextFile(
+          fileName: defaultFileName,
+          content: json,
+          dialogTitle: 'Uložit šablony',
+        );
+        if (res.cancelled) return;
+        messenger.showSnackBar(
+          SnackBar(content: Text(res.path != null ? 'Uloženo: ${res.path}' : 'Staženo: $defaultFileName')),
+        );
       }
     } catch (e) {
       messenger.showSnackBar(

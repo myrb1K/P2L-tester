@@ -12,6 +12,7 @@ import '../models/device_template.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
+import '../services/file_export.dart';
 import '../services/template_io.dart';
 import '../widgets/add_module_dialog.dart';
 import '../widgets/apply_template_sheet.dart';
@@ -192,26 +193,30 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
       ),
     );
     if (share == null) return;
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
 
-    if (share) {
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/$fileName');
-      await file.writeAsString(json);
-      await Share.shareXFiles([XFile(file.path)], subject: fileName);
-    } else {
-      if (kIsWeb || Platform.isAndroid || Platform.isIOS) {
-        await FilePicker.platform.saveFile(
-          fileName: fileName,
-          bytes: Uint8List.fromList(json.codeUnits),
-        );
+    try {
+      // Sdílení (přes dočasný soubor) jen nativně — na webu path_provider
+      // a Share API nefungují, tak vždy stáhneme.
+      if (share && !kIsWeb) {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsString(json);
+        await Share.shareXFiles([XFile(file.path)], subject: fileName);
       } else {
-        final outPath = await FilePicker.platform.saveFile(
+        final res = await saveTextFile(
           fileName: fileName,
-          allowedExtensions: ['json'],
-          type: FileType.custom,
+          content: json,
+          dialogTitle: 'Uložit devices',
         );
-        if (outPath != null) await File(outPath).writeAsString(json);
+        if (res.cancelled) return;
+        messenger.showSnackBar(SnackBar(
+          content: Text(res.path != null ? 'Uloženo: ${res.path}' : 'Staženo: $fileName'),
+        ));
       }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Export selhal: $e')));
     }
   }
 

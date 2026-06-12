@@ -16,6 +16,7 @@ import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
 import '../services/auth_api.dart';
+import '../services/file_export.dart';
 import '../services/mqtt_service.dart';
 import '../services/unit_ids_io.dart';
 import '../widgets/bulk_config_menu.dart';
@@ -221,7 +222,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
 
     try {
-      if (choice == _ExportChoice.share) {
+      // Sdílení (přes dočasný soubor) jen nativně — na webu path_provider
+      // a Share API nefungují, tak vždy stáhneme.
+      if (choice == _ExportChoice.share && !kIsWeb) {
         final dir = await getTemporaryDirectory();
         final file = File('${dir.path}/$fileName');
         await file.writeAsString(json);
@@ -230,31 +233,15 @@ class _HomeScreenState extends State<HomeScreen> {
           subject: fileName,
         );
       } else {
-        final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-        if (isMobile) {
-          final bytes = utf8.encode(json);
-          final path = await FilePicker.platform.saveFile(
-            dialogTitle: 'Uložit seznam P2L modulů',
-            fileName: fileName,
-            type: FileType.custom,
-            allowedExtensions: const ['json'],
-            bytes: Uint8List.fromList(bytes),
-          );
-          if (path == null) return;
-          messenger.showSnackBar(SnackBar(content: Text('Uloženo: $path')));
-        } else {
-          final path = await FilePicker.platform.saveFile(
-            dialogTitle: 'Uložit seznam P2L modulů',
-            fileName: fileName,
-            type: FileType.custom,
-            allowedExtensions: const ['json'],
-          );
-          if (path == null) return;
-          final outPath =
-              path.toLowerCase().endsWith('.json') ? path : '$path.json';
-          await File(outPath).writeAsString(json);
-          messenger.showSnackBar(SnackBar(content: Text('Uloženo: $outPath')));
-        }
+        final res = await saveTextFile(
+          fileName: fileName,
+          content: json,
+          dialogTitle: 'Uložit seznam P2L modulů',
+        );
+        if (res.cancelled) return;
+        messenger.showSnackBar(SnackBar(
+          content: Text(res.path != null ? 'Uloženo: ${res.path}' : 'Staženo: $fileName'),
+        ));
       }
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Export selhal: $e')));
