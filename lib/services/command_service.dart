@@ -228,7 +228,7 @@ class CommandService {
 
   /// Topic pro konkrétní device: `I/<unit_id>/<TYPE>/<DEVICE_ID>/<CMD>`.
   /// DEVICE_ID = 2-ciferný kód typu + 4-ciferná adresa (např. 050246 = DISP @246).
-  /// Pro BTN (bez prefixu v README) použijeme holou 6-místnou adresu.
+  /// Prefixy: DISP `05`, BTN `06`, LEDS `11`, DIST `04` (viz `DeviceTypeExt.addressPrefix`).
   static String getDeviceCommandTopic(
       String unitId, DeviceType type, int address, String command) {
     final unit = _unitId6(unitId);
@@ -311,19 +311,41 @@ class CommandService {
     );
   }
 
-  /// REPLACE-FROM: vadný device (typ+oldAddr) se nahradí novým (newDefaultAddr).
+  /// DEVICE-REPLACE: vadný device se nahradí novým osazeným kusem.
+  ///
+  /// Nový FW (kolegův přepis): UNIT-level topic `I/<unit>/UNIT/<unit>/DEVICE-REPLACE`,
+  /// payload `{"From": <default_nového>, "To": <adresa_vadného>}`. Adresa typu se
+  /// už neřeší v topicu — firmware přemapuje device z factory-default adresy
+  /// (`From`) na cílovou adresu vadného kusu (`To`).
+  ///
   /// Firmware atomicky přečipuje 1 fyzický čip — pro PUM-A přemapuje i LEDS
   /// (pokud jsou osazené), pro PUM-C i sekundární BTN @1000+M. Aplikace tedy
-  /// pošle 1 REPLACE-FROM na primární adresu modulu (DISP @M nebo BTN @M).
-  static ({String topic, String payload}) buildReplaceFromCommand({
+  /// pošle 1 DEVICE-REPLACE na modul.
+  static ({String topic, String payload}) buildDeviceReplaceCommand({
     required String unitId,
-    required DeviceType type,
-    required int oldAddress,
-    required int newDefaultAddress,
+    required int fromAddress,
+    required int toAddress,
   }) {
     return (
-      topic: getDeviceCommandTopic(unitId, type, oldAddress, 'REPLACE-FROM'),
-      payload: jsonEncode({'Id': newDefaultAddress}),
+      topic: getUnitCommandTopic(unitId, 'DEVICE-REPLACE'),
+      payload: jsonEncode({'From': fromAddress, 'To': toAddress}),
+    );
+  }
+
+  /// DEVICE-SET-ID: přečíslování existujícího device z adresy `From` na `To`.
+  ///
+  /// Nový FW: UNIT-level topic `I/<unit>/UNIT/<unit>/DEVICE-SET-ID`,
+  /// payload `{"From": <stará_adresa>, "To": <nová_adresa>}`. Firmware atomicky
+  /// přemapuje celý fyzický čip (analogicky k DEVICE-REPLACE) — aplikace pošle
+  /// 1 DEVICE-SET-ID na modul.
+  static ({String topic, String payload}) buildDeviceSetIdCommand({
+    required String unitId,
+    required int fromAddress,
+    required int toAddress,
+  }) {
+    return (
+      topic: getUnitCommandTopic(unitId, 'DEVICE-SET-ID'),
+      payload: jsonEncode({'From': fromAddress, 'To': toAddress}),
     );
   }
 
@@ -453,12 +475,13 @@ class CommandService {
   }
 
   /// Factory default adresa nového čipu podle typu device (z výroby).
-  /// Po REPLACE-FROM aplikace přečipuje nový kus na ID původního.
+  /// Po DEVICE-REPLACE aplikace přečipuje nový kus na ID původního (`From` =
+  /// tato default adresa, `To` = adresa vadného kusu).
   ///
   /// - DIST: 127 (rozsah 0-126 pro provoz)
   /// - DISP: 246 (PUM-A; rozsah 127-247 pro provoz)
   /// - BTN: 247 (PUM-B i PUM-C; rozsah 127-247 pro provoz)
-  /// - LEDS: 0 (REPLACE-FROM samostatně nepodporován; LEDS se přečipují
+  /// - LEDS: 0 (DEVICE-REPLACE samostatně nepodporován; LEDS se přečipují
   ///   automaticky s DISP v rámci stejného PUM-A čipu)
   static int defaultReplacementAddress(DeviceType type) => switch (type) {
         DeviceType.dist => 127,
@@ -467,7 +490,7 @@ class CommandService {
         _ => 0,
       };
 
-  /// Zda je výměna přes REPLACE-FROM podporována pro daný typ. LEDS se
+  /// Zda je výměna přes DEVICE-REPLACE podporována pro daný typ. LEDS se
   /// vyměňují s celým PUM-A čipem (firmware atomicky přemapuje DISP+LEDS).
   static bool supportsReplace(DeviceType type) =>
       type == DeviceType.dist ||

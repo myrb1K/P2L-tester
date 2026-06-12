@@ -363,9 +363,9 @@ class AppState extends ChangeNotifier {
       _mqttService.subscribe('O/+/UNIT/+/ADD-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/RECREATE-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
-      _mqttService.subscribe('O/+/DIST/+/REPLACE-FROM');
-      _mqttService.subscribe('O/+/DISP/+/REPLACE-FROM');
-      _mqttService.subscribe('O/+/BTN/+/REPLACE-FROM');
+      // Nový FW: výměna i přečíslování device jsou UNIT-level příkazy.
+      _mqttService.subscribe('O/+/UNIT/+/DEVICE-REPLACE');
+      _mqttService.subscribe('O/+/UNIT/+/DEVICE-SET-ID');
       // BTN press notifikace pro vizuální flash na chipech
       _mqttService.subscribe('D/+/BTN/+/UPDATE');
       _statusMessage = 'Připojeno, čekám na ALIVE…';
@@ -466,7 +466,8 @@ class AppState extends ChangeNotifier {
 
     if (cmd == 'GET-DEVICES') {
       _handleGetDevicesResponse(unitId, json, message);
-    } else if (cmd == 'REPLACE-FROM' ||
+    } else if (cmd == 'DEVICE-REPLACE' ||
+        cmd == 'DEVICE-SET-ID' ||
         cmd == 'ADD-DEVICES' ||
         cmd == 'RECREATE-DEVICES' ||
         cmd == 'DELETE-DEVICES') {
@@ -1107,11 +1108,36 @@ class AppState extends ChangeNotifier {
     if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
-    final cmd = CommandService.buildReplaceFromCommand(
+    // Nový FW: DEVICE-REPLACE má From = factory default nového kusu,
+    // To = adresa vadného (původního) device.
+    final cmd = CommandService.buildDeviceReplaceCommand(
       unitId: id,
-      type: type,
-      oldAddress: oldAddress,
-      newDefaultAddress: newDefaultAddress,
+      fromAddress: newDefaultAddress,
+      toAddress: oldAddress,
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  /// Přečíslování existujícího device (DEVICE-SET-ID). Změní adresu z
+  /// [oldAddress] na [newAddress]. Firmware atomicky přemapuje celý čip.
+  Future<void> setDeviceId({
+    required String unitId,
+    required DeviceType type,
+    required int oldAddress,
+    required int newAddress,
+    bool restartAfter = false,
+  }) async {
+    final id = _normUnitId(unitId);
+    _unitModulesPending.add(id);
+    _deviceActionStatus =
+        'Přečíslování ${type.code} @$oldAddress → $newAddress na $id…';
+    if (restartAfter) _pendingRestart.add(id);
+    notifyListeners();
+
+    final cmd = CommandService.buildDeviceSetIdCommand(
+      unitId: id,
+      fromAddress: oldAddress,
+      toAddress: newAddress,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
   }
