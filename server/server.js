@@ -12,6 +12,7 @@ const { openDb } = require('./db');
 const { seedInitialAdmin } = require('./db/init');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
+const firmwareRoutes = require('./routes/firmware');
 
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 
@@ -62,6 +63,7 @@ app.use('/api/login', loginLimiter);
 
 app.use('/api', authRoutes.makeRouter(db));
 app.use('/api/admin', adminRoutes.makeRouter(db));
+app.use('/api', firmwareRoutes.makeRouter());
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });

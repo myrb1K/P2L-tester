@@ -1,6 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
+
+import 'auth_api.dart' show authApiBase;
+import 'auth_http_client.dart';
 
 /// Jeden firmware soubor v listingu.
 class FirmwareFile {
@@ -55,6 +60,14 @@ class FirmwareListingService {
           'Neplatná URL — musí začínat http:// nebo https://');
     }
 
+    // Web: prohlížeč nesmí fetchnout autoindex přímo (firmware server nemá
+    // CORS), proto jdeme přes backend proxy /api/firmware-list. Native tahá
+    // HTML přímo (žádný CORS). FLASH URL pro jednotku zůstává v obou případech
+    // přímá — soubor si stahuje jednotka, ne appka.
+    if (kIsWeb) {
+      return _fetchViaProxy(url);
+    }
+
     final http.Response response;
     try {
       response = await http
@@ -72,6 +85,44 @@ class FirmwareListingService {
     }
 
     return parseHtml(response.body);
+  }
+
+  /// Web varianta: listing přes backend proxy (`GET /api/firmware-list?url=`).
+  /// Backend stáhne autoindex server-side a vrátí `{ "html": "..." }`.
+  /// Posílá session cookie (auth klient s credentials) — endpoint je za loginem.
+  static Future<List<FirmwareFile>> _fetchViaProxy(String baseUrl) async {
+    final proxyUri = Uri.parse('$authApiBase/firmware-list')
+        .replace(queryParameters: {'url': baseUrl});
+    final client = createAuthClient();
+    final http.Response response;
+    try {
+      response = await client
+          .get(proxyUri)
+          .timeout(const Duration(seconds: 12));
+    } on TimeoutException {
+      throw const FirmwareListingException('Server neodpověděl (timeout).');
+    } catch (e) {
+      throw FirmwareListingException('Chyba spojení: $e');
+    } finally {
+      client.close();
+    }
+
+    if (response.statusCode == 401) {
+      throw const FirmwareListingException(
+          'Nepřihlášený — obnov přihlášení a zkus to znovu.');
+    }
+    if (response.statusCode != 200) {
+      String detail = 'HTTP ${response.statusCode}';
+      try {
+        final err = jsonDecode(response.body) as Map<String, dynamic>;
+        if (err['error'] != null) detail = '${err['error']}';
+      } catch (_) {}
+      throw FirmwareListingException('Listing přes server selhal ($detail).');
+    }
+
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final html = json['html'] as String? ?? '';
+    return parseHtml(html);
   }
 
   /// Parsuje HTML autoindex (Apache / nginx). Hledá `href="*.bin"` linky
