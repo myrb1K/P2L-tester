@@ -71,32 +71,12 @@ class BulkConfigMenu extends StatelessWidget {
               ),
             ),
             PopupMenuItem(
-              value: _BulkAction.dispBrightness,
-              child: ListTile(
-                leading: const Icon(Icons.brightness_6),
-                title: const Text('Jas displejů'),
-                subtitle: hasSelection
-                    ? Text('${state.selectedCount} vybraných · 0–6')
-                    : const Text('Nejprve vyberte P2L moduly'),
-              ),
-            ),
-            PopupMenuItem(
               value: _BulkAction.unitBrightness,
               child: ListTile(
                 leading: const Icon(Icons.light_mode),
-                title: const Text('Jas jednotky'),
+                title: const Text('Jas P2L LED'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných · 0–100 %')
-                    : const Text('Nejprve vyberte P2L moduly'),
-              ),
-            ),
-            PopupMenuItem(
-              value: _BulkAction.applyTemplate,
-              child: ListTile(
-                leading: const Icon(Icons.dashboard_customize),
-                title: const Text('Aplikovat šablonu'),
-                subtitle: hasSelection
-                    ? Text('${state.selectedCount} vybraných')
                     : const Text('Nejprve vyberte P2L moduly'),
               ),
             ),
@@ -104,7 +84,7 @@ class BulkConfigMenu extends StatelessWidget {
               value: _BulkAction.firmwareUpdate,
               child: ListTile(
                 leading: const Icon(Icons.system_update_alt),
-                title: const Text('Nahrát firmware'),
+                title: const Text('Aktualizovat firmware'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných')
                     : const Text('Nejprve vyberte P2L moduly'),
@@ -114,7 +94,28 @@ class BulkConfigMenu extends StatelessWidget {
               value: _BulkAction.restart,
               child: ListTile(
                 leading: const Icon(Icons.power_settings_new),
-                title: const Text('Restart jednotek'),
+                title: const Text('Restartovat P2L modul'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: _BulkAction.dispBrightness,
+              child: ListTile(
+                leading: const Icon(Icons.brightness_6),
+                title: const Text('Jas PUM-A'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných · 0–6')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BulkAction.applyTemplate,
+              child: ListTile(
+                leading: const Icon(Icons.dashboard_customize),
+                title: const Text('Aplikovat šablonu'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných')
                     : const Text('Nejprve vyberte P2L moduly'),

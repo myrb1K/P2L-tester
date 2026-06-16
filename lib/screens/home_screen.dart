@@ -301,8 +301,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 const BulkConfigMenu(),
                 if (state.units.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Vymazat seznam',
+                    icon: const Icon(Icons.delete_sweep),
+                    tooltip: 'Vyčistit seznam',
                     onPressed: () => state.clearUnits(),
                   ),
                 IconButton(
