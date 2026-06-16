@@ -21,6 +21,7 @@ import '../services/mqtt_service.dart';
 import '../services/unit_ids_io.dart';
 import '../widgets/bulk_config_menu.dart';
 import 'auth_gate.dart';
+import 'help_screen.dart';
 import 'settings_screen.dart';
 import 'templates_screen.dart';
 import 'unit_detail_screen.dart';
@@ -311,6 +312,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () => Navigator.of(
                     context,
                   ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.help_outline),
+                  tooltip: 'Nápověda',
+                  onPressed: () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
                 ),
                 if (kIsWeb && AuthScope.userOf(context) != null)
                   _UserMenu(user: AuthScope.userOf(context)!),

@@ -32,6 +32,7 @@ Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Verze se zv
 - **Export / Import šablon** — JSON wrapper formát ([template_io.dart](lib/services/template_io.dart)), volba mezi nativním sdílením (`share_plus`) a uložením do souboru (`file_picker.saveFile`); při importu konflikty jmen řeší dialog Přepsat / Přejmenovat / Přeskočit. Export funguje i na webu (stažení přes blob, [file_export.dart](lib/services/file_export.dart)).
 - **Export / Import seznamu ID** P2L modulů ([unit_ids_io.dart](lib/services/unit_ids_io.dart)) — JSON včetně volitelného broker profilu, placeholder jednotky pro ještě neodpovězená ID.
 - **Filtr offline jednotek**, scanování (`get_param`), restart jednotky, vyčištění seznamu.
+- **In-app nápověda** ([screens/help_screen.dart](lib/screens/help_screen.dart)) — uživatelský návod [docs/navod.md](docs/navod.md) zobrazený přímo v appce (tlačítko `?` v AppBaru); jeden zdroj čitelný i na GitHubu.
 - **Vlastní splash screen** ([screens/splash_screen.dart](lib/screens/splash_screen.dart)) s plným Smartbox logem (1.8–2.2 s, fade transition) — nezávislé na nativním Android 12+ kruhovém splashi.
 - **Cross-platform**: Windows, Android, iOS, web.
 
