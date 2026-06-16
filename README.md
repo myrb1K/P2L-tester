@@ -2,7 +2,7 @@
 
 Flutter aplikace pro testování a konfiguraci **P2L hardware modulů** (Pick-to-Light) přes MQTT. Slouží jako diagnostický nástroj pro ~70 jednotek se 4–8 LED porty (až 600 LED/port), modulů PUM-A/B/C a senzorů DIST.
 
-Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Při každé user-facing změně inkrementovat.
+Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Verze se zvedá až při commitu user-facing změny (ne automaticky po každé editaci).
 
 ---
 
@@ -26,10 +26,12 @@ Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Při každ�
 - **Testovací LED pattern** (volitelné porty, barva, doba on/off) — JSON i BIN formát.
 - **Detail jednotky** s rekonstruovaným seznamem fyzických modulů PUM-A/B/C/DIST z `GET-DEVICES`.
 - **Správa device topologie**: přidávat/mazat moduly, výměna vadného device (`DEVICE-REPLACE`), přečíslování device (`DEVICE-SET-ID`), aplikace šablon (`DeviceTemplate`).
-- **Hromadná konfigurace**: změna brokera (`set_Mqtt`) a WiFi (`set_WiFi`) na vybraných jednotkách (s 100 ms pauzou mezi publish).
-- **Broker profily** s drag-and-drop řazením, kontrolou duplicit a uložením v `SharedPreferences`.
-- **Export / Import šablon** — JSON wrapper formát ([template_io.dart](lib/services/template_io.dart)), volba mezi nativním sdílením (`share_plus`) a uložením do souboru (`file_picker.saveFile`); při importu konflikty jmen řeší dialog Přepsat / Přejmenovat / Přeskočit.
-- **Filtr offline jednotek**, scanování (`get_param`), restart jednotky.
+- **Hromadná konfigurace** ([widgets/bulk_config_menu.dart](lib/widgets/bulk_config_menu.dart)) na vybraných jednotkách (s 100 ms pauzou mezi publish): změna brokera (`set_Mqtt`), WiFi (`set_WiFi`), jasu P2L LED (`set_brightness`) i jasu displejů PUM-A (DISP `SET-CONFIG`), aktualizace firmware (`update`), restart, aplikace šablony.
+- **Hromadné nahrání firmware** — auto-discovery `*.bin` z autoindex HTML serveru ([firmware_listing_service.dart](lib/services/firmware_listing_service.dart)), base URL v `SharedPreferences`.
+- **Broker profily** s drag-and-drop řazením, kontrolou duplicit a uložením v `SharedPreferences`. Volitelně MQTT přes **WebSocket** (`useWebsocket` + `wsPath`) pro brokery za firewallem / WSS.
+- **Export / Import šablon** — JSON wrapper formát ([template_io.dart](lib/services/template_io.dart)), volba mezi nativním sdílením (`share_plus`) a uložením do souboru (`file_picker.saveFile`); při importu konflikty jmen řeší dialog Přepsat / Přejmenovat / Přeskočit. Export funguje i na webu (stažení přes blob, [file_export.dart](lib/services/file_export.dart)).
+- **Export / Import seznamu ID** P2L modulů ([unit_ids_io.dart](lib/services/unit_ids_io.dart)) — JSON včetně volitelného broker profilu, placeholder jednotky pro ještě neodpovězená ID.
+- **Filtr offline jednotek**, scanování (`get_param`), restart jednotky, vyčištění seznamu.
 - **Vlastní splash screen** ([screens/splash_screen.dart](lib/screens/splash_screen.dart)) s plným Smartbox logem (1.8–2.2 s, fade transition) — nezávislé na nativním Android 12+ kruhovém splashi.
 - **Cross-platform**: Windows, Android, iOS, web.
 
@@ -38,10 +40,12 @@ Aktuální verze: viz `appVersion` v [lib/main.dart](lib/main.dart). Při každ�
 ## Technologický stack
 
 - **Flutter** (Dart, SDK ^3.11.4)
-- **mqtt_client** ^10.6 — TCP MQTT klient
+- **mqtt_client** ^10.6 — MQTT klient (TCP i WebSocket, native i web)
 - **provider** ^6.1 — state management
 - **shared_preferences** ^2.3 — lokální persistence (žádná databáze)
 - **package_info_plus** ^9.0
+- **http** ^1.2 — auto-discovery firmware `*.bin` z autoindex HTML
+- **share_plus** ^10.1 + **file_picker** ^8.1 + **path_provider** ^2.1 — export/sdílení šablon a ID (nativní; na webu stažení přes blob)
 
 ---
 
@@ -148,10 +152,11 @@ unitId >= 1000?
 | `00` | UNIT (jednotka samotná) |
 | `01` | P2L (LED pásky) |
 | `04` | DIST (senzor vzdálenosti) |
-| `05` | DISP (displej PUMA) |
+| `05` | DISP (displej PUM-A) |
+| `06` | BTN (tlačítko rodiny PUMA) |
 | `11` | LEDS (PUMA LED) |
 
-DEVICE_ID v topicu = 2-ciferný kód + 4-ciferná adresa, např. `050246` = DISP @246.
+DEVICE_ID v topicu = 2-ciferný kód + 4-ciferná adresa, např. `050246` = DISP @246. DISP (`05`) i BTN (`06`) jsou z rodiny PUMA, ale mají vlastní prefix (zdroj `DeviceTypeExt.addressPrefix`).
 
 ### Detailní reference protokolu
 
@@ -186,7 +191,7 @@ P2L jednotka komunikuje s devices přes **RS485 sběrnici v sérii**:
 | Modul | Popis | Samostatně? | Čipů | MQTT entries |
 |-------|-------|-------------|------|--------------|
 | **PUM-A** @N | displej + 0/1/2 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže |
-| **PUM-B** @N | samostatné tlačítko | ano | 1 | BTN `N` (bez prefixu) |
+| **PUM-B** @N | samostatné tlačítko + volit. LEDS | ano | 1 | BTN `N` (bez prefixu) + volit. LEDS `N` |
 | **PUM-C** @M | vždy 2 tlačítka (+/−), připojeno k PUM-A | NE — jen doplněk PUM-A bez 2 tlačítek | 1 | BTN `1000+M` (+), BTN `M` (−) |
 | **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací |
 
@@ -203,7 +208,7 @@ P2L jednotka komunikuje s devices přes **RS485 sběrnici v sérii**:
 ### Klíčová pravidla
 
 - **PUM-B** a **PUM-C mínus** jsou oba holá `N` — rozlišit se dají jen tak, že PUM-C mínus má vždy párového brata `1000+N`.
-- **LEDS** jsou fyzicky vždy součástí PUM-A (nikdy samostatně). V `GET-DEVICES` se ale objeví jen pokud je jednotka "potřebuje znát" — registrace je volitelná.
+- **LEDS** jsou fyzicky součástí PUM-A nebo PUM-B (volitelný LED kroužek na tlačítku, nikdy samostatně). V `GET-DEVICES` se objeví jen pokud je jednotka "potřebuje znát" — registrace je volitelná. PUM-B s LEDS = BTN @N + LEDS @N (rekonstrukce: BTN bez DISP páru + LEDS na stejné adrese → PUM-B s LEDS).
 - **DISP** vždy znamená PUM-A.
 - **PUM-C** lze zapojit JEN k PUM-A, které má 0 nebo 1 tlačítko (PUM-C dodá chybějící). Kombinace PUM-A se 2 tlačítky + PUM-C vedle je neplatná.
 - Adresy modulů jsou **nezávislé** — PUM-A na 128, PUM-C na 130 je validní.
@@ -257,10 +262,12 @@ Volitelně `Segments` (segmentový režim) — zatím první iterace posílá pr
 Nový FW řeší obě operace **UNIT-level příkazy** na topicu `I/<unit>/UNIT/<unit>/<CMD>` s payloadem `{"From": <z>, "To": <na>}`. Typ device ani per-device topic se už neřeší.
 
 **DEVICE-REPLACE — výměna vadného kusu:**
-- Vadný device se fyzicky vymění za nový s **factory default chip adresou**.
-- **DIST default = 127** (rozsah platných adres 0–126).
-- **DISP default = 246** (PUM-A; rozsah pro provoz 127–247).
-- **BTN default = 247** (PUM-B a PUM-C; rozsah pro provoz 127–247).
+- Vadný device se fyzicky vymění za nový s **factory default chip adresou** (= horní mez rozsahu daného modulu).
+- Platné rozsahy adres podle typu modulu (jeden zdroj pravdy [`ModuleTypeExt.addressRange`](lib/models/module.dart), default = horní mez):
+  - **PUM-A: 128–246** (default 246)
+  - **PUM-B: 128–247** (default 247)
+  - **PUM-C: 128–247** (default 247)
+  - **DIST: 1–127** (default 127)
 - Aplikace pošle `DEVICE-REPLACE` s `{"From": <default_nového>, "To": <adresa_vadného>}` → jednotka přečipuje nový na ID původního.
 
 **DEVICE-SET-ID — přečíslování funkčního device:**

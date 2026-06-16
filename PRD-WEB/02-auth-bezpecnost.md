@@ -287,7 +287,7 @@ Všechny chráněné middleware `requireAdmin` (kontroluje JWT claim `isAdmin ==
 - [x] Refresh stránky uživatele neodhlašuje.
 - [x] Logout invaliduje session (následné `GET /api/me` vrátí 401).
 - [x] Špatný login zobrazí chybovou zprávu, žádné session se nezaloží.
-- [x] Rate limit po 5 pokusech / IP / 15 min funguje (potvrzeno `RateLimit-Limit: 5` headery).
+- [x] Rate limit po 50 pokusech / IP / 15 min funguje (potvrzeno `RateLimit-Limit: 50` headery; práh zvýšen z 5 na 50 po praktické zkušenosti v devu).
 - [x] Cookies mají `HttpOnly`, `SameSite=Lax`. **`Secure` se zapne automaticky v produkci** přes `NODE_ENV=production` (v dev běží přes HTTP a Secure by spojení rozbilo).
 - [x] DB schéma obsahuje `is_admin BOOLEAN` od první migrace ([server/db/schema.sql](../server/db/schema.sql)).
 - [x] JWT payload obsahuje claim `isAdmin` ([server/routes/auth.js](../server/routes/auth.js) `signToken`).
