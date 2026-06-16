@@ -351,6 +351,11 @@ Recent themes:
 
 **Pozor — nezvedat `appVersion` automaticky.** Po code změnách na něj nesahat; verzi řeší až commit, a to **až poté, co se uživatele zeptám**, jestli má být nová verze (a jaká). Někdy je změna jen WIP / experiment / refactor, kdy se verze nemění. Toto pravidlo přepisuje starší pokyn "Always increment".
 
+## In-app nápověda — udržovat v souladu
+- Uživatelský návod ovládání je `docs/navod.md` (registrovaný jako asset v `pubspec.yaml`), zobrazený v appce přes `lib/screens/help_screen.dart` (tlačítko „Nápověda" `Icons.help_outline` v AppBaru HomeScreen). **Jeden zdroj, dvě cesty** — čitelný i na GitHubu.
+- Renderuje vlastní lehký renderer `_MarkdownView` (nadpisy `#`/`##`/`###`, odstavce, odrážky `- `, číslované `1.`, citace `> `, `---`, GFM tabulky, inline `**tučné**` / `` `kód` ``) — **bez závislosti `flutter_markdown`** (deprecovaný). Obsah návodu řídíme sami, proto stačí tahle podmnožina; pokud do návodu přibude jiná syntaxe, rozšířit renderer.
+- **Pravidlo:** při každé user-facing změně ovládání (přejmenování/přesun tlačítka, nová akce v menu, nový dialog, změna toku) zkontrolovat `docs/navod.md` a sjednotit příslušnou sekci — ideálně ve stejném commitu. Čistě interní změny/refactory bez dopadu na ovládání návod měnit nemusí. Drobné úpravy návodu nezvedají `appVersion`.
+
 ## Splash Screen
 - `lib/screens/splash_screen.dart` — Flutter splash s `Image.asset('assets/icons/Smartboxlogo.png')` na bílém pozadí, dole verze aplikace.
 - Asset registrovaný v `pubspec.yaml` (`flutter.assets`).
