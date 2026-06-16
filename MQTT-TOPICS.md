@@ -6,6 +6,10 @@
 |-------|-----|-------------|
 | `D/+/UNIT/+/ALIVE` | Ihned po připojení | Pravidelné hlášení jednotky (každých ~5 min). Obsahuje firmware, battery, HWModel. Podle tohoto topicu se jednotky **automaticky objevují** v seznamu. |
 | `A/SERVER/+/CMD` | Ihned po připojení | Odpověď na příkaz `get_param`. Obsahuje detailní info: IP, MAC, firmware, ID portů. |
+| `O/+/UNIT/+/GET-DEVICES` | Ihned po připojení | Seznam atomických devices na sběrnici (P2L32) — vstup pro rekonstrukci PUM-A/B/C. |
+| `O/+/UNIT/+/{ADD,RECREATE,DELETE}-DEVICES` | Ihned po připojení | Potvrzení device-management operací. |
+| `O/+/UNIT/+/DEVICE-REPLACE` | Ihned po připojení | Potvrzení výměny vadného device (nový FW, UNIT-level). |
+| `O/+/UNIT/+/DEVICE-SET-ID` | Ihned po připojení | Potvrzení přečíslování device (nový FW, UNIT-level). |
 
 ### Příklad ALIVE payloadu
 ```json
@@ -60,12 +64,17 @@
 
 | Akce | Topic(s) |
 |------|----------|
-| Připojení – subscribe | `D/+/UNIT/+/ALIVE` + `A/SERVER/+/CMD` |
+| Připojení – subscribe | `D/+/UNIT/+/ALIVE` + `A/SERVER/+/CMD` + `O/+/UNIT/+/{GET,ADD,RECREATE,DELETE}-DEVICES` + `O/+/UNIT/+/{DEVICE-REPLACE,DEVICE-SET-ID}` |
 | TEST (stará jednotka) | `I/u<4dig>/SERVER/CMD` (JSON) |
 | TEST (nová, OLD mode) | `I/<6dig>/P2L/01<4dig>/CMD` (JSON) |
 | TEST (nová, BIN mode) | `I/<6dig>/P2L/01<4dig>/CMD` (JSON: clr_strips) + `I/<6dig>/UNIT/<6dig>/BIN` (binary) |
 | CLEAR | `I/u<4dig>/SERVER/CMD` nebo `I/<6dig>/P2L/01<4dig>/CMD` (JSON: clr_strips) |
 | SCAN / Get Param | `I/u<4dig>/SERVER/CMD` nebo `I/<6dig>/P2L/01<4dig>/CMD` (JSON: get_param) |
+| GET-DEVICES / device management | `I/<6dig>/UNIT/<6dig>/{GET-DEVICES,ADD-DEVICES,RECREATE-DEVICES,DELETE-DEVICES}` |
+| Výměna vadného device (nový FW) | `I/<6dig>/UNIT/<6dig>/DEVICE-REPLACE` (JSON: `{"From":<default>,"To":<vadný>}`) |
+| Přečíslování device (nový FW) | `I/<6dig>/UNIT/<6dig>/DEVICE-SET-ID` (JSON: `{"From":<stará>,"To":<nová>}`) |
+| Firmware OTA (`update`) | `I/u<4dig>/SERVER/CMD` nebo `I/<6dig>/P2L/01<4dig>/CMD` (JSON: update) |
+| Hromadná změna brokera/WiFi/jasu | `I/u<4dig>/SERVER/CMD` nebo `I/<6dig>/P2L/01<4dig>/CMD` (JSON: set_Mqtt / set_WiFi / set_brightness) |
 
 ---
 
@@ -86,10 +95,28 @@ unitId >= 1000 ?
 
 ## Kód zařízení v topic (nový formát)
 
+DEVICE_ID = 2-ciferný kód typu + 4-ciferná adresa (např. `050246` = DISP @246).
+
 | Kód | Typ |
 |-----|-----|
 | `00` | UNIT (jednotka samotná) |
-| `01` | P2L (LED pásky) |
+| `01` | P2L (LED pásky / test příkazy) |
 | `04` | DIST (senzor vzdálenosti) |
-| `05` | DISP (displej PUMA) |
+| `05` | DISP (displej PUM-A) |
+| `06` | BTN (tlačítko rodiny PUMA) |
 | `11` | LEDS (PUMA LED) |
+
+> **Pozn.:** DISP (`05`) i BTN (`06`) patří do rodiny PUMA, ale mají **vlastní prefix** (potvrzeno firmwarem i reálným tracem — BTN ALIVE `D/<unit>/BTN/06<addr>/ALIVE`). Adresné device příkazy (SET-DATA, SET-CONFIG, SET-LEDS…) používají `DeviceTypeExt.addressPrefix` v [lib/models/device.dart](lib/models/device.dart).
+
+---
+
+## Výměna a přečíslování device (nový FW, od v2.67)
+
+Nový firmware řeší obě operace **UNIT-level příkazy** — typ device ani per-device topic se neřeší, firmware přemapuje celý fyzický čip podle adres.
+
+| Operace | Topic | Payload | Odpověď |
+|---------|-------|---------|---------|
+| Výměna vadného | `I/<6dig>/UNIT/<6dig>/DEVICE-REPLACE` | `{"From":<factory default nového>,"To":<adresa vadného>}` | `O/<6dig>/UNIT/<6dig>/DEVICE-REPLACE` `{"Code":0,"Message":"OK"}` |
+| Přečíslování | `I/<6dig>/UNIT/<6dig>/DEVICE-SET-ID` | `{"From":<stará>,"To":<nová>}` | `O/<6dig>/UNIT/<6dig>/DEVICE-SET-ID` `{"Code":0,"Message":"OK"}` |
+
+Factory default adresy (= horní mez rozsahu typu): PUM-A/DISP **246**, PUM-B/PUM-C/BTN **247**, DIST **127**. Po `{"Code":0}` aplikace automaticky pošle `GET-DEVICES`. (Starší firmware používal per-device `REPLACE-FROM` — appka už ho neobsluhuje. Viz [README-P2L-32.md](README-P2L-32.md) a [CLAUDE.md](CLAUDE.md).)
