@@ -350,7 +350,8 @@ class CommandService {
   }
 
   /// SET-DATA na DISP: zobrazí 4-znakový text. Prázdný řetězec = smazání displeje.
-  /// DISP adresa 0 = broadcast na všechny displeje jednotky.
+  /// Pozn.: nový FW neumí broadcast přes adresu 0 (vrací „unknown ID") — posílej
+  /// na konkrétní DISP adresu, pro „všechny" iteruj.
   static ({String topic, String payload}) buildSetDispDataCommand({
     required String unitId,
     required int dispAddress,
@@ -363,7 +364,8 @@ class CommandService {
   }
 
   /// SET-CONFIG na DISP: nastaví intensitu (jas) displeje. Rozsah 0–6.
-  /// DISP adresa 0 = broadcast na všechny displeje jednotky.
+  /// Pozn.: nový FW neumí broadcast přes adresu 0 (vrací „unknown ID") — posílej
+  /// na konkrétní DISP adresu, pro „všechny" iteruj.
   static ({String topic, String payload}) buildSetDispConfigCommand({
     required String unitId,
     required int dispAddress,

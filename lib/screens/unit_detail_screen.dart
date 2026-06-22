@@ -667,7 +667,7 @@ class _GroupSection extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   iconSize: 18,
-                  tooltip: 'AHOJ na všechny displeje (broadcast)',
+                  tooltip: 'AHOJ na všechny displeje',
                   icon: const Icon(Icons.text_fields, color: Colors.blue),
                   onPressed: () => _bulkDisp(context, 'AHOJ'),
                 ),
@@ -685,7 +685,7 @@ class _GroupSection extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   iconSize: 18,
-                  tooltip: 'Smazat text na všech displejích (broadcast)',
+                  tooltip: 'Smazat text na všech displejích',
                   icon: const Icon(Icons.format_clear),
                   onPressed: () => _bulkDisp(context, ''),
                 ),
@@ -736,8 +736,13 @@ class _GroupSection extends StatelessWidget {
   }
 
   Future<void> _bulkDisp(BuildContext context, String text) async {
-    // DISP adresa 0 = broadcast na všechny displeje jednotky (1 MQTT zpráva).
-    await context.read<AppState>().sendDispData(unitId: unitId, dispAddress: 0, data: text);
+    // Nový FW neumí broadcast na DISP 0 ("unknown ID") — pošleme na každý
+    // displej zvlášť (modules = PUM-A skupina) se 100ms pauzou.
+    final state = context.read<AppState>();
+    for (final m in modules) {
+      await state.sendDispData(unitId: unitId, dispAddress: m.baseAddress, data: text);
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
   }
 
   Future<void> _bulkDispAddresses(BuildContext context) async {

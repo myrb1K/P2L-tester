@@ -754,28 +754,52 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Hromadná změna jasu displejů (DISP SET-CONFIG, broadcast adresa 050000)
-  /// na všech vybraných jednotkách. Intensity 0–6.
+  /// DISP adresy (PUM-A) jednotky z posledního GET-DEVICES, vzestupně.
+  List<int> _dispAddressesFor(String unitId) {
+    final mods = _unitModules[_normUnitId(unitId)] ?? const <PumaModule>[];
+    final addrs = mods
+        .where((m) => m.type == ModuleType.pumA)
+        .map((m) => m.baseAddress)
+        .toList()
+      ..sort();
+    return addrs;
+  }
+
+  /// Hromadná změna jasu displejů (DISP SET-CONFIG) na všech vybraných
+  /// jednotkách. Intensity 0–6.
+  ///
+  /// Nový FW neumí broadcast na DISP adresu 0 (vrací „unknown ID") — posíláme
+  /// SET-CONFIG na každou skutečnou DISP adresu zvlášť (z posledního
+  /// GET-DEVICES) se 100ms pauzou. Jednotky bez známých DISP (nenačtené devices)
+  /// se přeskočí.
   Future<void> sendBulkBrightness(int intensity) async {
     if (_selectedUnits.isEmpty) return;
     final clamped = intensity.clamp(0, 6);
     final targets = _selectedUnits.toList();
     var sent = 0;
+    var skipped = 0;
     for (final unitId in targets) {
-      final cmd = CommandService.buildSetDispConfigCommand(
-        unitId: _normUnitId(unitId),
-        dispAddress: 0,
-        intensity: clamped,
-      );
-      _mqttService.publish(cmd.topic, cmd.payload);
-      sent++;
-      _statusMessage = 'Jas: $sent / ${targets.length} (intensity=$clamped)';
-      notifyListeners();
-      if (sent < targets.length) {
+      final disps = _dispAddressesFor(unitId);
+      if (disps.isEmpty) {
+        skipped++;
+        continue;
+      }
+      for (final addr in disps) {
+        final cmd = CommandService.buildSetDispConfigCommand(
+          unitId: _normUnitId(unitId),
+          dispAddress: addr,
+          intensity: clamped,
+        );
+        _mqttService.publish(cmd.topic, cmd.payload);
+        sent++;
+        _statusMessage = 'Jas: $sent displejů (intensity=$clamped)';
+        notifyListeners();
         await Future.delayed(const Duration(milliseconds: 100));
       }
     }
-    _statusMessage = 'Jas $clamped odeslán na $sent P2L modulů';
+    _statusMessage = skipped > 0
+        ? 'Jas $clamped odeslán na $sent displejů ($skipped jednotek bez známých DISP — otevři detail / Obnovit)'
+        : 'Jas $clamped odeslán na $sent displejů';
     notifyListeners();
   }
 
@@ -976,7 +1000,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Pošle text na DISP (4 znaky). Adresa 0 = broadcast na všechny displeje.
+  /// Pošle text na DISP (4 znaky) na konkrétní adresu. Pozn.: nový FW neumí
+  /// broadcast přes adresu 0 (vrací „unknown ID") — pro „všechny displeje"
+  /// volej tuto metodu v cyklu přes skutečné DISP adresy.
   Future<void> sendDispData({
     required String unitId,
     required int dispAddress,
