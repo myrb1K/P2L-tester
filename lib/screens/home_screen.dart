@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../main.dart' show appVersion;
 import '../models/broker_profile.dart';
+import '../models/bus_scan.dart';
 import '../models/device.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
@@ -21,7 +22,6 @@ import '../services/mqtt_service.dart';
 import '../services/unit_ids_io.dart';
 import '../widgets/bulk_config_menu.dart';
 import 'auth_gate.dart';
-import 'help_screen.dart';
 import 'settings_screen.dart';
 import 'templates_screen.dart';
 import 'unit_detail_screen.dart';
@@ -313,13 +313,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     context,
                   ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.help_outline),
-                  tooltip: 'Nápověda',
-                  onPressed: () => Navigator.of(
-                    context,
-                  ).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
-                ),
                 if (kIsWeb && AuthScope.userOf(context) != null)
                   _UserMenu(user: AuthScope.userOf(context)!),
               ],
@@ -395,21 +388,32 @@ class _StatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final message = !state.isConnected
-        ? 'Odpojeno – otevřete Nastavení'
-        : state.statusMessage.isNotEmpty
-        ? state.statusMessage
-        : 'Připojeno';
+    // Chybová hláška (Code != 0) má přednost a zobrazí se červeně.
+    final isError = state.deviceActionIsError;
+    final message = isError
+        ? state.deviceActionStatus
+        : !state.isConnected
+            ? 'Odpojeno – otevřete Nastavení'
+            : state.statusMessage.isNotEmpty
+                ? state.statusMessage
+                : 'Připojeno';
+
+    final MaterialColor base = isError
+        ? Colors.red
+        : state.isConnected
+            ? Colors.green
+            : Colors.orange;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: state.isConnected ? Colors.green.withAlpha(25) : Colors.orange.withAlpha(25),
+      color: base.withAlpha(25),
       child: Text(
         message,
         style: TextStyle(
           fontSize: 13,
-          color: state.isConnected ? Colors.green[800] : Colors.orange[800],
+          color: base[800],
+          fontWeight: isError ? FontWeight.w600 : FontWeight.normal,
         ),
       ),
     );
@@ -600,11 +604,21 @@ class _UnitListView extends StatelessWidget {
       itemBuilder: (context, index) {
         final unit = units[index];
         final isSelected = state.selectedUnits.contains(unit.id);
+        // Barva ikony „Seznam devices" podle výsledku posledního skenu sběrnice:
+        // červená = něco chybí, šedá = něco nového/neuloženého, jinak původní.
+        final diag = state.busDiagnosis(unit.id);
+        Color? scanColor;
+        if (diag.any((r) => r.status == BusScanStatus.missing)) {
+          scanColor = Colors.red;
+        } else if (diag.any((r) => r.status == BusScanStatus.unregistered)) {
+          scanColor = Colors.grey;
+        }
         return _UnitCard(
           key: ValueKey(unit.id),
           unit: unit,
           isSelected: isSelected,
           moduleCount: state.modulesForUnit(unit.id)?.length,
+          scanStatusColor: scanColor,
           onToggle: () => state.toggleUnit(unit.id),
           onGetParam: () {
             state.sendGetParam(unit.id);
@@ -624,6 +638,8 @@ class _UnitCard extends StatefulWidget {
   final P2LUnit unit;
   final bool isSelected;
   final int? moduleCount;
+  // Barva ikony „Seznam devices" podle výsledku skenu sběrnice (null = původní).
+  final Color? scanStatusColor;
   final VoidCallback onToggle;
   final VoidCallback onGetParam;
   final VoidCallback onOpenDetail;
@@ -633,6 +649,7 @@ class _UnitCard extends StatefulWidget {
     required this.unit,
     required this.isSelected,
     required this.moduleCount,
+    this.scanStatusColor,
     required this.onToggle,
     required this.onGetParam,
     required this.onOpenDetail,
@@ -779,9 +796,15 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                     alignment: Alignment.center,
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.device_hub, size: 28, color: Colors.blueGrey),
+                        icon: Icon(Icons.device_hub,
+                            size: 28,
+                            color: widget.scanStatusColor ?? Colors.blueGrey),
                         onPressed: widget.onOpenDetail,
-                        tooltip: 'Seznam devices',
+                        tooltip: widget.scanStatusColor == Colors.red
+                            ? 'Seznam devices — sken: některý device chybí'
+                            : widget.scanStatusColor == Colors.grey
+                                ? 'Seznam devices — sken: nalezen neuložený device'
+                                : 'Seznam devices',
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -789,7 +812,8 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                       if (widget.moduleCount != null)
                         IgnorePointer(
                           child: Badge(
-                            backgroundColor: Colors.blueGrey,
+                            backgroundColor:
+                                widget.scanStatusColor ?? Colors.blueGrey,
                             textColor: Colors.white,
                             offset: const Offset(-2, 2),
                             label: Text('${widget.moduleCount}'),

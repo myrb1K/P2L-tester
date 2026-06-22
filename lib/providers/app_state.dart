@@ -89,6 +89,15 @@ class AppState extends ChangeNotifier {
   final Map<String, BusScanScope> _unitBusScanScope = {};
   List<DeviceTemplate> _templates = [];
   String _deviceActionStatus = '';
+  // true = poslední hláška je chybová (Code != 0) → v UI červeně.
+  bool _deviceActionIsError = false;
+
+  /// Jednotné nastavení stavové hlášky správy devices. `isError` určuje červené
+  /// zabarvení v UI; každé volání příznak přepíše, takže se nezasekne na červené.
+  void _setStatus(String msg, {bool isError = false}) {
+    _deviceActionStatus = msg;
+    _deviceActionIsError = isError;
+  }
 
   // Timestamp posledního stisku BTN. Klíč: "<unitId>:<baseAddr>:<left|right>".
   final Map<String, DateTime> _btnPresses = {};
@@ -136,6 +145,7 @@ class AppState extends ChangeNotifier {
   }
   List<DeviceTemplate> get templates => List.unmodifiable(_templates);
   String get deviceActionStatus => _deviceActionStatus;
+  bool get deviceActionIsError => _deviceActionIsError;
 
   static String _normUnitId(String unitId) =>
       unitId.startsWith('u') ? unitId.substring(1) : unitId;
@@ -502,9 +512,15 @@ class AppState extends ChangeNotifier {
         cmd == 'ADD-DEVICES' ||
         cmd == 'RECREATE-DEVICES' ||
         cmd == 'DELETE-DEVICES') {
-      _deviceActionStatus = '$cmd na $unitId: ${code == 0 || code == '0' ? 'OK' : 'chyba'}${msg != null ? " — $msg" : ""}';
+      final ok = code == 0 || code == '0';
+      _setStatus('$cmd na $unitId: ${ok ? 'OK' : 'chyba'}${msg != null ? " — $msg" : ""}',
+          isError: !ok);
       _unitModulesPending.remove(unitId);
-      if (code == 0 || code == '0') {
+      if (ok) {
+        // Operace prošla → fyzický stav sběrnice i config se změnily, starý
+        // sken je neplatný. Při chybě (Code != 0) sken zachováme, ať uživatel
+        // nemusí znovu skenovat.
+        _invalidateBusScan(unitId);
         if (_pendingRestart.remove(unitId)) {
           // S restartem: GET-DEVICES posílat až po návratu jednotky online (první ALIVE).
           _awaitingAliveAfterRestart.add(unitId);
@@ -544,9 +560,9 @@ class AppState extends ChangeNotifier {
       final devices = parseGetDevicesPayload(devicesField);
       _unitModules[unitId] = reconstructModules(devices);
       _unitModulesFetchedAt[unitId] = DateTime.now();
-      _deviceActionStatus = 'Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)';
+      _setStatus('Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)');
     } else {
-      _deviceActionStatus = 'GET-DEVICES $unitId: neočekávaný formát odpovědi';
+      _setStatus('GET-DEVICES $unitId: neočekávaný formát odpovědi', isError: true);
     }
     notifyListeners();
   }
@@ -560,14 +576,13 @@ class AppState extends ChangeNotifier {
     final code = json['Code'];
     if (code != null && code != 0 && code != '0') {
       final msg = json['Message'] as String?;
-      _deviceActionStatus =
-          'Sken sběrnice $displayId: chyba${msg != null ? " — $msg" : ""}';
+      _setStatus('Sken sběrnice $displayId: chyba${msg != null ? " — $msg" : ""}',
+          isError: true);
     } else {
       final scope = _unitBusScanScope[unitId] ?? BusScanScope.all;
       final scan = BusScanResult.fromJson(json, DateTime.now(), scope: scope);
       _unitBusScan[unitId] = scan;
-      _deviceActionStatus =
-          'Sken sběrnice $displayId: nalezeno ${scan.total} čipů';
+      _setStatus('Sken sběrnice $displayId: nalezeno ${scan.total} čipů');
     }
     notifyListeners();
   }
@@ -576,6 +591,12 @@ class AppState extends ChangeNotifier {
     // Topic: D/<id>/UNIT/<id>/ALIVE
     final parts = topic.split('/');
     if (parts.length < 4) return;
+    // Device-level ALIVE (BTN/DISP/LEDS/DIST) nese diagnostiku Code/Message;
+    // řešíme zvlášť, UNIT ALIVE pokračuje níž.
+    if (parts.length >= 3 && parts[2] != 'UNIT') {
+      _handleDeviceAlive(parts, json);
+      return;
+    }
     final rawId = parts[1];
     // Stará jednotka má v topicu prefix 'u' (D/u0472/UNIT/u0472/ALIVE),
     // nová P2L32 posílá 6-cifernou holou adresu (D/000123/UNIT/000123/ALIVE).
@@ -612,12 +633,39 @@ class AppState extends ChangeNotifier {
         _awaitingAliveAfterRestart.remove(unitId);
         _restartSentAt.remove(unitId);
         _initialFetchDone.add(unitId);
-        _deviceActionStatus = 'P2L modul ${int.tryParse(unitId)?.toString() ?? unitId} zpět online — načítám devices.';
+        _setStatus('P2L modul ${int.tryParse(unitId)?.toString() ?? unitId} zpět online — načítám devices.');
         Future.microtask(() => fetchDevices(unitId));
       }
     } else if (_initialFetchDone.add(unitId)) {
       // První ALIVE této jednotky v rámci aktuálního připojení → auto-fetch.
       Future.microtask(() => fetchDevices(unitId));
+    }
+    notifyListeners();
+  }
+
+  /// Device ALIVE (BTN/DISP/LEDS/DIST), topic `D/<unit>/<TYPE>/<deviceId>/ALIVE`.
+  /// Nese diagnostiku `Code`/`Message`: `Code:0` = OK (ticho), jinak chybu
+  /// vypíšeme do stavové hlášky červeně. Zároveň osvěží lastSeen jednotky.
+  void _handleDeviceAlive(List<String> parts, Map<String, dynamic> json) {
+    if (parts.length < 5) return;
+    final unitId = _normUnitId(parts[1]);
+    final type = parts[2];
+    final deviceId = parts[3];
+
+    // Device ALIVE je doklad, že jednotka relayuje → osvěž lastSeen/online.
+    final u = _units[unitId];
+    if (u != null) {
+      u.lastSeen = DateTime.now();
+      u.isOnline = true;
+    }
+
+    final code = json['Code'];
+    final isError = code != null && code != 0 && code != '0';
+    if (isError) {
+      final msg = (json['Message'] as String?) ?? 'chyba';
+      final displayId = int.tryParse(unitId)?.toString() ?? unitId;
+      _setStatus('$displayId · $type $deviceId: $msg (Code $code)',
+          isError: true);
     }
     notifyListeners();
   }
@@ -958,7 +1006,7 @@ class AppState extends ChangeNotifier {
     // Ruční načtení ruší čekání na post-restart auto-trigger.
     _awaitingAliveAfterRestart.remove(id);
     _restartSentAt.remove(id);
-    _deviceActionStatus = 'Načítám devices jednotky ${int.tryParse(id)?.toString() ?? id}…';
+    _setStatus('Načítám devices jednotky ${int.tryParse(id)?.toString() ?? id}…');
     notifyListeners();
 
     final cmd = CommandService.buildGetDevicesCommand(id);
@@ -973,8 +1021,8 @@ class AppState extends ChangeNotifier {
     final id = _normUnitId(unitId);
     _unitBusScanPending.add(id);
     _unitBusScanScope[id] = scope;
-    _deviceActionStatus =
-        'Skenuji sběrnici jednotky ${int.tryParse(id)?.toString() ?? id}… (může trvat i přes 10 s)';
+    _setStatus(
+        'Skenuji sběrnici jednotky ${int.tryParse(id)?.toString() ?? id}… (může trvat i přes 10 s)');
     notifyListeners();
 
     final cmd = CommandService.buildScanDevicesCommand(unitId: id, scope: scope);
@@ -986,8 +1034,9 @@ class AppState extends ChangeNotifier {
     // už je pryč.
     Future.delayed(const Duration(seconds: 45), () {
       if (!_unitBusScanPending.remove(id)) return;
-      _deviceActionStatus =
-          'Sken sběrnice ${int.tryParse(id)?.toString() ?? id}: bez odpovědi (starší firmware?)';
+      _setStatus(
+          'Sken sběrnice ${int.tryParse(id)?.toString() ?? id}: bez odpovědi (starší firmware?)',
+          isError: true);
       notifyListeners();
     });
   }
@@ -996,6 +1045,15 @@ class AppState extends ChangeNotifier {
   void clearBusScan(String unitId) {
     final id = _normUnitId(unitId);
     if (_unitBusScan.remove(id) != null) notifyListeners();
+  }
+
+  /// Zneplatní uložený sken po operaci, která mění devices (přečíslování,
+  /// výměna, přidání, přepis, smazání) — fyzický stav sběrnice i config se mění,
+  /// takže staré porovnání by ukazovalo falešné „chybí"/„neuloženo". Volající
+  /// následně stejně volá notifyListeners.
+  void _invalidateBusScan(String id) {
+    _unitBusScan.remove(id);
+    _unitBusScanScope.remove(id);
   }
 
   final Set<String> _pendingRestart = {};
@@ -1014,7 +1072,7 @@ class AppState extends ChangeNotifier {
     if (modules.isEmpty) return;
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _deviceActionStatus = 'Přidávám devices do ${int.tryParse(id)?.toString() ?? id}…';
+    _setStatus('Přidávám devices do ${int.tryParse(id)?.toString() ?? id}…');
     if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
@@ -1041,7 +1099,7 @@ class AppState extends ChangeNotifier {
     final cmd = CommandService.buildRestartCommand(id);
     _mqttService.publish(cmd.topic, cmd.payload);
     _markUnitOfflineUntilAlive(id);
-    _deviceActionStatus = 'Restart jednotky ${int.tryParse(id)?.toString() ?? id} odeslán';
+    _setStatus('Restart jednotky ${int.tryParse(id)?.toString() ?? id} odeslán');
     notifyListeners();
   }
 
@@ -1097,9 +1155,9 @@ class AppState extends ChangeNotifier {
       data: data,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
-    _deviceActionStatus = data.isEmpty
+    _setStatus(data.isEmpty
         ? 'DISP @$dispAddress na $id: smazáno'
-        : 'DISP @$dispAddress na $id: "$data"';
+        : 'DISP @$dispAddress na $id: "$data"');
     notifyListeners();
   }
 
@@ -1120,7 +1178,7 @@ class AppState extends ChangeNotifier {
       color: effectiveColor,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
-    _deviceActionStatus = 'LEDS @$ledsAddress na $id: rozsvíceno';
+    _setStatus('LEDS @$ledsAddress na $id: rozsvíceno');
     notifyListeners();
   }
 
@@ -1135,7 +1193,7 @@ class AppState extends ChangeNotifier {
       ledsAddress: ledsAddress,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
-    _deviceActionStatus = 'LEDS @$ledsAddress na $id: zhasnuto';
+    _setStatus('LEDS @$ledsAddress na $id: zhasnuto');
     notifyListeners();
   }
 
@@ -1165,14 +1223,14 @@ class AppState extends ChangeNotifier {
         ];
       }
     }
-    _deviceActionStatus = 'DIST @$distAddress: config aktualizován';
+    _setStatus('DIST @$distAddress: config aktualizován');
     notifyListeners();
   }
 
   Future<void> recreateDevices(String unitId, List<PumaModule> modules) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _deviceActionStatus = 'Přepisuji konfiguraci $id…';
+    _setStatus('Přepisuji konfiguraci $id…');
     notifyListeners();
 
     final cmd = CommandService.buildRecreateDevicesCommand(id, modules);
@@ -1194,7 +1252,7 @@ class AppState extends ChangeNotifier {
   Future<void> deleteModule(String unitId, PumaModule module) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _deviceActionStatus = 'Mažu ${module.displayLabel} na ${int.tryParse(id)?.toString() ?? id}…';
+    _setStatus('Mažu ${module.displayLabel} na ${int.tryParse(id)?.toString() ?? id}…');
     notifyListeners();
 
     final cmd = CommandService.buildDeleteDevicesCommand(id, [module]);
@@ -1217,8 +1275,8 @@ class AppState extends ChangeNotifier {
   }) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _deviceActionStatus =
-        'Výměna ${type.code} @$oldAddress za nový ($newDefaultAddress) na $id…';
+    _setStatus(
+        'Výměna ${type.code} @$oldAddress za nový ($newDefaultAddress) na $id…');
     if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
@@ -1243,8 +1301,8 @@ class AppState extends ChangeNotifier {
   }) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _deviceActionStatus =
-        'Přečíslování ${type.code} @$oldAddress → $newAddress na $id…';
+    _setStatus(
+        'Přečíslování ${type.code} @$oldAddress → $newAddress na $id…');
     if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
@@ -1266,8 +1324,8 @@ class AppState extends ChangeNotifier {
       _unitModulesPending.add(id);
       normIds.add(id);
     }
-    _deviceActionStatus =
-        'Šablona "${template.name}" aplikována na ${targetUnitIds.length} jednotek';
+    _setStatus(
+        'Šablona "${template.name}" aplikována na ${targetUnitIds.length} jednotek');
     notifyListeners();
 
     // Fallback: firmware neposílá O/.../RECREATE-DEVICES odpověď.
