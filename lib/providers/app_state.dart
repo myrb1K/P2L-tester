@@ -102,6 +102,9 @@ class AppState extends ChangeNotifier {
   // Timestamp posledního stisku BTN. Klíč: "<unitId>:<baseAddr>:<left|right>".
   final Map<String, DateTime> _btnPresses = {};
 
+  // Poslední naměřená vzdálenost DIST senzoru [mm]. Klíč: "<unitId>:<addr>".
+  final Map<String, int> _distValues = {};
+
   // ID jednotek, pro které už se zahrála wave animace v UI seznamu. Vlna
   // má proběhnout právě jednou — při prvním objevení nebo přechodu offline→online.
   // Bez tracking-u na úrovni AppState by se animace spouštěla pokaždé, když
@@ -401,6 +404,8 @@ class AppState extends ChangeNotifier {
       _mqttService.subscribe('O/+/UNIT/+/SCAN-DEVICES');
       // BTN press notifikace pro vizuální flash na chipech
       _mqttService.subscribe('D/+/BTN/+/UPDATE');
+      // DIST měření vzdálenosti (živá hodnota u senzoru v seznamu devices)
+      _mqttService.subscribe('D/+/DIST/+/UPDATE');
       _statusMessage = 'Připojeno, čekám na ALIVE…';
       _tickTimer?.cancel();
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -459,6 +464,8 @@ class AppState extends ChangeNotifier {
       _handleResponse(topic, decoded);
     } else if (topic.startsWith('D/') && topic.contains('/BTN/') && topic.endsWith('/UPDATE')) {
       _handleBtnUpdate(topic);
+    } else if (topic.startsWith('D/') && topic.contains('/DIST/') && topic.endsWith('/UPDATE') && decoded is Map<String, dynamic>) {
+      _handleDistUpdate(topic, decoded);
     } else if (topic.startsWith('O/')) {
       // GET-DEVICES odpověď je top-level pole; ostatní O/ odpovědi jsou Map s Code/Message.
       final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
@@ -491,6 +498,26 @@ class AppState extends ChangeNotifier {
     final id = _normUnitId(unitId);
     return _btnPresses['$id:$baseAddr:${left ? 'left' : 'right'}'];
   }
+
+  /// Topic: `D/<unit>/DIST/<deviceId>/UPDATE`, deviceId = `04<addr4>`,
+  /// payload `{"distance": <mm>}`. Uloží poslední naměřenou vzdálenost senzoru.
+  void _handleDistUpdate(String topic, Map<String, dynamic> json) {
+    final parts = topic.split('/');
+    if (parts.length < 5) return;
+    final unitId = _normUnitId(parts[1]);
+    final deviceId = parts[3];
+    if (deviceId.length < 4) return;
+    final addr = int.tryParse(deviceId.substring(deviceId.length - 4));
+    final distance = json['distance'];
+    if (addr == null || distance is! num) return;
+
+    _distValues['$unitId:$addr'] = distance.toInt();
+    notifyListeners();
+  }
+
+  /// Poslední naměřená vzdálenost [mm] DIST senzoru, nebo null (zatím nepřišla).
+  int? distanceFor(String unitId, int address) =>
+      _distValues['${_normUnitId(unitId)}:$address'];
 
   void _handleDeviceResponse(
       String topic, Map<String, dynamic> json, dynamic message) {

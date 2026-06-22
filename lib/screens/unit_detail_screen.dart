@@ -1073,19 +1073,56 @@ class _AddressChip extends StatelessWidget {
           final leftFlash = _pressColor(left: true);
           final rightFlash = _pressColor(left: false);
           final chip = Chip(
-            label: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  module.baseAddress.toString(),
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: effColor),
-                ),
-                if (showLed) ...[
-                  const SizedBox(width: 4),
-                  Icon(Icons.lightbulb, size: 14, color: Colors.amber.shade700),
-                ],
-              ],
-            ),
+            label: module.type == ModuleType.dist
+                // DIST: adresa nahoře, živá naměřená vzdálenost pod ní (menší).
+                // Pevná šířka celého obsahu (max 4 cifry, „4000") + tabulkové
+                // číslice → všechny senzorové chipy mají stejnou šířku bez ohledu
+                // na počet cifer adresy i hodnoty.
+                ? SizedBox(
+                    width: 34,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          module.baseAddress.toString(),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: effColor,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        Selector<AppState, int?>(
+                          selector: (_, s) => s.distanceFor(unitId, module.baseAddress),
+                          builder: (_, dist, _) => Text(
+                            dist == null ? '—' : '$dist',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 10,
+                              height: 1.0,
+                              color: effColor.withAlpha(200),
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        module.baseAddress.toString(),
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600, color: effColor),
+                      ),
+                      if (showLed) ...[
+                        const SizedBox(width: 4),
+                        Icon(Icons.lightbulb, size: 14, color: Colors.amber.shade700),
+                      ],
+                    ],
+                  ),
             backgroundColor: effColor.withAlpha(30),
             side: missing
                 ? const BorderSide(color: Colors.red, width: 2)
