@@ -105,6 +105,10 @@ class AppState extends ChangeNotifier {
   // Poslední naměřená vzdálenost DIST senzoru [mm]. Klíč: "<unitId>:<addr>".
   final Map<String, int> _distValues = {};
 
+  // Devices jednotky, které v posledním ALIVE hlásily Code != 0 (porucha).
+  // Klíč = unitId, hodnota = set deviceId. Prázdný/chybějící = vše OK.
+  final Map<String, Set<String>> _unitDeviceFaults = {};
+
   // ID jednotek, pro které už se zahrála wave animace v UI seznamu. Vlna
   // má proběhnout právě jednou — při prvním objevení nebo přechodu offline→online.
   // Bez tracking-u na úrovni AppState by se animace spouštěla pokaždé, když
@@ -391,6 +395,12 @@ class AppState extends ChangeNotifier {
 
     if (result) {
       _mqttService.subscribe('D/+/UNIT/+/ALIVE');
+      // Device ALIVE (každých ~5 min) nese Code/Message — sledování poruch
+      // devices (Code != 0 → červená ikona „Seznam devices").
+      _mqttService.subscribe('D/+/DIST/+/ALIVE');
+      _mqttService.subscribe('D/+/DISP/+/ALIVE');
+      _mqttService.subscribe('D/+/BTN/+/ALIVE');
+      _mqttService.subscribe('D/+/LEDS/+/ALIVE');
       _mqttService.subscribe('A/SERVER/+/CMD');
       // Odpovědi na device management commandy (P2L32 protokol)
       _mqttService.subscribe('O/+/UNIT/+/GET-DEVICES');
@@ -688,6 +698,17 @@ class AppState extends ChangeNotifier {
 
     final code = json['Code'];
     final isError = code != null && code != 0 && code != '0';
+
+    // Sleduj poruchy devices: deviceId je v rámci jednotky unikátní. Při Code != 0
+    // device přidej do poruch jednotky, při Code 0 (zotavení) odeber. Z toho se
+    // odvozuje červená ikona „Seznam devices" v seznamu jednotek.
+    final faults = _unitDeviceFaults.putIfAbsent(unitId, () => {});
+    if (isError) {
+      faults.add(deviceId);
+    } else {
+      faults.remove(deviceId);
+    }
+
     if (isError) {
       final msg = (json['Message'] as String?) ?? 'chyba';
       final displayId = int.tryParse(unitId)?.toString() ?? unitId;
@@ -695,6 +716,27 @@ class AppState extends ChangeNotifier {
           isError: true);
     }
     notifyListeners();
+  }
+
+  /// True, pokud některý device jednotky v posledním ALIVE hlásil Code != 0.
+  bool unitHasDeviceFault(String unitId) =>
+      _unitDeviceFaults[_normUnitId(unitId)]?.isNotEmpty ?? false;
+
+  /// Base adresy modulů s poruchou (z device ALIVE Code != 0). DeviceId je
+  /// `<typeCode><addr4>`; levé tlačítko (addr ≥ 1000) se mapuje na base adresu
+  /// modulu (addr-1000). Slouží k červenému rámečku chipu v detailu.
+  Set<int> deviceFaultAddresses(String unitId) {
+    final faults = _unitDeviceFaults[_normUnitId(unitId)];
+    if (faults == null || faults.isEmpty) return const {};
+    final out = <int>{};
+    for (final devId in faults) {
+      final addr = devId.length >= 4
+          ? int.tryParse(devId.substring(devId.length - 4))
+          : int.tryParse(devId);
+      if (addr == null) continue;
+      out.add(addr >= 1000 ? addr - 1000 : addr);
+    }
+    return out;
   }
 
   void _handleResponse(String topic, Map<String, dynamic> json) {
@@ -1016,6 +1058,7 @@ class AppState extends ChangeNotifier {
     _unitBusScan.remove(id);
     _unitBusScanPending.remove(id);
     _unitBusScanScope.remove(id);
+    _unitDeviceFaults.remove(id);
 
     final newIdStr = newId.toString().padLeft(4, '0');
     _statusMessage =
