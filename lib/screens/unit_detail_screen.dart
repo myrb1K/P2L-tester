@@ -416,10 +416,19 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  color: Colors.blue.withAlpha(25),
+                  color: (state.deviceActionIsError ? Colors.red : Colors.blue)
+                      .withAlpha(25),
                   child: Text(
                     state.deviceActionStatus,
-                    style: TextStyle(fontSize: 12, color: Colors.blue[800]),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: state.deviceActionIsError
+                          ? Colors.red[800]
+                          : Colors.blue[800],
+                      fontWeight: state.deviceActionIsError
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
                   ),
                 ),
               if (pending) const LinearProgressIndicator(minHeight: 2),

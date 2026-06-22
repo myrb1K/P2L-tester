@@ -45,7 +45,7 @@ V **Nastavení** (ozubené kolo) v sekci *Uložené profily*:
 
 Každý řádek ukazuje: zaškrtávátko pro výběr, ID, indikátor online (tečka), čas posledního ALIVE, firmware a napětí baterie. Vpravo jsou tři ikony:
 
-- **Seznam devices** (`device_hub`, s počtem modulů v odznaku) — otevře detail jednotky.
+- **Seznam devices** (`device_hub`, s počtem modulů v odznaku) — otevře detail jednotky. Po skenu sběrnice (viz §5) se ikona obarví podle výsledku: 🔴 červená = některý uložený device na sběrnici chybí, ⬜ šedá = na sběrnici je neuložený device, jinak zůstane původní.
 - **Info** (`i`) — dialog s podrobnostmi (IP, MAC, SSID, MQTT, baterie, jas, LED na portech). Lze **kopírovat** do schránky, **Změnit ID** jednotky a přepnout režim LED příkazů **BIN/OLD**.
 - **Obnovit** (`↻`) — vyžádá aktuální parametry a seznam devices.
 

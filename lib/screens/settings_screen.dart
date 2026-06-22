@@ -12,6 +12,7 @@ import '../providers/app_state.dart';
 import '../services/file_export.dart';
 import 'admin_users_screen.dart';
 import 'auth_gate.dart';
+import 'help_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -456,6 +457,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.help_outline),
+                tooltip: 'Nápověda',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const HelpScreen()),
+                ),
               ),
             ],
           ),
