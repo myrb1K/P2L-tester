@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../main.dart' show appVersion;
+import '../models/bus_scan.dart';
 import '../models/device_template.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
@@ -42,13 +43,13 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
 
   Future<void> _addModule(AppState state, List<PumaModule> currentModules) async {
     final existing = currentModules.map((m) => m.baseAddress).toSet();
-    final suggested = existing.isEmpty ? null : (existing.reduce((a, b) => a > b ? a : b) + 1);
+    // Bez suggestedAddress → dialog navrhne první volnou adresu v rozsahu typu
+    // (suggestedAddress se používá jen při přidání ze skenu sběrnice).
     final result = await showDialog<AddModuleResult>(
       context: context,
       builder: (_) => AddModuleDialog(
         existingAddresses: existing,
         hasPumAWithRoom: hasPumAWithButtonRoom(currentModules),
-        suggestedAddress: suggested,
       ),
     );
     if (result != null) {
@@ -60,6 +61,41 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         return;
       }
       await state.addModules(widget.unitId, [result.module], restartAfter: result.restartAfter);
+    }
+  }
+
+  /// Přidání modulu z diagnostiky sběrnice — předvyplní adresu i typ nalezené
+  /// scanem. U `PUM-X` (starší PUMA bez registru typu) typ neznáme → necháme
+  /// na uživateli.
+  Future<void> _addModuleAt(AppState state, List<PumaModule> currentModules,
+      int address, String? busType) async {
+    final existing = currentModules.map((m) => m.baseAddress).toSet();
+    final suggestedType = switch (busType) {
+      'PUM-A' => ModuleType.pumA,
+      'PUM-B' => ModuleType.pumB,
+      'PUM-C' => ModuleType.pumC,
+      'DIST' => ModuleType.dist,
+      _ => null, // PUM-X = neznámý podtyp
+    };
+    final result = await showDialog<AddModuleResult>(
+      context: context,
+      builder: (_) => AddModuleDialog(
+        existingAddresses: existing,
+        hasPumAWithRoom: hasPumAWithButtonRoom(currentModules),
+        suggestedAddress: address,
+        suggestedType: suggestedType,
+      ),
+    );
+    if (result != null) {
+      if (currentModules.length >= kMaxChipsPerUnit) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Limit 100 entit na jednotku dosažen.')),
+        );
+        return;
+      }
+      await state.addModules(widget.unitId, [result.module],
+          restartAfter: result.restartAfter);
     }
   }
 
@@ -308,6 +344,18 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         final pending = state.isModulesPending(widget.unitId);
         final fetchedAt = state.modulesFetchedAt(widget.unitId);
 
+        // Diagnostika z posledního skenu sběrnice: červené zvýraznění
+        // chybějících + šedé „ghost" chipy nalezených neuložených devices.
+        final diag = state.busDiagnosis(widget.unitId);
+        final missingAddresses = {
+          for (final r in diag)
+            if (r.status == BusScanStatus.missing) r.address,
+        };
+        final ghosts = [
+          for (final r in diag)
+            if (r.status == BusScanStatus.unregistered) r,
+        ];
+
         return Scaffold(
           appBar: AppBar(
             actions: [
@@ -315,6 +363,19 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 icon: const Icon(Icons.refresh),
                 tooltip: 'Načíst devices',
                 onPressed: () => state.fetchDevices(widget.unitId),
+              ),
+              PopupMenuButton<BusScanScope>(
+                icon: const Icon(Icons.radar),
+                tooltip: 'Skenovat sběrnici (diagnostika)',
+                enabled: !state.isBusScanPending(widget.unitId),
+                onSelected: (scope) =>
+                    state.scanBus(widget.unitId, scope: scope),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: BusScanScope.all, child: Text('Vše')),
+                  PopupMenuItem(value: BusScanScope.pum, child: Text('PUM-X')),
+                  PopupMenuItem(
+                      value: BusScanScope.dist, child: Text('SENZORY')),
+                ],
               ),
               IconButton(
                 icon: const Icon(Icons.add),
@@ -362,12 +423,24 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                   ),
                 ),
               if (pending) const LinearProgressIndicator(minHeight: 2),
+              if (state.isBusScanPending(widget.unitId))
+                const LinearProgressIndicator(minHeight: 2),
+              if (state.busScanFor(widget.unitId) != null)
+                _BusScanPanel(
+                  scan: state.busScanFor(widget.unitId)!,
+                  modules: modules,
+                  onClose: () => state.clearBusScan(widget.unitId),
+                ),
               Expanded(
-                child: modules.isEmpty
+                child: (modules.isEmpty && ghosts.isEmpty)
                     ? _EmptyModules(pending: pending)
                     : _ModulesGroupedList(
                         unitId: widget.unitId,
                         modules: modules,
+                        missingAddresses: missingAddresses,
+                        ghosts: ghosts,
+                        onAdd: (addr, busType) =>
+                            _addModuleAt(state, modules, addr, busType),
                         onReplace: (m) => _replaceModule(state, m),
                         onSetId: (m) => _setIdModule(state, m),
                         onEdit: (m) => _editModule(state, m),
@@ -494,6 +567,11 @@ class _UnitInfoCard extends StatelessWidget {
 class _ModulesGroupedList extends StatelessWidget {
   final String unitId;
   final List<PumaModule> modules;
+  // Adresy modulů, které sken na sběrnici nenašel → červený okraj chipu.
+  final Set<int> missingAddresses;
+  // Devices nalezené skenem, ale neuložené v jednotce → šedé „ghost" chipy.
+  final List<BusScanRow> ghosts;
+  final void Function(int address, String? busType) onAdd;
   final void Function(PumaModule) onReplace;
   final void Function(PumaModule) onSetId;
   final void Function(PumaModule) onEdit;
@@ -508,6 +586,9 @@ class _ModulesGroupedList extends StatelessWidget {
   const _ModulesGroupedList({
     required this.unitId,
     required this.modules,
+    required this.missingAddresses,
+    required this.ghosts,
+    required this.onAdd,
     required this.onReplace,
     required this.onSetId,
     required this.onEdit,
@@ -520,56 +601,77 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.canReplace,
   });
 
-  static const _order = [ModuleType.pumA, ModuleType.pumB, ModuleType.pumC, ModuleType.dist];
+  // Pořadí kategorií. 'PUM-X' (starší PUMA bez registru typu) je jen pro ghost
+  // chipy ze skenu — v konfiguraci nikdy není.
+  static const _order = ['PUM-A', 'PUM-B', 'PUM-C', 'PUM-X', 'SENZOR'];
 
-  String _label(ModuleType t) => switch (t) {
-    ModuleType.pumA => 'PUM-A',
-    ModuleType.pumB => 'PUM-B',
-    ModuleType.pumC => 'PUM-C',
-    ModuleType.dist => 'SENZOR',
-  };
+  /// Kategorie konfigurovaného modulu.
+  static String _catForModule(ModuleType t) => switch (t) {
+        ModuleType.pumA => 'PUM-A',
+        ModuleType.pumB => 'PUM-B',
+        ModuleType.pumC => 'PUM-C',
+        ModuleType.dist => 'SENZOR',
+      };
 
-  Color _color(ModuleType t) => switch (t) {
-    ModuleType.pumA => Colors.blue,
-    ModuleType.pumB => Colors.orange,
-    ModuleType.pumC => Colors.purple,
-    ModuleType.dist => Colors.teal,
-  };
+  /// Kategorie podle typu ze skenu sběrnice.
+  static String _catForBusType(String? busType) => switch (busType) {
+        'PUM-A' => 'PUM-A',
+        'PUM-B' => 'PUM-B',
+        'PUM-C' => 'PUM-C',
+        'DIST' => 'SENZOR',
+        _ => 'PUM-X',
+      };
+
+  Color _color(String cat) => switch (cat) {
+        'PUM-A' => Colors.blue,
+        'PUM-B' => Colors.orange,
+        'PUM-C' => Colors.purple,
+        'SENZOR' => Colors.teal,
+        _ => Colors.grey, // PUM-X
+      };
 
   @override
   Widget build(BuildContext context) {
-    final byType = <ModuleType, List<PumaModule>>{};
+    final configByCat = <String, List<PumaModule>>{};
     for (final m in modules) {
-      byType.putIfAbsent(m.type, () => []).add(m);
+      configByCat.putIfAbsent(_catForModule(m.type), () => []).add(m);
     }
-    for (final list in byType.values) {
+    for (final list in configByCat.values) {
       list.sort((a, b) => a.baseAddress.compareTo(b.baseAddress));
+    }
+
+    final ghostByCat = <String, List<BusScanRow>>{};
+    for (final g in ghosts) {
+      ghostByCat.putIfAbsent(_catForBusType(g.busType), () => []).add(g);
+    }
+    for (final list in ghostByCat.values) {
+      list.sort((a, b) => a.address.compareTo(b.address));
     }
 
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       children: [
-        for (final type in _order)
-          if (byType[type]?.isNotEmpty ?? false)
+        for (final cat in _order)
+          if ((configByCat[cat]?.isNotEmpty ?? false) ||
+              (ghostByCat[cat]?.isNotEmpty ?? false))
             _GroupSection(
               unitId: unitId,
-              label: _label(type),
-              color: _color(type),
-              modules: byType[type]!,
+              label: cat == 'SENZOR' ? 'SENZOR' : cat,
+              color: _color(cat),
+              modules: configByCat[cat] ?? const [],
+              ghosts: ghostByCat[cat] ?? const [],
+              missingAddresses: missingAddresses,
+              onAdd: onAdd,
               onReplace: onReplace,
               onSetId: onSetId,
-              onEdit: type == ModuleType.dist ? onEdit : null,
+              onEdit: cat == 'SENZOR' ? onEdit : null,
               onDelete: onDelete,
               canReplace: canReplace,
-              onTestDisplay: type == ModuleType.pumA ? onTestDisplay : null,
-              onShowAddress: type == ModuleType.pumA ? onShowAddress : null,
-              onClearDisplay: type == ModuleType.pumA ? onClearDisplay : null,
-              onLedsOn: (type == ModuleType.pumA || type == ModuleType.pumB)
-                  ? onLedsOn
-                  : null,
-              onLedsOff: (type == ModuleType.pumA || type == ModuleType.pumB)
-                  ? onLedsOff
-                  : null,
+              onTestDisplay: cat == 'PUM-A' ? onTestDisplay : null,
+              onShowAddress: cat == 'PUM-A' ? onShowAddress : null,
+              onClearDisplay: cat == 'PUM-A' ? onClearDisplay : null,
+              onLedsOn: (cat == 'PUM-A' || cat == 'PUM-B') ? onLedsOn : null,
+              onLedsOff: (cat == 'PUM-A' || cat == 'PUM-B') ? onLedsOff : null,
             ),
       ],
     );
@@ -581,6 +683,9 @@ class _GroupSection extends StatelessWidget {
   final String label;
   final Color color;
   final List<PumaModule> modules;
+  final List<BusScanRow> ghosts;
+  final Set<int> missingAddresses;
+  final void Function(int address, String? busType) onAdd;
   final void Function(PumaModule) onReplace;
   final void Function(PumaModule) onSetId;
   final void Function(PumaModule) onDelete;
@@ -597,6 +702,9 @@ class _GroupSection extends StatelessWidget {
     required this.label,
     required this.color,
     required this.modules,
+    required this.ghosts,
+    required this.missingAddresses,
+    required this.onAdd,
     required this.onReplace,
     required this.onSetId,
     required this.onDelete,
@@ -626,7 +734,11 @@ class _GroupSection extends StatelessWidget {
           Row(
             children: [
               Text(
-                '$label  ${modules.length}x',
+                modules.isEmpty
+                    ? '$label  ${ghosts.length}× nové'
+                    : ghosts.isEmpty
+                        ? '$label  ${modules.length}x'
+                        : '$label  ${modules.length}x  +${ghosts.length}',
                 style: TextStyle(fontWeight: FontWeight.w700, color: color, fontSize: 13),
               ),
               if (hasLedsSupport || hasDispSupport) const Spacer(),
@@ -702,6 +814,7 @@ class _GroupSection extends StatelessWidget {
                   unitId: unitId,
                   module: m,
                   color: color,
+                  missing: missingAddresses.contains(m.baseAddress),
                   onReplace: canReplace(m) ? () => onReplace(m) : null,
                   onSetId: () => onSetId(m),
                   onEdit: onEdit != null ? () => onEdit!(m) : null,
@@ -711,6 +824,12 @@ class _GroupSection extends StatelessWidget {
                   onClearDisplay: onClearDisplay != null ? () => onClearDisplay!(m) : null,
                   onLedsOn: onLedsOn != null && m.hasLeds ? () => onLedsOn!(m) : null,
                   onLedsOff: onLedsOff != null && m.hasLeds ? () => onLedsOff!(m) : null,
+                ),
+              for (final g in ghosts)
+                _GhostChip(
+                  address: g.address,
+                  busType: g.busType,
+                  onAdd: () => onAdd(g.address, g.busType),
                 ),
             ],
           ),
@@ -762,6 +881,8 @@ class _AddressChip extends StatelessWidget {
   final String unitId;
   final PumaModule module;
   final Color color;
+  // Sken sběrnice tento device nenašel → červený okraj.
+  final bool missing;
   final VoidCallback? onReplace;
   final VoidCallback? onSetId;
   final VoidCallback? onEdit;
@@ -776,6 +897,7 @@ class _AddressChip extends StatelessWidget {
     required this.unitId,
     required this.module,
     required this.color,
+    this.missing = false,
     required this.onReplace,
     required this.onSetId,
     required this.onDelete,
@@ -956,7 +1078,9 @@ class _AddressChip extends StatelessWidget {
               ],
             ),
             backgroundColor: effColor.withAlpha(30),
-            side: BorderSide(color: effColor.withAlpha(110)),
+            side: missing
+                ? const BorderSide(color: Colors.red, width: 2)
+                : BorderSide(color: effColor.withAlpha(110)),
             visualDensity: VisualDensity.compact,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           );
@@ -989,6 +1113,40 @@ class _AddressChip extends StatelessWidget {
             child: chip,
           );
         },
+      ),
+    );
+  }
+}
+
+/// Šedý „ghost" chip — device nalezený skenem sběrnice, ale neuložený
+/// v konfiguraci jednotky. Klepnutím se otevře dialog Přidat (předvyplní adresu).
+class _GhostChip extends StatelessWidget {
+  final int address;
+  final String? busType;
+  final VoidCallback onAdd;
+
+  const _GhostChip({
+    required this.address,
+    required this.busType,
+    required this.onAdd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '${busType ?? "?"} @$address — na sběrnici, neuloženo.\nKlepni pro přidání.',
+      child: ActionChip(
+        onPressed: onAdd,
+        avatar: const Icon(Icons.add, size: 14, color: Colors.grey),
+        label: Text(
+          address.toString(),
+          style: const TextStyle(
+              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey),
+        ),
+        backgroundColor: Colors.grey.withAlpha(20),
+        side: BorderSide(color: Colors.grey.withAlpha(130)),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }
@@ -1059,6 +1217,88 @@ class _EmptyModules extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Souhrnný proužek diagnostiky skenu sběrnice (SCAN-DEVICES). Počty OK /
+/// chybí / nezaregistr.; detail (červené a šedé chipy) je inline v seznamu
+/// devices níže.
+class _BusScanPanel extends StatelessWidget {
+  final BusScanResult scan;
+  final List<PumaModule> modules;
+  final VoidCallback onClose;
+
+  const _BusScanPanel({
+    required this.scan,
+    required this.modules,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = diagnoseBus(modules, scan);
+    final okCount = rows.where((r) => r.status == BusScanStatus.ok).length;
+    final missing =
+        rows.where((r) => r.status == BusScanStatus.missing).length;
+    final extra =
+        rows.where((r) => r.status == BusScanStatus.unregistered).length;
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+        child: Row(
+          children: [
+            const Icon(Icons.radar, size: 18),
+            const SizedBox(width: 8),
+            Text('${_scopeLabel(scan.scope)} · ${scan.total} čipů',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                children: [
+                  _summaryChip(Icons.check_circle, Colors.green, '$okCount OK'),
+                  if (missing > 0)
+                    _summaryChip(
+                        Icons.error_outline, Colors.red, '$missing chybí'),
+                  if (extra > 0)
+                    _summaryChip(Icons.warning_amber, Colors.grey,
+                        '$extra neuloženo'),
+                  if (rows.isEmpty)
+                    Text('nic nenalezeno',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              tooltip: 'Zavřít diagnostiku',
+              visualDensity: VisualDensity.compact,
+              onPressed: onClose,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _scopeLabel(BusScanScope scope) => switch (scope) {
+        BusScanScope.all => 'Vše',
+        BusScanScope.pum => 'PUM-X',
+        BusScanScope.dist => 'SENZORY',
+      };
+
+  Widget _summaryChip(IconData icon, Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 12, color: color)),
+      ],
     );
   }
 }

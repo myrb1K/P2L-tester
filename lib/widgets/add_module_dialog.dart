@@ -15,6 +15,8 @@ class AddModuleDialog extends StatefulWidget {
   final bool hasPumAWithRoom;
   final PumaModule? initial;
   final int? suggestedAddress;
+  // Předvolený typ (např. ze skenu sběrnice — ghost chip zná typ device).
+  final ModuleType? suggestedType;
 
   const AddModuleDialog({
     super.key,
@@ -22,6 +24,7 @@ class AddModuleDialog extends StatefulWidget {
     this.hasPumAWithRoom = false,
     this.initial,
     this.suggestedAddress,
+    this.suggestedType,
   });
 
   @override
@@ -50,15 +53,24 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
   void initState() {
     super.initState();
     final init = widget.initial;
-    _type = init?.type ?? ModuleType.pumA;
-    final initialSuggested = init == null ? _suggestFor(_type) : null;
+    _type = init?.type ?? widget.suggestedType ?? ModuleType.pumA;
+    // Předvyplněná adresa: explicitní z volajícího (sken), jinak první volná.
+    final initialSuggested =
+        init == null ? (widget.suggestedAddress ?? _suggestFor(_type)) : null;
     _lastSuggested = initialSuggested;
     _addrCtrl = TextEditingController(
       text: init?.baseAddress.toString() ?? initialSuggested?.toString() ?? '',
     );
-    _buttonCount = init?.buttonCount ?? 1;
-    _hasLeds = init?.hasLeds ?? false;
-    _buttonSide = init?.buttonSide ?? ButtonSide.left;
+    if (init != null) {
+      _buttonCount = init.buttonCount;
+      _hasLeds = init.hasLeds;
+      _buttonSide = init.buttonSide ?? ButtonSide.left;
+    } else {
+      // Defaulty podle typu (stejně jako přepínání typu v dropdownu).
+      _buttonCount = _type == ModuleType.pumA ? 1 : 0;
+      _hasLeds = false;
+      _buttonSide = ButtonSide.left;
+    }
 
     final cfg = init?.distConfig ?? const DistConfig();
     _distPeriodCtrl = TextEditingController(text: cfg.measurePeriod.toString());

@@ -1,0 +1,91 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:p2l_tester/models/bus_scan.dart';
+import 'package:p2l_tester/models/module.dart';
+
+void main() {
+  final at = DateTime(2026, 1, 1);
+
+  group('BusScanResult.fromJson', () {
+    test('parsuje typy, řadí adresy, vynechá prázdné', () {
+      final json = jsonDecode(
+              '{"DIST":[67,1,2],"PUM-A":[128],"PUM-X":[131,130],"PUM-B":[]}')
+          as Map<String, dynamic>;
+      final scan = BusScanResult.fromJson(json, at);
+
+      expect(scan.byType['DIST'], [1, 2, 67]);
+      expect(scan.byType['PUM-A'], [128]);
+      expect(scan.byType['PUM-X'], [130, 131]);
+      expect(scan.byType.containsKey('PUM-B'), isFalse); // prázdné se nepřidá
+      expect(scan.total, 6);
+    });
+  });
+
+  group('diagnoseBus', () {
+    test('OK / chybí na sběrnici / nezaregistrované', () {
+      final modules = [
+        const PumaModule.pumA(address: 128),
+        const PumaModule.pumA(address: 130), // na sběrnici chybí
+        PumaModule.dist(address: 67),
+      ];
+      final scan = BusScanResult.fromJson(
+        jsonDecode('{"PUM-A":[128],"PUM-X":[131],"DIST":[67]}')
+            as Map<String, dynamic>,
+        at,
+      );
+
+      final rows = {for (final r in diagnoseBus(modules, scan)) r.address: r};
+
+      expect(rows[128]!.status, BusScanStatus.ok);
+      expect(rows[130]!.status, BusScanStatus.missing);
+      expect(rows[131]!.status, BusScanStatus.unregistered);
+      expect(rows[67]!.status, BusScanStatus.ok);
+      // Řazení podle adresy
+      expect(diagnoseBus(modules, scan).map((r) => r.address),
+          [67, 128, 130, 131]);
+    });
+
+    test('PUM-X proti konfiguraci PUM-A není nesoulad typu', () {
+      final modules = [const PumaModule.pumA(address: 128)];
+      final scan = BusScanResult.fromJson(
+          jsonDecode('{"PUM-X":[128]}') as Map<String, dynamic>, at);
+      final row = diagnoseBus(modules, scan).single;
+      expect(row.status, BusScanStatus.ok);
+      expect(row.typeMismatch, isFalse);
+    });
+
+    test('sken jen DIST nehlásí PUM moduly jako chybějící', () {
+      // Jednotka má PUM moduly, ale skenoval se jen DIST rozsah (vrátil {}).
+      final modules = [
+        const PumaModule.pumA(address: 128),
+        const PumaModule.pumA(address: 129),
+      ];
+      final scan = BusScanResult.fromJson(
+          jsonDecode('{}') as Map<String, dynamic>, at,
+          scope: BusScanScope.dist);
+      // PUM moduly jsou mimo rozsah skenu → žádné řádky, žádné falešné „chybí".
+      expect(diagnoseBus(modules, scan), isEmpty);
+    });
+
+    test('sken jen PUM nehlásí DIST jako chybějící', () {
+      final modules = [PumaModule.dist(address: 67)];
+      final scan = BusScanResult.fromJson(
+          jsonDecode('{"PUM-X":[128]}') as Map<String, dynamic>, at,
+          scope: BusScanScope.pum);
+      final rows = diagnoseBus(modules, scan);
+      // DIST @67 mimo rozsah; jen nezaregistrovaný PUM-X @128.
+      expect(rows.map((r) => r.address), [128]);
+      expect(rows.single.status, BusScanStatus.unregistered);
+    });
+
+    test('PUM-A v konfiguraci vs PUM-C na sběrnici = nesoulad typu', () {
+      final modules = [const PumaModule.pumA(address: 128)];
+      final scan = BusScanResult.fromJson(
+          jsonDecode('{"PUM-C":[128]}') as Map<String, dynamic>, at);
+      final row = diagnoseBus(modules, scan).single;
+      expect(row.status, BusScanStatus.ok);
+      expect(row.typeMismatch, isTrue);
+    });
+  });
+}
