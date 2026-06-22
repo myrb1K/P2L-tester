@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:p2l_tester/models/bus_scan.dart';
 import 'package:p2l_tester/models/device.dart';
 import 'package:p2l_tester/models/module.dart';
 import 'package:p2l_tester/services/command_service.dart';
@@ -47,6 +48,27 @@ void main() {
       );
       expect(cmd.topic, 'I/001001/UNIT/001001/DEVICE-SET-ID');
       expect(cmd.payload, '{"From":128,"To":130}');
+    });
+
+    test('SCAN-DEVICES — scope all → bez Type', () {
+      final cmd = CommandService.buildScanDevicesCommand(unitId: '1017');
+      expect(cmd.topic, 'I/001017/UNIT/001017/SCAN-DEVICES');
+      expect(cmd.payload, '{}');
+    });
+
+    test('SCAN-DEVICES — scope pum/dist → Type PUM/DIST', () {
+      expect(
+        CommandService.buildScanDevicesCommand(
+                unitId: '001001', scope: BusScanScope.pum)
+            .payload,
+        '{"Type":"PUM"}',
+      );
+      expect(
+        CommandService.buildScanDevicesCommand(
+                unitId: '001001', scope: BusScanScope.dist)
+            .payload,
+        '{"Type":"DIST"}',
+      );
     });
   });
 

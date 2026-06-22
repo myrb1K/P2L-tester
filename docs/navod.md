@@ -96,6 +96,12 @@ Otevřeš ikonou **Seznam devices** na kartě jednotky. Devices jsou seskupené 
 ### Akce v liště detailu
 
 - **Načíst devices** (`↻`) — znovu načte seznam ze sběrnice (`GET-DEVICES`).
+- **Skenovat sběrnici** (`radar`) — diagnostika: read-only sken RS485 (`SCAN-DEVICES`), který zjistí **fyzicky připojené** čipy, aniž by cokoli přepsal. Po klepnutí vybereš rozsah — **Vše** / **PUM-X** (PUMA moduly) / **SENZORY** (DIST). Sken může chvíli trvat (i přes 10 s). Nahoře se ukáže souhrnný proužek (počty OK / chybí / neuloženo), výsledek se ale promítne hlavně přímo do seznamu devices:
+  - 🟢 normální barevný chip — device je v konfiguraci i na sběrnici,
+  - 🔴 **červený okraj** — device je v konfiguraci, ale na sběrnici nekomunikuje (odpojené / vadné),
+  - ⬜ **šedý chip** — device je na sběrnici, ale není uložený v jednotce; klepnutím ho **přidáš** (předvyplní se adresa i typ). Neznámý podtyp PUMA (`PUM-X`) se zobrazí jako samostatná šedá sekce — u něj typ doplníš ručně.
+  
+  Vyžaduje novější firmware jednotky; starší FW na sken neodpoví (proužek to oznámí). Proužek i zvýraznění zavřeš křížkem.
 - **Přidat device** (`+`) — dialog pro přidání modulu (viz níže).
 - **Aplikovat šablonu** — přepíše devices této jednotky šablonou.
 - **Uložit jako šablonu** — uloží aktuální skladbu modulů jako novou šablonu.

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
 import '../models/broker_profile.dart';
+import '../models/bus_scan.dart';
 import '../models/device.dart';
 import '../models/device_template.dart';
 import '../models/module.dart';
@@ -80,6 +81,12 @@ class AppState extends ChangeNotifier {
   final Map<String, List<PumaModule>> _unitModules = {};
   final Map<String, DateTime> _unitModulesFetchedAt = {};
   final Set<String> _unitModulesPending = {};
+  // Read-only scan sběrnice (SCAN-DEVICES) — fyzický stav, oddělený od _unitModules.
+  final Map<String, BusScanResult> _unitBusScan = {};
+  final Set<String> _unitBusScanPending = {};
+  // Rozsah posledního odeslaného skenu (odpověď ho neobsahuje, ale porovnání ho
+  // potřebuje, aby sken jen DIST nehlásil PUM moduly jako „chybí").
+  final Map<String, BusScanScope> _unitBusScanScope = {};
   List<DeviceTemplate> _templates = [];
   String _deviceActionStatus = '';
 
@@ -113,6 +120,20 @@ class AppState extends ChangeNotifier {
   List<PumaModule>? modulesForUnit(String unitId) => _unitModules[_normUnitId(unitId)];
   DateTime? modulesFetchedAt(String unitId) => _unitModulesFetchedAt[_normUnitId(unitId)];
   bool isModulesPending(String unitId) => _unitModulesPending.contains(_normUnitId(unitId));
+  BusScanResult? busScanFor(String unitId) => _unitBusScan[_normUnitId(unitId)];
+  bool isBusScanPending(String unitId) => _unitBusScanPending.contains(_normUnitId(unitId));
+
+  /// Diagnostické porovnání posledního skenu sběrnice s konfigurací (OK /
+  /// chybí / nezaregistrované). Prázdné, dokud sken neproběhl. Z toho se v UI
+  /// odvozuje červené zvýraznění chybějících chipů a šedé „ghost" chipy
+  /// nalezených, ale neuložených devices.
+  List<BusScanRow> busDiagnosis(String unitId) {
+    final id = _normUnitId(unitId);
+    final scan = _unitBusScan[id];
+    final mods = _unitModules[id];
+    if (scan == null || mods == null) return const [];
+    return diagnoseBus(mods, scan);
+  }
   List<DeviceTemplate> get templates => List.unmodifiable(_templates);
   String get deviceActionStatus => _deviceActionStatus;
 
@@ -366,6 +387,8 @@ class AppState extends ChangeNotifier {
       // Nový FW: výměna i přečíslování device jsou UNIT-level příkazy.
       _mqttService.subscribe('O/+/UNIT/+/DEVICE-REPLACE');
       _mqttService.subscribe('O/+/UNIT/+/DEVICE-SET-ID');
+      // Read-only scan sběrnice (od FW P2L_26061801NT)
+      _mqttService.subscribe('O/+/UNIT/+/SCAN-DEVICES');
       // BTN press notifikace pro vizuální flash na chipech
       _mqttService.subscribe('D/+/BTN/+/UPDATE');
       _statusMessage = 'Připojeno, čekám na ALIVE…';
@@ -472,6 +495,8 @@ class AppState extends ChangeNotifier {
 
     if (cmd == 'GET-DEVICES') {
       _handleGetDevicesResponse(unitId, json, message);
+    } else if (cmd == 'SCAN-DEVICES') {
+      _handleScanDevicesResponse(unitId, json);
     } else if (cmd == 'DEVICE-REPLACE' ||
         cmd == 'DEVICE-SET-ID' ||
         cmd == 'ADD-DEVICES' ||
@@ -522,6 +547,27 @@ class AppState extends ChangeNotifier {
       _deviceActionStatus = 'Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)';
     } else {
       _deviceActionStatus = 'GET-DEVICES $unitId: neočekávaný formát odpovědi';
+    }
+    notifyListeners();
+  }
+
+  /// SCAN-DEVICES: úspěch je přímý JSON objekt s adresami (bez `Code`), chyba
+  /// je Code/Message (`-1 unknown Type`, `-2 response too large`,
+  /// `-3 mqtt publish failed`).
+  void _handleScanDevicesResponse(String unitId, Map<String, dynamic> json) {
+    _unitBusScanPending.remove(unitId);
+    final displayId = int.tryParse(unitId)?.toString() ?? unitId;
+    final code = json['Code'];
+    if (code != null && code != 0 && code != '0') {
+      final msg = json['Message'] as String?;
+      _deviceActionStatus =
+          'Sken sběrnice $displayId: chyba${msg != null ? " — $msg" : ""}';
+    } else {
+      final scope = _unitBusScanScope[unitId] ?? BusScanScope.all;
+      final scan = BusScanResult.fromJson(json, DateTime.now(), scope: scope);
+      _unitBusScan[unitId] = scan;
+      _deviceActionStatus =
+          'Sken sběrnice $displayId: nalezeno ${scan.total} čipů';
     }
     notifyListeners();
   }
@@ -892,6 +938,9 @@ class AppState extends ChangeNotifier {
     _unitModules.remove(id);
     _unitModulesFetchedAt.remove(id);
     _unitModulesPending.remove(id);
+    _unitBusScan.remove(id);
+    _unitBusScanPending.remove(id);
+    _unitBusScanScope.remove(id);
 
     final newIdStr = newId.toString().padLeft(4, '0');
     _statusMessage =
@@ -914,6 +963,39 @@ class AppState extends ChangeNotifier {
 
     final cmd = CommandService.buildGetDevicesCommand(id);
     _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  /// Read-only sken RS485 sběrnice (SCAN-DEVICES) — zjistí fyzicky připojené
+  /// čipy bez zápisu do konfigurace jednotky. Vyžaduje FW ≥ P2L_26061801NT;
+  /// starší FW neodpoví a po timeoutu se zobrazí hláška.
+  Future<void> scanBus(String unitId,
+      {BusScanScope scope = BusScanScope.all}) async {
+    final id = _normUnitId(unitId);
+    _unitBusScanPending.add(id);
+    _unitBusScanScope[id] = scope;
+    _deviceActionStatus =
+        'Skenuji sběrnici jednotky ${int.tryParse(id)?.toString() ?? id}… (může trvat i přes 10 s)';
+    notifyListeners();
+
+    final cmd = CommandService.buildScanDevicesCommand(unitId: id, scope: scope);
+    _mqttService.publish(cmd.topic, cmd.payload);
+
+    // Sken sběrnice je pomalý — reálně trvá i přes 20 s (ověřeno tracem).
+    // Timeout proto velkoryse 45 s; teprve potom ukončíme pending (starší FW
+    // SCAN-DEVICES nezná a neodpoví vůbec). Když odpověď dorazí dřív, pending
+    // už je pryč.
+    Future.delayed(const Duration(seconds: 45), () {
+      if (!_unitBusScanPending.remove(id)) return;
+      _deviceActionStatus =
+          'Sken sběrnice ${int.tryParse(id)?.toString() ?? id}: bez odpovědi (starší firmware?)';
+      notifyListeners();
+    });
+  }
+
+  /// Zahodí výsledek skenu sběrnice (zavření diagnostického panelu).
+  void clearBusScan(String unitId) {
+    final id = _normUnitId(unitId);
+    if (_unitBusScan.remove(id) != null) notifyListeners();
   }
 
   final Set<String> _pendingRestart = {};

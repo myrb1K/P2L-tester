@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../models/bus_scan.dart';
 import '../models/device.dart';
 import '../models/module.dart';
 
@@ -458,6 +459,30 @@ class CommandService {
           },
         ],
       }),
+    );
+  }
+
+  /// SCAN-DEVICES na UNIT (od FW `P2L_26061801NT`): read-only scan RS485
+  /// sběrnice — vrátí fyzicky připojené čipy **bez zápisu** do konfigurace
+  /// (na rozdíl od [buildScanCommand]). Odpověď chodí na zrcadlový topic
+  /// `O/<unit>/UNIT/<unit>/SCAN-DEVICES` jako přímý JSON objekt
+  /// `{"PUM-A":[…],"DIST":[…]}` (úspěch), nebo Code/Message při chybě.
+  static ({String topic, String payload}) buildScanDevicesCommand({
+    required String unitId,
+    BusScanScope scope = BusScanScope.all,
+  }) {
+    final args = <String, dynamic>{};
+    switch (scope) {
+      case BusScanScope.dist:
+        args['Type'] = 'DIST';
+      case BusScanScope.pum:
+        args['Type'] = 'PUM';
+      case BusScanScope.all:
+        break;
+    }
+    return (
+      topic: getUnitCommandTopic(unitId, 'SCAN-DEVICES'),
+      payload: jsonEncode(args),
     );
   }
 
