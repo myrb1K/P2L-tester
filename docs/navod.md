@@ -53,7 +53,7 @@ Každý řádek ukazuje: zaškrtávátko pro výběr, ID, indikátor online (te�
 
 ### Vyčištění seznamu
 
-Ikona **smetáku** (`Vyčistit seznam`) v liště smaže celý seznam jednotek (na hardware to nemá vliv).
+Ikona **úklidu** (`Vyčistit seznam`) v liště smaže celý seznam jednotek (na hardware to nemá vliv).
 
 ---
 
@@ -84,7 +84,7 @@ Menu **Hromadná konfigurace** (ikona `settings_remote`) je aktivní jen při v�
 | **Jas P2L LED** | Jas LED pásků jednotky, 0–100 % (`set_brightness`). |
 | **Aktualizovat firmware** | OTA flash — zadej cestu k serveru, *Ověřit* načte dostupné `*.bin`, vyber a **FLASH**. Jednotky se restartují a budou pár minut nedostupné. |
 | **Restartovat P2L modul** | Pošle restart vybraným jednotkám. |
-| **Jas PUM-A** | Jas displejů PUM-A, 0–6 (DISP broadcast). |
+| **Jas PUM-A** | Jas displejů PUM-A, 0–6 (DISP SET-CONFIG na každý displej zvlášť). |
 | **Aplikovat šablonu** | Aplikuje device šablonu na vybrané jednotky (viz §6). |
 
 ---
@@ -123,7 +123,7 @@ V dialogu **Přidat device** zvol:
 - **Přečíslovat** — změna adresy funkčního device (viz §7).
 - **Smazat** — odebere device z jednotky.
 
-Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / adresu / smazat text na všechny displeje najednou (broadcast).
+Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / adresu / smazat text na všechny displeje (postupně na každý se 100ms pauzou).
 
 ---
 

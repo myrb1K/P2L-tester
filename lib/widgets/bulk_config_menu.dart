@@ -524,7 +524,7 @@ class _BulkDispBrightnessDialogState extends State<_BulkDispBrightnessDialog> {
           Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
           const SizedBox(height: 4),
           const Text(
-            'DISP SET-CONFIG broadcast (adresa 050000) — změní jas všech displejů na každé jednotce.',
+            'DISP SET-CONFIG na každý displej zvlášť (dle GET-DEVICES) — změní jas všech displejů na vybraných jednotkách.',
             style: TextStyle(fontSize: 11, color: Colors.grey),
           ),
           const SizedBox(height: 16),

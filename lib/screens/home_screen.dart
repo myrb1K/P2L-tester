@@ -302,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const BulkConfigMenu(),
                 if (state.units.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.delete_sweep),
+                    icon: const Icon(Icons.cleaning_services),
                     tooltip: 'Vyčistit seznam',
                     onPressed: () => state.clearUnits(),
                   ),
