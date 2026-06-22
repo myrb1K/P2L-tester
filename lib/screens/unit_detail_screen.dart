@@ -344,12 +344,13 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         final pending = state.isModulesPending(widget.unitId);
         final fetchedAt = state.modulesFetchedAt(widget.unitId);
 
-        // Diagnostika z posledního skenu sběrnice: červené zvýraznění
-        // chybějících + šedé „ghost" chipy nalezených neuložených devices.
+        // Červený rámeček chipu: device chybí na sběrnici (sken) NEBO hlásí
+        // poruchu v ALIVE (Code != 0). Šedé „ghost" chipy = nalezené neuložené.
         final diag = state.busDiagnosis(widget.unitId);
-        final missingAddresses = {
+        final alertAddresses = {
           for (final r in diag)
             if (r.status == BusScanStatus.missing) r.address,
+          ...state.deviceFaultAddresses(widget.unitId),
         };
         final ghosts = [
           for (final r in diag)
@@ -446,7 +447,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                     : _ModulesGroupedList(
                         unitId: widget.unitId,
                         modules: modules,
-                        missingAddresses: missingAddresses,
+                        alertAddresses: alertAddresses,
                         ghosts: ghosts,
                         onAdd: (addr, busType) =>
                             _addModuleAt(state, modules, addr, busType),
@@ -576,8 +577,9 @@ class _UnitInfoCard extends StatelessWidget {
 class _ModulesGroupedList extends StatelessWidget {
   final String unitId;
   final List<PumaModule> modules;
-  // Adresy modulů, které sken na sběrnici nenašel → červený okraj chipu.
-  final Set<int> missingAddresses;
+  // Adresy modulů k červenému okraji chipu (chybí na sběrnici ze skenu NEBO
+  // hlásí poruchu v ALIVE).
+  final Set<int> alertAddresses;
   // Devices nalezené skenem, ale neuložené v jednotce → šedé „ghost" chipy.
   final List<BusScanRow> ghosts;
   final void Function(int address, String? busType) onAdd;
@@ -595,7 +597,7 @@ class _ModulesGroupedList extends StatelessWidget {
   const _ModulesGroupedList({
     required this.unitId,
     required this.modules,
-    required this.missingAddresses,
+    required this.alertAddresses,
     required this.ghosts,
     required this.onAdd,
     required this.onReplace,
@@ -669,7 +671,7 @@ class _ModulesGroupedList extends StatelessWidget {
               color: _color(cat),
               modules: configByCat[cat] ?? const [],
               ghosts: ghostByCat[cat] ?? const [],
-              missingAddresses: missingAddresses,
+              alertAddresses: alertAddresses,
               onAdd: onAdd,
               onReplace: onReplace,
               onSetId: onSetId,
@@ -693,7 +695,7 @@ class _GroupSection extends StatelessWidget {
   final Color color;
   final List<PumaModule> modules;
   final List<BusScanRow> ghosts;
-  final Set<int> missingAddresses;
+  final Set<int> alertAddresses;
   final void Function(int address, String? busType) onAdd;
   final void Function(PumaModule) onReplace;
   final void Function(PumaModule) onSetId;
@@ -712,7 +714,7 @@ class _GroupSection extends StatelessWidget {
     required this.color,
     required this.modules,
     required this.ghosts,
-    required this.missingAddresses,
+    required this.alertAddresses,
     required this.onAdd,
     required this.onReplace,
     required this.onSetId,
@@ -823,7 +825,7 @@ class _GroupSection extends StatelessWidget {
                   unitId: unitId,
                   module: m,
                   color: color,
-                  missing: missingAddresses.contains(m.baseAddress),
+                  alert: alertAddresses.contains(m.baseAddress),
                   onReplace: canReplace(m) ? () => onReplace(m) : null,
                   onSetId: () => onSetId(m),
                   onEdit: onEdit != null ? () => onEdit!(m) : null,
@@ -890,8 +892,9 @@ class _AddressChip extends StatelessWidget {
   final String unitId;
   final PumaModule module;
   final Color color;
-  // Sken sběrnice tento device nenašel → červený okraj.
-  final bool missing;
+  // Device má problém (chybí na sběrnici ze skenu nebo hlásí poruchu v ALIVE)
+  // → červený okraj.
+  final bool alert;
   final VoidCallback? onReplace;
   final VoidCallback? onSetId;
   final VoidCallback? onEdit;
@@ -906,7 +909,7 @@ class _AddressChip extends StatelessWidget {
     required this.unitId,
     required this.module,
     required this.color,
-    this.missing = false,
+    this.alert = false,
     required this.onReplace,
     required this.onSetId,
     required this.onDelete,
@@ -1124,7 +1127,7 @@ class _AddressChip extends StatelessWidget {
                     ],
                   ),
             backgroundColor: effColor.withAlpha(30),
-            side: missing
+            side: alert
                 ? const BorderSide(color: Colors.red, width: 2)
                 : BorderSide(color: effColor.withAlpha(110)),
             visualDensity: VisualDensity.compact,

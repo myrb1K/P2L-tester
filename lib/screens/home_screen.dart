@@ -604,11 +604,13 @@ class _UnitListView extends StatelessWidget {
       itemBuilder: (context, index) {
         final unit = units[index];
         final isSelected = state.selectedUnits.contains(unit.id);
-        // Barva ikony „Seznam devices" podle výsledku posledního skenu sběrnice:
-        // červená = něco chybí, šedá = něco nového/neuloženého, jinak původní.
+        // Barva ikony „Seznam devices":
+        // červená = device hlásí poruchu (ALIVE Code != 0) NEBO sken našel chybějící,
+        // šedá = sken našel neuložený device, jinak původní.
         final diag = state.busDiagnosis(unit.id);
         Color? scanColor;
-        if (diag.any((r) => r.status == BusScanStatus.missing)) {
+        if (state.unitHasDeviceFault(unit.id) ||
+            diag.any((r) => r.status == BusScanStatus.missing)) {
           scanColor = Colors.red;
         } else if (diag.any((r) => r.status == BusScanStatus.unregistered)) {
           scanColor = Colors.grey;
@@ -801,7 +803,7 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                             color: widget.scanStatusColor ?? Colors.blueGrey),
                         onPressed: widget.onOpenDetail,
                         tooltip: widget.scanStatusColor == Colors.red
-                            ? 'Seznam devices — sken: některý device chybí'
+                            ? 'Seznam devices — porucha: device hlásí chybu nebo chybí na sběrnici'
                             : widget.scanStatusColor == Colors.grey
                                 ? 'Seznam devices — sken: nalezen neuložený device'
                                 : 'Seznam devices',
