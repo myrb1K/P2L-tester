@@ -114,7 +114,7 @@ V dialogu **Přidat device** zvol:
 
 - **Typ:** PUM-A, PUM-B, PUM-C nebo SENZOR (DIST).
 - **Adresu / číslo čipu** v platném rozsahu (viz §7).
-- **PUM-A:** počet tlačítek (žádné / 1 / 2), u jednoho tlačítka i stranu (levé / pravé), a zda má **LEDS** (kroužek).
+- **PUM-A:** **0–4 tlačítka** okolo displeje. Vybíráš je klepnutím na vizuální dlaždice v řadě `3 · 1 · DISPLEJ · 0 · 2` (uprostřed displej, vlevo i vpravo až 2 tlačítka). Každá dlaždice ukazuje **číslo tlačítka** (0–3) a jeho **adresu** (např. `1132`); tlačítka jsou nezávislá, vyber libovolnou kombinaci. Dole zaškrtni, zda má **LEDS** (kroužek). Číslo tlačítka = tisícová číslice jeho adresy.
 - **PUM-B:** zda má LEDS.
 - **PUM-C:** lze přidat jen k PUM-A, které má 0 nebo 1 tlačítko.
 - **SENZOR (DIST):** konfigurace měření (perioda, timeout, počet měření, max. odchylka, offset, dosah Short/Middle/Long).
@@ -130,6 +130,8 @@ V dialogu **Přidat device** zvol:
 - **Smazat** — odebere device z jednotky.
 
 Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / adresu / smazat text na všechny displeje (postupně na každý se 100ms pauzou).
+
+**Stisk tlačítka naživo:** když na sběrnici stiskneš fyzické tlačítko, na chvíli (1 s) se zvýrazní příslušná hrana buňky devicu a v ní se ukáže **číslo stisknutého tlačítka** (0–3). Tlačítka 1 a 3 (levá strana displeje) zvýrazní levou hranu, tlačítka 0 a 2 (pravá strana) pravou. U SENZORU (DIST) chip průběžně ukazuje naměřenou vzdálenost v mm.
 
 ---
 

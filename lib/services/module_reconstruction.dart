@@ -13,33 +13,23 @@ List<PumaModule> reconstructModules(List<Device> rawDevices) {
   final modules = <PumaModule>[];
 
   // 1. PUM-A za každý DISP
-  // PUM-A tlačítka: levé = 1000+N, pravé = N.
+  // PUM-A tlačítka: adresy {N, 1000+N, 2000+N, 3000+N} (čísla 0/1/2/3).
+  // Patří PUM-A, protože na adrese N je DISP (PUM-C/PUM-B DISP nikdy nemají).
   final sortedDisps = dispIds.toList()..sort();
   for (final n in sortedDisps) {
-    int buttonCount = 0;
-    ButtonSide? side;
-    final hasLeft = btnIds.contains(1000 + n);
-    final hasRight = btnIds.contains(n);
-
-    if (hasLeft && hasRight) {
-      buttonCount = 2;
-      claimedBtn.add(1000 + n);
-      claimedBtn.add(n);
-    } else if (hasLeft) {
-      buttonCount = 1;
-      side = ButtonSide.left;
-      claimedBtn.add(1000 + n);
-    } else if (hasRight) {
-      buttonCount = 1;
-      side = ButtonSide.right;
-      claimedBtn.add(n);
+    final buttons = <PumaButton>{};
+    for (final b in PumaButton.values) {
+      final addr = b.addressFor(n);
+      if (btnIds.contains(addr)) {
+        buttons.add(b);
+        claimedBtn.add(addr);
+      }
     }
 
     modules.add(PumaModule.pumA(
       address: n,
-      buttonCount: buttonCount,
+      buttons: buttons,
       hasLeds: ledsIds.contains(n),
-      buttonSide: side,
     ));
   }
 

@@ -80,15 +80,8 @@ class ModuleTile extends StatelessWidget {
 
   String? _variantBadge() {
     if (module.type != ModuleType.pumA) return null;
-    switch (module.buttonCount) {
-      case 0:
-        return '0 tl.';
-      case 1:
-        return module.buttonSide == ButtonSide.left ? '1 tl. L' : '1 tl. P';
-      case 2:
-        return '2 tl.';
-    }
-    return null;
+    if (module.buttons.isEmpty) return '0 tl.';
+    return '${module.buttons.length} tl. (${module.buttonNumbers.join(',')})';
   }
 
   @override

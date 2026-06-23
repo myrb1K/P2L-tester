@@ -80,22 +80,30 @@ DEVICE_ID v topicu je **2-ciferný kód typu + 4-ciferná adresa** (např. `0502
 
 | Modul | Popis | Samostatně? | Čipů | MQTT entries | Factory default |
 |-------|-------|-------------|------|--------------|-----------------|
-| **PUM-A** @N | displej + 0/1/2 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže | **246** (DISP) |
+| **PUM-A** @N | displej + 0–4 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže | **246** (DISP) |
 | **PUM-B** @N | samostatné tlačítko + volit. LEDS | ano | 1 | BTN `N` (bez prefixu) + volit. LEDS `N` | **247** (BTN) |
 | **PUM-C** @M | vždy 2 tlačítka (+/−), jen jako doplněk PUM-A bez 2 tlačítek | NE | 1 | BTN `1000+M` (+), BTN `M` (−) | **247** (BTN) |
 | **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací | **127** |
 
 **Factory default** = adresa, kterou má čip z výroby před přečipováním. Po fyzické výměně vadného kusu aplikace pošle `DEVICE-REPLACE` s touto default adresou v poli `From` a adresou vadného kusu v poli `To` → jednotka přečipuje nový kus na ID původního. Autoritativní zdroj: [`CommandService.defaultReplacementAddress`](lib/services/command_service.dart).
 
-### PUM-A tlačítka
+### PUM-A tlačítka (0–4)
 
-| Počet | MQTT BTN entries |
-|-------|------------------|
-| 0 | žádné |
-| 1 | BTN `N` (pravé) **nebo** BTN `1000+N` (levé) — strana se ukládá v `buttonSide` |
-| 2 | BTN `1000+N` (levé) + BTN `N` (pravé) |
+PUM-A má uprostřed displej a okolo něj **0 až 4 tlačítka** (až 2 vlevo, až 2 vpravo). Každé tlačítko je samostatná BTN entry s adresou `offset + N` (N = adresa DISP). **Číslo tlačítka (0–3) = tisícová číslice adresy** (`offset / 1000`).
 
-Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný `2000+N` se nepoužívá. Autoritativní zdroj: [`module_reconstruction.dart`](lib/services/module_reconstruction.dart) a `PumaModule.toDevices()` v [`module.dart`](lib/models/module.dart).
+| Fyzická pozice (zleva doprava) | Offset | Adresa | **Číslo** | Strana |
+|-------------------------------|--------|--------|-----------|--------|
+| levé-vlevo (vnější L) | `3000` | `3000+N` | **3** | levá |
+| levé-vpravo (vnitřní L) | `1000` | `1000+N` | **1** | levá |
+| DISPLEJ | — | `N` | — | — |
+| pravé-vlevo (vnitřní P) | `0` | `N` | **0** | pravá |
+| pravé-vpravo (vnější P) | `2000` | `2000+N` | **2** | pravá |
+
+Tlačítka jsou **nezávislá** (libovolná kombinace 0–4). Na každé straně je nižší číslo vnitřní (u displeje). Strana pro zvýraznění stisku: čísla **1 a 3 = levá hrana**, **0 a 2 = pravá**. Reprezentace v kódu: `Set<PumaButton>` (`PumaButton` + `PumaButtonExt` v [`module.dart`](lib/models/module.dart)). Autoritativní zdroj: [`module_reconstruction.dart`](lib/services/module_reconstruction.dart) a `PumaModule.toDevices()`.
+
+**Disambiguace vs. PUM-C:** offsety `0`/`1000` sdílí PUM-A i PUM-C, ale PUM-A má vždy DISP na `N`, PUM-C nikdy → BTN patří PUM-A právě tehdy, když na jeho bázové adrese (`addr % 1000`) existuje DISP. Offsety `2000`/`3000` jsou výhradně PUM-A.
+
+**Migrace starého formátu:** dřívější model (`buttonCount` 0/1/2 + `buttonSide`) je v `PumaModule.fromJson` mapován na sadu tlačítek (`left`/1000+N → tl. 1, `right`/N → tl. 0, 2 tl. → {0,1}) kvůli starým uloženým šablonám.
 
 ### Klíčová pravidla rekonstrukce
 
@@ -107,7 +115,7 @@ Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný
 
 ### Algoritmus rekonstrukce z `GET-DEVICES`
 
-1. Pro každý DISP `N`: vytvoř PUM-A @N. Podle přítomnosti BTN `1000+N` / BTN `N` urči 0/1/2 tlačítek a stranu. LEDS `N` → `hasLeds=true`.
+1. Pro každý DISP `N`: vytvoř PUM-A @N. Nárokuj BTN z `{N, 1000+N, 2000+N, 3000+N}` (čísla 0/1/2/3) jako jeho tlačítka. LEDS `N` → `hasLeds=true`.
 2. Pro nezabrané dvojice (BTN `1000+M`, BTN `M`) bez DISP `M` → PUM-C @M.
 3. Zbylé osamocené BTN `N` → PUM-B @N.
 4. Každý DIST → samostatný DIST modul s konfigurací.
@@ -324,8 +332,9 @@ Detail v [README.md §Typy nasazení](README.md).
 
 ## Version and Recent Changes
 
-Current version: **2.72** (see `main.dart`)  
+Current version: **2.73** (see `main.dart`)  
 Recent themes:
+- v2.73: **PUM-A 0–4 tlačítka (nové adresování přes offsety).** PUM-A nově umí až 4 tlačítka okolo displeje (2 vlevo, 2 vpravo) místo dřívějších 0/1/2. Adresa tlačítka = `offset + N` (N = adresa DISP), **číslo tlačítka 0–3 = tisícová číslice** (`offset/1000`): vnitřní pravé `0` (holé N), vnitřní levé `1` (1000+N), vnější pravé `2` (2000+N), vnější levé `3` (3000+N). Fyzicky zleva doprava `3·1·DISPLEJ·0·2`. Model: `enum PumaButton` + `PumaButtonExt` a `Set<PumaButton> buttons` místo `buttonCount`/`buttonSide` ([module.dart](lib/models/module.dart)); `fromJson` migruje starý formát (1tl. levé→1, pravé→0, 2tl.→{0,1}) kvůli uloženým šablonám. Rekonstrukce ([module_reconstruction.dart](lib/services/module_reconstruction.dart)) nárokuje za DISP `{N,1000+N,2000+N,3000+N}`; **disambiguace vs PUM-C přes přítomnost DISP** (PUM-A má vždy DISP na N, PUM-C nikdy; offsety 2000/3000 jsou výhradně PUM-A). PUM-B i **PUM-C beze změny**. Modal „Přidat device" ([add_module_dialog.dart](lib/widgets/add_module_dialog.dart)): vizuální řada 5 dlaždic `3·1·DISPLEJ·0·2`, 4 nezávislé toggly s číslem + popiskem strany + **4-cifernou živou adresou** (`0133`/`1133`/`2133`/`3133`), DISPLEJ statický uprostřed; `IntrinsicHeight` (stretch ve scroll view). Flash stisku ([app_state.dart](lib/providers/app_state.dart) `_handleBtnUpdate`, [unit_detail_screen.dart](lib/screens/unit_detail_screen.dart) `_PressFlash`): `číslo=addr~/1000`, `base=addr%1000`, levá hrana {1,3} / pravá {0,2}, v zazářené hraně se zobrazí **číslo tlačítka**. Testy přepsané + nové (4 tl., offsety 2000/3000, disambiguace, render modalu [test/add_module_dialog_test.dart](test/add_module_dialog_test.dart)). `widget_test.dart` přepsán ze stale šablonového testu na smoke test splash→přechod. Návod + CLAUDE.md sjednoceny.
 - v2.72: **Diagnostika sběrnice (SCAN-DEVICES) + sledování zdraví devices.** (1) Read-only sken RS485 `SCAN-DEVICES` (FW ≥ `P2L_26061801NT`) v UnitDetailScreen — tlačítko `Icons.radar` → menu **Vše / PUM-X / SENZORY** (`BusScanScope`). Zjistí fyzicky připojené čipy bez zápisu do configu; odpověď je přímý JSON objekt `{"PUM-A":[…],"DIST":[…]}` (úspěch) nebo Code/Message (chyba). Model [bus_scan.dart](lib/models/bus_scan.dart) (`BusScanResult`, `diagnoseBus`), porovnání respektuje rozsah skenu (DIST sken nehlásí PUM jako chybějící). Timeout 45 s (sken trvá i přes 20 s). (2) **Výsledek inline v seznamu devices:** 🟢 normální = OK, 🔴 červený rámeček = v configu, ale na sběrnici chybí, ⬜ šedý ghost chip = na sběrnici, neuložený → klepnutím přidá (předvyplní typ+adresu; `AddModuleDialog` nově respektuje `suggestedAddress`+`suggestedType`). `PUM-X` (starší PUMA bez registru typu) jako samostatná šedá sekce. Souhrnný proužek nahoře. (3) **Sledování zdraví devices z ALIVE:** subscribe `D/+/{DIST,DISP,BTN,LEDS}/+/ALIVE` (dřív se odebíral jen UNIT!); `_handleDeviceAlive` — `Code:0` = OK, jinak porucha (`_unitDeviceFaults`). Porucha → **červená ikona „Seznam devices" na hlavní obrazovce + červený rámeček chipu v detailu** (sjednoceno s missing do `alertAddresses`/`alert`); zotavení (`Code:0`) barvu vrátí. (4) **Barevné chybové hlášky:** jednotný příznak `deviceActionIsError` přes `_setStatus`, červeně v detailu i v hlavním status baru (error override); pokrývá O/ odpovědi, chyby/timeout skenu i device ALIVE. (5) **Sken se zneplatní jen po potvrzeném úspěchu** device operace (`Code:0`) — při chybě/bez odpovědi se zachová, ať uživatel neskenuje znovu. (6) **Živá vzdálenost DIST:** subscribe `D/+/DIST/+/UPDATE`, `distanceFor` — DIST chip ukazuje pod adresou naměřené mm (menším písmem, pevná šířka 34 + tabulkové číslice, ať se buňky nepřekreslují). Ikona „Seznam devices" má počítadlo i barvu. Testy: nový [test/bus_scan_test.dart](test/bus_scan_test.dart) + SCAN-DEVICES v `command_service_devices_test.dart`.
 - v2.71: **Fix hromadného jasu/textu displejů na novém FW (konec broadcastu DISP 0).** Nový FW odmítá broadcast na DISP adresu 0 (`050000` → `Code:-2 "unknown ID"`). `AppState.sendBulkBrightness` a `_bulkDisp` (AHOJ / smazat text na všech displejích v detailu) nově posílají SET-CONFIG/SET-DATA na **každou skutečnou DISP adresu zvlášť** (z posledního GET-DEVICES přes nový helper `_dispAddressesFor`) se 100ms pauzou; jednotky bez načtených devices se u jasu přeskočí (hláška). Docstringy/UI texty zbavené nepravdivého „broadcast (050000)". Drobnost: ikona „Vyčistit seznam" v HomeScreen AppBaru z `Icons.delete_sweep` na `Icons.cleaning_services`. Tlačítko „Nápověda" (`Icons.help_outline`) přesunuto z AppBaru HomeScreen do AppBaru Nastavení (vedle Export/Import). (Pozn.: jednotlivé per-display akce — Test displeje, Adresa na displej — fungovaly i dřív, rozbité byly jen „na všechny" přes adresu 0.)
 - v2.70: **In-app nápověda (uživatelský návod).** Nový [docs/navod.md](docs/navod.md) — kompletní český návod ovládání (připojení, seznam jednotek, LED test, hromadná konfigurace, správa devices, šablony, výměna/přečíslování, export/import ID, nastavení, web). Registrován jako asset v `pubspec.yaml` (`docs/navod.md`). Zobrazuje se přímo v appce přes novou [lib/screens/help_screen.dart](lib/screens/help_screen.dart) (tlačítko `Icons.help_outline` „Nápověda" v AppBaru HomeScreen za Nastavením) — **jeden zdroj, dvě cesty** (GitHub + in-app). HelpScreen načítá markdown přes `rootBundle.loadString` a renderuje vlastním lehkým rendererem `_MarkdownView` (nadpisy `#`/`##`/`###`, odstavce, odrážky `- `, číslované `1.`, citace `> `, vodorovná čára `---`, GFM tabulky, inline `**tučné**` / `` `kód` ``) — **bez nové závislosti** (`flutter_markdown` je deprecovaný; obsah návodu řídíme sami, takže stačí podmnožina). Návod aktualizovat při změnách UI.

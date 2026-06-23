@@ -75,7 +75,11 @@ void main() {
   group('ADD-DEVICES payload', () {
     test('PUM-A 128 (DISP+LEDS+2BTN) + DIST 98', () {
       final modules = [
-        const PumaModule.pumA(address: 128, buttonCount: 2, hasLeds: true),
+        const PumaModule.pumA(
+          address: 128,
+          buttons: {PumaButton.leftInner, PumaButton.rightInner},
+          hasLeds: true,
+        ),
         PumaModule.dist(address: 98),
       ];
       final cmd = CommandService.buildAddDevicesCommand('001001', modules);
@@ -96,9 +100,8 @@ void main() {
       final modules = [
         const PumaModule.pumA(
           address: 128,
-          buttonCount: 1,
+          buttons: {PumaButton.leftInner},
           hasLeds: true,
-          buttonSide: ButtonSide.left,
         ),
         const PumaModule.pumC(address: 129),
         const PumaModule.pumB(address: 200),
@@ -114,12 +117,11 @@ void main() {
       expect(byType.containsKey('DIST'), false);
     });
 
-    test('PUM-A s 1 tl. PRAVÝM → BTN N', () {
+    test('PUM-A s 1 tl. holým N → BTN N', () {
       final modules = [
         const PumaModule.pumA(
           address: 128,
-          buttonCount: 1,
-          buttonSide: ButtonSide.right,
+          buttons: {PumaButton.rightInner},
         ),
       ];
       final cmd = CommandService.buildAddDevicesCommand('001001', modules);

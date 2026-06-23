@@ -34,9 +34,8 @@ class AddModuleDialog extends StatefulWidget {
 class _AddModuleDialogState extends State<AddModuleDialog> {
   late ModuleType _type;
   late TextEditingController _addrCtrl;
-  int _buttonCount = 0;
+  final Set<PumaButton> _buttons = <PumaButton>{};
   bool _hasLeds = false;
-  ButtonSide _buttonSide = ButtonSide.left;
   bool _restartAfter = false;
   String? _error;
   int? _lastSuggested;
@@ -61,15 +60,15 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     _addrCtrl = TextEditingController(
       text: init?.baseAddress.toString() ?? initialSuggested?.toString() ?? '',
     );
+    // Adresy tlačítek se odvozují od bázové adresy → překresli při změně pole.
+    _addrCtrl.addListener(_onAddrChanged);
     if (init != null) {
-      _buttonCount = init.buttonCount;
+      _buttons.addAll(init.buttons);
       _hasLeds = init.hasLeds;
-      _buttonSide = init.buttonSide ?? ButtonSide.left;
     } else {
-      // Defaulty podle typu (stejně jako přepínání typu v dropdownu).
-      _buttonCount = _type == ModuleType.pumA ? 1 : 0;
+      // Default: jedno tlačítko (vnitřní levé = 1) jako dřív.
+      if (_type == ModuleType.pumA) _buttons.add(PumaButton.leftInner);
       _hasLeds = false;
-      _buttonSide = ButtonSide.left;
     }
 
     final cfg = init?.distConfig ?? const DistConfig();
@@ -90,6 +89,10 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     _distMaxDevCtrl.dispose();
     _distOffsetCtrl.dispose();
     super.dispose();
+  }
+
+  void _onAddrChanged() {
+    if (_type == ModuleType.pumA && mounted) setState(() {});
   }
 
   int _suggestFor(ModuleType t) {
@@ -130,9 +133,8 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
       case ModuleType.pumA:
         module = PumaModule.pumA(
           address: addr,
-          buttonCount: _buttonCount,
+          buttons: {..._buttons},
           hasLeds: _hasLeds,
-          buttonSide: _buttonCount == 1 ? _buttonSide : null,
         );
       case ModuleType.pumB:
         module = PumaModule.pumB(address: addr, hasLeds: _hasLeds);
@@ -154,6 +156,46 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     Navigator.pop(
       context,
       AddModuleResult(module: module, restartAfter: _restartAfter),
+    );
+  }
+
+  /// Vizuální výběr 0–4 tlačítek PUM-A okolo displeje.
+  /// Zleva doprava: 3 · 1 · DISPLEJ · 0 · 2 (nezávislé toggly).
+  Widget _buildButtonSelector() {
+    final base = int.tryParse(_addrCtrl.text);
+
+    Widget toggle(PumaButton b) => Expanded(
+          child: _ButtonToggle(
+            number: b.number,
+            positionLabel: b.positionLabel,
+            // 4-ciferný tvar (tisícová číslice = číslo tlačítka), např. 0133.
+            address: base == null
+                ? '—'
+                : b.addressFor(base).toString().padLeft(4, '0'),
+            selected: _buttons.contains(b),
+            onTap: () => setState(() {
+              if (!_buttons.add(b)) _buttons.remove(b);
+            }),
+          ),
+        );
+
+    // IntrinsicHeight dá Row konečnou výšku (= nejvyšší dlaždice), aby
+    // crossAxisAlignment.stretch fungoval i ve svislém scroll view.
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          toggle(PumaButton.leftOuter),
+          const SizedBox(width: 4),
+          toggle(PumaButton.leftInner),
+          const SizedBox(width: 4),
+          Expanded(child: _DisplaySlot(address: base?.toString() ?? '—')),
+          const SizedBox(width: 4),
+          toggle(PumaButton.rightInner),
+          const SizedBox(width: 4),
+          toggle(PumaButton.rightOuter),
+        ],
+      ),
     );
   }
 
@@ -192,10 +234,9 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                         _type = v!;
                         _error = null;
                         if (_type == ModuleType.pumA) {
-                          _buttonCount = 1;
-                        } else {
-                          _buttonCount = 0;
-                          if (_type != ModuleType.pumB) _hasLeds = false;
+                          if (_buttons.isEmpty) _buttons.add(PumaButton.leftInner);
+                        } else if (_type != ModuleType.pumB) {
+                          _hasLeds = false;
                         }
                         final current = int.tryParse(_addrCtrl.text);
                         if (_addrCtrl.text.isEmpty ||
@@ -216,7 +257,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                     ? 'Adresa sensoru (${_type.addressRange.min}–${_type.addressRange.max})'
                     : 'Adresa / číslo čipu (${_type.addressRange.min}–${_type.addressRange.max})',
                 hintText: _type == ModuleType.pumA
-                    ? 'např. 128 (DISP N, tlačítka 1N/2N)'
+                    ? 'např. 128 (DISP + tlačítka 0/1/2/3)'
                     : _type == ModuleType.pumC
                         ? 'např. 130 (PUM-C + = 1130, − = 130)'
                         : null,
@@ -226,28 +267,10 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
             ),
             if (_type == ModuleType.pumA) ...[
               const SizedBox(height: 12),
-              Text('Počet tlačítek', style: Theme.of(context).textTheme.bodyMedium),
-              SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('Žádné')),
-                  ButtonSegment(value: 1, label: Text('1 tl.')),
-                  ButtonSegment(value: 2, label: Text('2 tl. (L+P)')),
-                ],
-                selected: {_buttonCount},
-                onSelectionChanged: (s) => setState(() => _buttonCount = s.first),
-              ),
-              if (_buttonCount == 1) ...[
-                const SizedBox(height: 8),
-                Text('Strana tlačítka', style: Theme.of(context).textTheme.bodyMedium),
-                SegmentedButton<ButtonSide>(
-                  segments: const [
-                    ButtonSegment(value: ButtonSide.left, label: Text('Levé (1000+N)')),
-                    ButtonSegment(value: ButtonSide.right, label: Text('Pravé (N)')),
-                  ],
-                  selected: {_buttonSide},
-                  onSelectionChanged: (s) => setState(() => _buttonSide = s.first),
-                ),
-              ],
+              Text('Tlačítka (klepnutím vyber)',
+                  style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 6),
+              _buildButtonSelector(),
               const SizedBox(height: 8),
               CheckboxListTile(
                 value: _hasLeds,
@@ -402,4 +425,111 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
 bool hasPumAWithButtonRoom(List<PumaModule> modules) {
   return modules.any(
       (m) => m.type == ModuleType.pumA && m.buttonCount < 2);
+}
+
+/// Přepínatelná dlaždice jednoho tlačítka PUM-A (číslo + pozice + adresa).
+class _ButtonToggle extends StatelessWidget {
+  final int number;
+  final String positionLabel;
+  final String address;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ButtonToggle({
+    required this.number,
+    required this.positionLabel,
+    required this.address,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final accent = selected ? scheme.primary : scheme.outline;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+        decoration: BoxDecoration(
+          color: selected ? scheme.primary.withAlpha(28) : null,
+          border: Border.all(color: accent, width: selected ? 2 : 1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$number',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: selected ? scheme.primary : null,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              positionLabel,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 8.5, height: 1.05),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              address,
+              style: TextStyle(
+                fontSize: 9,
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: selected ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Statický rámeček uprostřed výběru — displej PUM-A (vždy přítomen).
+class _DisplaySlot extends StatelessWidget {
+  final String address;
+  const _DisplaySlot({required this.address});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.monitor, size: 16, color: scheme.onSurfaceVariant),
+          const SizedBox(height: 2),
+          Text(
+            'DISPLEJ',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 8.5,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            address,
+            style: TextStyle(
+              fontSize: 9,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
