@@ -1136,7 +1136,8 @@ class _AddressChip extends StatelessWidget {
 
           // BTN press flash: levý a pravý okraj zazáří 1s, když přijde D/.../BTN/.../UPDATE.
           // Selector vrací jen relevantní timestampy — chip se rebuildne jen při novém stisku.
-          return Selector<AppState, ({DateTime? left, DateTime? right})>(
+          return Selector<AppState,
+              ({({DateTime ts, int number})? left, ({DateTime ts, int number})? right})>(
             selector: (_, s) => (
               left: s.lastButtonPress(unitId, module.baseAddress, left: true),
               right: s.lastButtonPress(unitId, module.baseAddress, left: false),
@@ -1149,9 +1150,9 @@ class _AddressChip extends StatelessWidget {
                     child: IgnorePointer(
                       child: Row(
                         children: [
-                          _PressFlash(timestamp: presses.left, color: leftFlash),
+                          _PressFlash(press: presses.left, color: leftFlash),
                           const Spacer(),
-                          _PressFlash(timestamp: presses.right, color: rightFlash),
+                          _PressFlash(press: presses.right, color: rightFlash),
                         ],
                       ),
                     ),
@@ -1205,24 +1206,28 @@ class _GhostChip extends StatelessWidget {
 /// Klíčuje TweenAnimationBuilder timestampem, aby se animace restartovala
 /// při novém stisku.
 class _PressFlash extends StatelessWidget {
-  final DateTime? timestamp;
+  final ({DateTime ts, int number})? press;
   final Color color;
-  const _PressFlash({required this.timestamp, required this.color});
+  const _PressFlash({required this.press, required this.color});
+
+  static const double _width = 15;
 
   @override
   Widget build(BuildContext context) {
-    if (timestamp == null) return const SizedBox(width: 13);
-    final age = DateTime.now().difference(timestamp!);
+    final p = press;
+    if (p == null) return const SizedBox(width: _width);
+    final age = DateTime.now().difference(p.ts);
     if (age >= const Duration(seconds: 1)) {
-      return const SizedBox(width: 13);
+      return const SizedBox(width: _width);
     }
     return TweenAnimationBuilder<double>(
-      key: ValueKey(timestamp!.microsecondsSinceEpoch),
+      key: ValueKey(p.ts.microsecondsSinceEpoch),
       tween: Tween(begin: 1.0, end: 0.0),
       duration: const Duration(seconds: 1),
       curve: Curves.easeOut,
       builder: (_, value, _) => Container(
-        width: 13,
+        width: _width,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: color.withValues(alpha: value),
           borderRadius: BorderRadius.circular(3),
@@ -1235,6 +1240,16 @@ class _PressFlash extends StatelessWidget {
                   ),
                 ]
               : null,
+        ),
+        // Číslo stisknutého tlačítka (0–3) v zazářené hraně.
+        child: Text(
+          '${p.number}',
+          style: TextStyle(
+            fontSize: 10,
+            height: 1.0,
+            fontWeight: FontWeight.bold,
+            color: Colors.white.withValues(alpha: value),
+          ),
         ),
       ),
     );

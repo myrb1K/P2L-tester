@@ -9,36 +9,31 @@ void main() {
   group('TemplateBundle v2', () {
     test('encode sloučí moduly se shodnou konfigurací do CSV baseAddresses', () {
       final modules = [
-        PumaModule(
+        const PumaModule(
           type: ModuleType.pumA,
           baseAddress: 128,
-          buttonCount: 1,
+          buttons: {PumaButton.leftInner},
           hasLeds: true,
-          buttonSide: ButtonSide.left,
         ),
-        PumaModule(
+        const PumaModule(
           type: ModuleType.pumC,
           baseAddress: 129,
-          buttonCount: 2,
           hasLeds: false,
         ),
-        PumaModule(
+        const PumaModule(
           type: ModuleType.pumA,
           baseAddress: 130,
-          buttonCount: 1,
+          buttons: {PumaButton.leftInner},
           hasLeds: true,
-          buttonSide: ButtonSide.left,
         ),
-        PumaModule(
+        const PumaModule(
           type: ModuleType.pumC,
           baseAddress: 131,
-          buttonCount: 2,
           hasLeds: false,
         ),
-        PumaModule(
+        const PumaModule(
           type: ModuleType.pumB,
           baseAddress: 132,
-          buttonCount: 1,
           hasLeds: true,
         ),
       ];
@@ -193,19 +188,17 @@ void main() {
 
     test('encode+decode round-trip zachová všechny údaje', () {
       final modules = [
-        PumaModule(
+        const PumaModule(
           type: ModuleType.pumA,
           baseAddress: 128,
-          buttonCount: 1,
+          buttons: {PumaButton.leftInner},
           hasLeds: true,
-          buttonSide: ButtonSide.left,
         ),
-        PumaModule(
+        const PumaModule(
           type: ModuleType.pumA,
           baseAddress: 130,
-          buttonCount: 1,
+          buttons: {PumaButton.leftInner},
           hasLeds: true,
-          buttonSide: ButtonSide.left,
         ),
       ];
       final original = DeviceTemplate(
@@ -225,7 +218,7 @@ void main() {
       expect(decoded.modules[0].baseAddress, 128);
       expect(decoded.modules[0].buttonCount, 1);
       expect(decoded.modules[0].hasLeds, true);
-      expect(decoded.modules[0].buttonSide, ButtonSide.left);
+      expect(decoded.modules[0].buttons, {PumaButton.leftInner});
     });
 
     test('decode odmítne neplatné baseAddresses s chybou', () {

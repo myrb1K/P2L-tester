@@ -42,7 +42,7 @@ class TemplateBundle {
         : jsonEncode(Map.fromEntries(
             (m.distConfig!.toJson().entries.toList()
                 ..sort((a, b) => a.key.compareTo(b.key)))));
-    return '${m.type.name}|${m.buttonCount}|${m.hasLeds}|${m.buttonSide?.name ?? 'null'}|$distPart';
+    return '${m.type.name}|${m.buttonNumbers.join(',')}|${m.hasLeds}|$distPart';
   }
 
   static List<Map<String, dynamic>> _compactModules(List<PumaModule> modules) {

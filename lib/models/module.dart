@@ -28,9 +28,50 @@ extension ModuleTypeExt on ModuleType {
   int get defaultAddress => addressRange.max;
 }
 
-/// Strana tlačítka PUM-A s 1 tlačítkem.
-/// Levé = BTN 1000+N, Pravé = BTN N.
-enum ButtonSide { left, right }
+/// Tlačítko PUM-A okolo displeje. PUM-A může mít 0–4 tlačítka (2 vlevo, 2 vpravo).
+/// Číslo tlačítka (0–3) = tisícová číslice jeho MQTT adresy (offset/1000),
+/// adresa tlačítka = offset + baseAddress (adresa DISP).
+///
+/// Fyzicky zleva doprava: leftOuter(3) · leftInner(1) · DISPLEJ · rightInner(0) · rightOuter(2).
+/// Na každé straně je nižší číslo vnitřní (u displeje), vyšší vnější.
+enum PumaButton { rightInner, leftInner, rightOuter, leftOuter }
+
+extension PumaButtonExt on PumaButton {
+  /// Číslo tlačítka (0–3) = tisícová číslice adresy.
+  int get number => switch (this) {
+        PumaButton.rightInner => 0,
+        PumaButton.leftInner => 1,
+        PumaButton.rightOuter => 2,
+        PumaButton.leftOuter => 3,
+      };
+
+  /// Adresní offset (0 / 1000 / 2000 / 3000).
+  int get offset => number * 1000;
+
+  /// Levá strana displeje (čísla 1 a 3 → zvýraznění levé hrany buňky).
+  bool get isLeft =>
+      this == PumaButton.leftInner || this == PumaButton.leftOuter;
+
+  /// MQTT adresa tlačítka pro PUM-A se zadanou bázovou adresou (DISP).
+  int addressFor(int base) => offset + base;
+
+  /// Lidský popisek fyzické pozice.
+  String get positionLabel => switch (this) {
+        PumaButton.leftOuter => 'levé-vlevo',
+        PumaButton.leftInner => 'levé-vpravo',
+        PumaButton.rightInner => 'pravé-vlevo',
+        PumaButton.rightOuter => 'pravé-vpravo',
+      };
+
+  /// Tlačítko podle čísla (0–3), nebo null pro neznámé číslo.
+  static PumaButton? fromNumber(int n) => switch (n) {
+        0 => PumaButton.rightInner,
+        1 => PumaButton.leftInner,
+        2 => PumaButton.rightOuter,
+        3 => PumaButton.leftOuter,
+        _ => null,
+      };
+}
 
 class DistConfig {
   final int measurePeriod;
@@ -89,43 +130,45 @@ class DistConfig {
 class PumaModule {
   final ModuleType type;
   final int baseAddress;
-  final int buttonCount; // jen pro PUM-A: 0/1/2; pevně 1 pro PUM-B, 2 pro PUM-C
+  final Set<PumaButton> buttons; // jen pro PUM-A: 0–4 tlačítka okolo displeje
   final bool hasLeds; // pro PUM-A i PUM-B (LED kroužek na adrese baseAddress)
-  final ButtonSide? buttonSide; // jen pro PUM-A s 1 tlačítkem
   final DistConfig? distConfig; // jen pro DIST
 
   const PumaModule({
     required this.type,
     required this.baseAddress,
-    this.buttonCount = 0,
+    this.buttons = const <PumaButton>{},
     this.hasLeds = false,
-    this.buttonSide,
     this.distConfig,
   });
 
+  /// Počet osazených tlačítek PUM-A (0–4).
+  int get buttonCount => buttons.length;
+
+  /// Čísla osazených tlačítek (0–3) vzestupně.
+  List<int> get buttonNumbers =>
+      buttons.map((b) => b.number).toList()..sort();
+
   const PumaModule.pumA({
     required int address,
-    int buttonCount = 0,
+    Set<PumaButton> buttons = const <PumaButton>{},
     bool hasLeds = false,
-    ButtonSide? buttonSide,
   }) : this(
           type: ModuleType.pumA,
           baseAddress: address,
-          buttonCount: buttonCount,
+          buttons: buttons,
           hasLeds: hasLeds,
-          buttonSide: buttonSide,
         );
 
   const PumaModule.pumB({required int address, bool hasLeds = false})
       : this(
           type: ModuleType.pumB,
           baseAddress: address,
-          buttonCount: 1,
           hasLeds: hasLeds,
         );
 
   const PumaModule.pumC({required int address})
-      : this(type: ModuleType.pumC, baseAddress: address, buttonCount: 2);
+      : this(type: ModuleType.pumC, baseAddress: address);
 
   PumaModule.dist({required int address, DistConfig? config})
       : this(
@@ -135,22 +178,18 @@ class PumaModule {
         );
 
   /// Všechny MQTT Device záznamy, které tento modul (1 čip) generuje do GET-DEVICES.
-  /// PUM-A/PUM-C konvence: BTN levé = 1000+N, BTN pravé = N.
+  /// PUM-A tlačítka: adresa = offset(0/1000/2000/3000) + baseAddress (viz [PumaButton]).
+  /// PUM-C konvence: BTN + = 1000+N, BTN − = N. PUM-B: BTN N.
   List<Device> toDevices() {
     switch (type) {
       case ModuleType.pumA:
+        final sorted = buttons.toList()
+          ..sort((a, b) => a.number.compareTo(b.number));
         return [
           Device(type: DeviceType.disp, id: baseAddress),
           if (hasLeds) Device(type: DeviceType.leds, id: baseAddress),
-          if (buttonCount == 1)
-            Device(
-              type: DeviceType.btn,
-              id: buttonSide == ButtonSide.right ? baseAddress : 1000 + baseAddress,
-            ),
-          if (buttonCount == 2) ...[
-            Device(type: DeviceType.btn, id: 1000 + baseAddress),
-            Device(type: DeviceType.btn, id: baseAddress),
-          ],
+          for (final b in sorted)
+            Device(type: DeviceType.btn, id: b.addressFor(baseAddress)),
         ];
       case ModuleType.pumB:
         return [
@@ -171,12 +210,10 @@ class PumaModule {
     switch (type) {
       case ModuleType.pumA:
         final parts = <String>['PUM-A @$baseAddress'];
-        if (buttonCount == 0) {
+        if (buttons.isEmpty) {
           parts.add('bez tl.');
-        } else if (buttonCount == 1) {
-          parts.add(buttonSide == ButtonSide.right ? '1 tl. (P)' : '1 tl. (L)');
         } else {
-          parts.add('2 tl.');
+          parts.add('${buttons.length} tl. (${buttonNumbers.join(',')})');
         }
         if (hasLeds) parts.add('LEDS');
         return parts.join(' · ');
@@ -192,27 +229,50 @@ class PumaModule {
   Map<String, dynamic> toJson() => {
         'type': type.name,
         'baseAddress': baseAddress,
-        'buttonCount': buttonCount,
+        if (type == ModuleType.pumA) 'buttons': buttonNumbers,
         'hasLeds': hasLeds,
-        if (buttonSide != null) 'buttonSide': buttonSide!.name,
         if (distConfig != null) 'distConfig': distConfig!.toJson(),
       };
 
   factory PumaModule.fromJson(Map<String, dynamic> json) {
     final typeName = json['type'] as String;
     final type = ModuleType.values.firstWhere((t) => t.name == typeName);
-    final sideName = json['buttonSide'] as String?;
     return PumaModule(
       type: type,
       baseAddress: json['baseAddress'] as int,
-      buttonCount: json['buttonCount'] as int? ?? 0,
+      buttons: type == ModuleType.pumA
+          ? _buttonsFromJson(json)
+          : const <PumaButton>{},
       hasLeds: json['hasLeds'] as bool? ?? false,
-      buttonSide: sideName == null
-          ? null
-          : ButtonSide.values.firstWhere((s) => s.name == sideName),
       distConfig: json['distConfig'] != null
           ? DistConfig.fromJson(json['distConfig'] as Map<String, dynamic>)
           : (type == ModuleType.dist ? const DistConfig() : null),
     );
+  }
+
+  /// Načte sadu tlačítek PUM-A z JSON.
+  /// Nový formát: `"buttons": [0,1,2,3]`.
+  /// Starý formát (migrace): `"buttonCount"` (0/1/2) + `"buttonSide"`
+  /// ("left" = 1000+N → tl. 1, "right" = N → tl. 0); 2 tl. = {0,1}.
+  static Set<PumaButton> _buttonsFromJson(Map<String, dynamic> json) {
+    final raw = json['buttons'];
+    if (raw is List) {
+      final out = <PumaButton>{};
+      for (final n in raw) {
+        final b = n is int ? PumaButtonExt.fromNumber(n) : null;
+        if (b != null) out.add(b);
+      }
+      return out;
+    }
+    final count = json['buttonCount'] as int? ?? 0;
+    if (count <= 0) return const <PumaButton>{};
+    if (count == 1) {
+      return {
+        json['buttonSide'] == 'right'
+            ? PumaButton.rightInner
+            : PumaButton.leftInner
+      };
+    }
+    return {PumaButton.leftInner, PumaButton.rightInner};
   }
 }

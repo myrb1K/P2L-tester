@@ -100,7 +100,8 @@ class AppState extends ChangeNotifier {
   }
 
   // Timestamp posledního stisku BTN. Klíč: "<unitId>:<baseAddr>:<left|right>".
-  final Map<String, DateTime> _btnPresses = {};
+  // Klíč `unitId:baseAddr:side` → poslední stisk (čas + číslo tlačítka 0–3).
+  final Map<String, ({DateTime ts, int number})> _btnPresses = {};
 
   // Poslední naměřená vzdálenost DIST senzoru [mm]. Klíč: "<unitId>:<addr>".
   final Map<String, int> _distValues = {};
@@ -484,8 +485,8 @@ class AppState extends ChangeNotifier {
   }
 
   /// Topic: `D/<unit>/BTN/<deviceId>/UPDATE`, deviceId = `06<addr4>`.
-  /// Adresa ≥ 1000 = levé tlačítko PUM-A/C s baseAddress = addr-1000.
-  /// Adresa < 1000 = pravé tlačítko (nebo PUM-B s 1 tlačítkem).
+  /// Číslo tlačítka (0–3) = tisícová číslice adresy; bázová adresa = addr % 1000.
+  /// Tlačítka 1 a 3 jsou levá (levá hrana buňky), 0 a 2 pravá. PUM-B/PUM-C: 0/1.
   void _handleBtnUpdate(String topic) {
     final parts = topic.split('/');
     if (parts.length < 5) return;
@@ -495,16 +496,18 @@ class AppState extends ChangeNotifier {
     final addr = int.tryParse(deviceId.substring(deviceId.length - 4));
     if (addr == null) return;
 
-    final isLeft = addr >= 1000;
-    final baseAddr = isLeft ? addr - 1000 : addr;
+    final number = addr ~/ 1000; // 0..3
+    final baseAddr = addr % 1000;
+    final isLeft = number == 1 || number == 3;
     final side = isLeft ? 'left' : 'right';
-    _btnPresses['$unitId:$baseAddr:$side'] = DateTime.now();
+    _btnPresses['$unitId:$baseAddr:$side'] = (ts: DateTime.now(), number: number);
     notifyListeners();
   }
 
-  /// Vrátí timestamp posledního stisku tlačítka pro daný PUM modul a stranu.
-  /// `left=true` → levé tlačítko (BTN id = 1000+baseAddr).
-  DateTime? lastButtonPress(String unitId, int baseAddr, {required bool left}) {
+  /// Vrátí poslední stisk (čas + číslo tlačítka) pro daný PUM modul a stranu.
+  /// `left=true` → levá hrana (tlačítka 1/3), `false` → pravá (tlačítka 0/2).
+  ({DateTime ts, int number})? lastButtonPress(String unitId, int baseAddr,
+      {required bool left}) {
     final id = _normUnitId(unitId);
     return _btnPresses['$id:$baseAddr:${left ? 'left' : 'right'}'];
   }
