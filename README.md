@@ -191,20 +191,24 @@ P2L jednotka komunikuje s devices přes **RS485 sběrnici v sérii**:
 
 | Modul | Popis | Samostatně? | Čipů | MQTT entries |
 |-------|-------|-------------|------|--------------|
-| **PUM-A** @N | displej + 0/1/2 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže |
+| **PUM-A** @N | displej + 0–4 tlačítka + volit. LEDS | ano | 1 | DISP `N` + volit. LEDS `N`; tlačítka viz níže |
 | **PUM-B** @N | samostatné tlačítko + volit. LEDS | ano | 1 | BTN `N` (bez prefixu) + volit. LEDS `N` |
 | **PUM-C** @M | vždy 2 tlačítka (+/−), připojeno k PUM-A | NE — jen doplněk PUM-A bez 2 tlačítek | 1 | BTN `1000+M` (+), BTN `M` (−) |
 | **DIST** @N | senzor vzdálenosti | ano | 1 | DIST `N` s konfigurací |
 
-### PUM-A tlačítka
+### PUM-A tlačítka (0–4)
 
-| Počet | MQTT BTN entries |
-|-------|------------------|
-| 0 | žádné |
-| 1 | buď BTN `N` (pravé) **nebo** BTN `1000+N` (levé) — strana se ukládá v `buttonSide` |
-| 2 | BTN `1000+N` (levé) + BTN `N` (pravé) |
+PUM-A má uprostřed displej a okolo něj **0 až 4 tlačítka** (až 2 vlevo, až 2 vpravo). Každé tlačítko je samostatná BTN entry s adresou `offset + N` (N = adresa DISP). **Číslo tlačítka (0–3) = tisícová číslice adresy** (`offset / 1000`).
 
-> **Důležité:** Pravé tlačítko je vždy bez prefixu (holé `N`), levé je s `1000+`. Žádný `2000+N` se nepoužívá. Autoritativní zdroj: [`module_reconstruction.dart`](lib/services/module_reconstruction.dart) a `PumaModule.toDevices()` v [`module.dart`](lib/models/module.dart).
+| Fyzická pozice (zleva doprava) | Offset | Adresa | **Číslo** | Hrana (flash) |
+|-------------------------------|--------|--------|-----------|---------------|
+| levé-vlevo (vnější L) | `3000` | `3000+N` | **3** | levá |
+| levé-vpravo (vnitřní L) | `1000` | `1000+N` | **1** | levá |
+| DISPLEJ | — | `N` | — | — |
+| pravé-vlevo (vnitřní P) | `0` | `N` | **0** | pravá |
+| pravé-vpravo (vnější P) | `2000` | `2000+N` | **2** | pravá |
+
+> **Důležité:** Tlačítka jsou **nezávislá** (libovolná kombinace 0–4); na každé straně je nižší číslo vnitřní (u displeje). Offsety `0`/`1000` sdílí PUM-A i PUM-C, ale PUM-A má vždy DISP na `N`, PUM-C nikdy → BTN patří PUM-A právě tehdy, když na jeho bázové adrese (`addr % 1000`) existuje DISP. Offsety `2000`/`3000` jsou výhradně PUM-A. Reprezentace v kódu: `Set<PumaButton>` (`PumaButton` + `PumaButtonExt` v [`module.dart`](lib/models/module.dart)). Autoritativní zdroj: [`module_reconstruction.dart`](lib/services/module_reconstruction.dart) a `PumaModule.toDevices()`. Starý formát (`buttonCount`/`buttonSide`) migruje `PumaModule.fromJson` (1tl. levé→1, pravé→0, 2tl.→{0,1}).
 
 ### Klíčová pravidla
 
@@ -216,7 +220,7 @@ P2L jednotka komunikuje s devices přes **RS485 sběrnici v sérii**:
 
 ### Algoritmus rekonstrukce z `GET-DEVICES`
 
-1. Pro každý DISP `N`: vytvoř PUM-A @N. Podle přítomnosti BTN `1000+N` / BTN `N` urči 0/1/2 tlačítek a stranu. LEDS `N` → `hasLeds=true`.
+1. Pro každý DISP `N`: vytvoř PUM-A @N. Nárokuj BTN z `{N, 1000+N, 2000+N, 3000+N}` (čísla 0/1/2/3) jako jeho tlačítka. LEDS `N` → `hasLeds=true`.
 2. Pro nezabrané dvojice (BTN `1000+M`, BTN `M`) bez DISP `M` → PUM-C @M.
 3. Zbylé osamocené BTN `N` → PUM-B @N.
 4. Každý DIST → samostatný DIST modul s konfigurací.
@@ -235,7 +239,7 @@ Implementace v [module_reconstruction.dart](lib/services/module_reconstruction.d
 ```
 
 Rekonstrukce:
-- PUM-A @128: DISP 128, BTN 128 (1 tlačítko, pravé), LEDS osazeno
+- PUM-A @128: DISP 128, BTN 128 (1 tlačítko, číslo 0 = pravé-vlevo), LEDS osazeno
 - PUM-C @130: BTN 1130 (+), BTN 130 (−) — přilepeno k PUM-A 128
 - PUM-B @200: samostatné tlačítko
 
