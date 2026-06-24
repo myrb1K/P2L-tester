@@ -422,6 +422,19 @@ class CommandService {
     );
   }
 
+  /// GET-VALUE pro DIST sensor (od FW `P2L_26062301NT`): vyžádá poslední
+  /// naměřenou vzdálenost + stav senzoru. Odpověď na zrcadlovém topicu
+  /// `O/<unit>/DIST/04<addr>/GET-VALUE` jako `{"Distance":<mm>,"Code":0,…}`.
+  static ({String topic, String payload}) buildGetValueCommand({
+    required String unitId,
+    required int distAddress,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, DeviceType.dist, distAddress, 'GET-VALUE'),
+      payload: '{}',
+    );
+  }
+
   /// RESTART jednotky: SW restart. Payload prázdný objekt.
   static ({String topic, String payload}) buildRestartCommand(String unitId) {
     return (

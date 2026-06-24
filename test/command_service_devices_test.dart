@@ -70,6 +70,13 @@ void main() {
         '{"Type":"DIST"}',
       );
     });
+
+    test('GET-VALUE — DIST device topic, prázdný payload', () {
+      final cmd =
+          CommandService.buildGetValueCommand(unitId: '1017', distAddress: 67);
+      expect(cmd.topic, 'I/001017/DIST/040067/GET-VALUE');
+      expect(cmd.payload, '{}');
+    });
   });
 
   group('ADD-DEVICES payload', () {

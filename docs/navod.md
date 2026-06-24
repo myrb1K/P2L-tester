@@ -124,6 +124,7 @@ V dialogu **Přidat device** zvol:
 
 - **Test displeje (AHOJ)** / **Adresa na displej** / **Smazat text** — jen PUM-A.
 - **Rozsvítit / Zhasnout LED** — moduly s LEDS.
+- **Změřit teď** — jen SENZOR (DIST): vyžádá si okamžité změření vzdálenosti (`GET-VALUE`, od FW `P2L_26062301NT`). Výsledek se ukáže v hlášce dole (vzdálenost v mm, nebo porucha / TIMEOUT). Vyžaduje novější firmware — starší jednotka neodpoví a po ~10 s se hlásí „bez odpovědi".
 - **Upravit** — konfigurace DIST.
 - **Vyměnit** — výměna vadného kusu (viz §7).
 - **Přečíslovat** — změna adresy funkčního device (viz §7).
