@@ -3,7 +3,7 @@ P2L32-modul může pro ovládání LED používat identický format jako stará 
 
 
 # Obecný formát nového requestu na jednotku
-Requesty se posilaji na topic ve tvaru: `I/<UNIT_ID>/<DEVICE_TYPE>/<DEVICE_ID>\<COMMAND>`\
+Requesty se posilaji na topic ve tvaru: `I/<UNIT_ID>/<DEVICE_TYPE>/<DEVICE_ID>/<COMMAND>`\
 **UNIT_ID**: ID jednotky.\
 **DEVICE_TYPE**: Typ zařízení ovladaného jednotkou: UNIT, DIST, DISP,BTN, P2L.\
 **DEVICE_ID**: ID zařízení ovladaného jednotkou. ID se skláda z kódu pro zařízení 2-cifry a jeho adresy 4-cifry.\
@@ -12,25 +12,26 @@ Requesty se posilaji na topic ve tvaru: `I/<UNIT_ID>/<DEVICE_TYPE>/<DEVICE_ID>\<
   *  01 P2L
   *  04 DIST
   *  05 DISP
+  *  06 BTN
   *  11 LEDS
     
-**COMMAND**: Příkazy pro jednotlivá zařízení např. SET-CONFIG, GET-CONFIG, SCAN ..., popsáno dále.
+**COMMAND**: Příkazy pro jednotlivá zařízení např. SET-CONFIG, GET-CONFIG, SCAN, SCAN-DEVICES ..., popsáno dále.
 
-Payload obsahuje požadované parametry ve formátu JSON dle jednotlivých `<COMMAND>`s, popsáno dále.
+Payload obsahuje požadované parametry ve formátu JSON dle jednotlivých <COMMAND>s, popsáno dále.
 
 # Obecný formát nového response na request.
-Response se posilaji na topic ve tvaru: `O/<UNIT_ID>/<DEVICE_TYPE>/<DEVICE_ID>\<COMMAND>`\
-Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
+Response se posilaji na topic ve tvaru: `O/<UNIT_ID>/<DEVICE_TYPE>/<DEVICE_ID>/<COMMAND>`\
+Payload je ve formátu: ```{"Code":<STATUS>,"Message":"<Message>"}```\
 **STATUS**: kód chyby. 0 = OK\
 **Message**: popis stavu
 
 # Formát pro jednotlivá zařízení
 ## UNIT - jednotka - kód zařízení 00
 ***COMANDs:***
-* **SET-ID**: změna ID jednotky   \
+* **SET-ID**: změna ID jednotky   
   Parametr:
-  * **Id**\
-    ***Example:***\
+  * **Id**
+    ***Example:***
     TOPIC:
     ```
     I/001001/UNIT/001001/SET-ID 
@@ -39,11 +40,11 @@ Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
     ```jsonc
     {"Id":1002}
     ```
-* **SCAN**: hledání nových zařízení na RS485   \
+* **SCAN**: hledání nových zařízení na RS485   
   Parametr:
   * **Type**: nepovinné, ale doporučené. Určuje jaký typ zařízení se má hledat. Možnosti: DIST, DISP
-  * **Id**:  Adresa zařízení. Nepovinné, pokud známe adresu tak doporučené.\
-    ***Example:***\
+  * **Id**:  Adresa zařízení. Nepovinné, pokud známe adresu tak doporučené.
+    ***Example:***
     TOPIC:
     ```
     I/001001/UNIT/001001/SCAN
@@ -56,6 +57,54 @@ Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
     ```jsonc
     {}
     ```
+* **SCAN-DEVICES**: od verze P2L_26061801NT. Read-only scan RS485 sběrnice – zjistí připojená zařízení **bez zápisu** do konfigurace jednotky (na rozdíl od SCAN)   \
+  Parametr:
+  * **Type**: nepovinné. Omezí rozsah scanu. Možnosti: `DIST`, `PUM`. Chybí-li → scan obou rozsahů (nebo auto podle `Id`, viz níže).
+    * **DIST**: adresy 1–127 (WIT senzory)
+    * **PUM**: adresy 128–247 (PUMA moduly)
+  * **Id**: nepovinné. RS485 adresa pro scan jednoho zařízení. Bez `Type` se typ probe určí z rozsahu (`Id` 1–127 → DIST, 128–247 → PUM).
+  ***Example scan jedné adresy:***\
+  TOPIC:
+  ```
+  I/001001/UNIT/001001/SCAN-DEVICES
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"Id":132}
+  ```
+  ***Example scan PUM:***\
+  TOPIC:
+  ```
+  I/001001/UNIT/001001/SCAN-DEVICES
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"Type":"PUM"}
+  ```
+  ***Example scan DIST + PUM:***\
+  TOPIC:
+  ```
+  I/001001/UNIT/001001/SCAN-DEVICES
+  ```
+  PAYLOAD:
+  ```jsonc
+  {}
+  ```
+  ***Response:*** (stejně jako GET-DEVICES, není formát Code/Message, ale přímo JSON objekt)\
+  TOPIC:
+  ```
+  O/001001/UNIT/001001/SCAN-DEVICES
+  ```
+  PAYLOAD:
+  ```jsonc
+  {
+    "DIST": [1, 2, 67],
+    "PUM-A": [128],
+    "PUM-X": [129, 130, 131, 133]
+  }
+  ```
+  Klíče s prázdným polem se neposílají. Typy PUMA: `PUM-A`, `PUM-B`, `PUM-C` (z HW registru), `PUM-X` (starší PUMA bez registru typu). Verze firmware se neuvádí.\
+  Chybové odpovědi (formát Code/Message): `unknown Type` (-1), `response too large` (-2), `mqtt publish failed` (-3), `invalid Id` (-4).
 * **DELETE**: smazání zařízení   \
   Parametr:
   * **Id**:  Id zařízení včetně typu např 050246\
@@ -114,6 +163,28 @@ Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
     ]
     ```
 * **GET-DEVICES**: Vrátí seznam zařízení ve formátu stejném jako používá RECREATE-DEVICES včetně konfigurace DIST   \
+* **DEVIC-REPLACE**: od verze P2L_06061201NT\
+Nahradí nefunkční (nepřipojené) zařízení "To" novým funkčním zařizenim "From". Prakticky ověří zda původní zařízení nekomunikuje, pokud ano změní adresu nového na adresu původního. Využitelné při instalci, kdy mám jednotku nakonfigurovánu a postupně připojuji zařízení s univerzální adresou, nebo při nahradě poškozeného zařízení  
+    ***Example:***\
+    TOPIC:
+    ```
+    I/001001/UNIT/001001/DEVICE-REPLACE
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"From":247, "To":128}
+    ```
+* **DEVIC-SET-ID**: od verze P2L_06061201NT\
+Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To", nahrazuje SET-ID přímo u jednotlivých zařízení.\
+    ***Example:***\
+    TOPIC:
+    ```
+    I/001001/UNIT/001001/DEVICE-SET-ID
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"From":128, "To":130}
+    ```
 * **BIN**: hromandne commands v binarním formatu pro zrychleni a zkrácení komunikace \
   TOPIC:
   ```
@@ -238,7 +309,25 @@ Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
   ```jsonc
   {}
   ```
-* **REPLACE-FROM**:  funční od verze P2L_06033101NT\
+* **GET-VALUE**: od verze P2L_26062301NT. Vrátí poslední surové naměřenou vzdálenost v mm a stav senzoru (stejná pole Code/Message/Level jako ALIVE).\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/DIST/040001/GET-VALUE
+  ```
+  PAYLOAD:
+  ```jsonc
+  {}
+  ```
+  ***Response*** (topic `O/001001/DIST/040001/GET-VALUE`):
+  ```jsonc
+  {"Distance": 1234, "Code": 0, "Message": "OK", "Level": "INFO"}
+  ```
+  Při poruše (např. timeout RS485):
+  ```jsonc
+  {"Distance": 1234, "Code": -10, "Message": "TIMEOUT", "Level": "INFO"}
+  ```
+* **REPLACE-FROM**:  od verze P2L_26033101NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
   Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatnim ID (standartně 127). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
   Parametr:
   * **ID**: Id ( addr) funčního zařízení standartně 127.   \
@@ -296,7 +385,7 @@ Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
     ```jsonc
     {"Intensity": 3}
     ```
-* **REPLACE-FROM**: funční od verze P2L_06033101NT\
+* **REPLACE-FROM**: funční od verze P2L_26033101NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
   Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatnim ID (standartně 247). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
   Parametr:
   * **ID**: Id ( addr) funčního zařízení standartně 247.   \
@@ -315,8 +404,8 @@ Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
   Rozsvícení Ledek.\
     ```jsonc
     {
-       "Style": 0,
-       "Color": 1
+       "Style": <number>,
+       "Color": <number>
     }
     Style:
     0 : svítí
@@ -368,4 +457,32 @@ Payload je ve formátu: `{"Code":"STATUS_CODE","Message":"Message"}`\
     PAYLOAD:
     ```jsonc
     {"R":255,"G":0,"B":0,"Style":0}
+    ```
+* **REPLACE-FROM**: funční od verze P2L_26061001NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
+  Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatnim ID (standartně 247). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
+  Parametr:
+  * **ID**: Id ( addr) funčního zařízení standartně 247.   \
+    ***Example:***\
+    TOPIC:
+    ```
+    I/001001/LEDS/110128/REPLACE-FROM
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"Id": 247}
+    ```
+## BTN - PUMA BTN - kód zařízení 06
+***COMANDs:***
+* **REPLACE-FROM**: funční od verze P2L_26061001NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
+  Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatním ID (standartně 247). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
+  Parametr:
+  * **ID**: Id ( addr) funčního zařízení standartně 247.   \
+    ***Example:***\
+    TOPIC:
+    ```
+    I/001001/BTN/060128/REPLACE-FROM
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"Id": 247}
     ```
