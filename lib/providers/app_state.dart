@@ -417,6 +417,8 @@ class AppState extends ChangeNotifier {
       _mqttService.subscribe('D/+/BTN/+/UPDATE');
       // DIST měření vzdálenosti (živá hodnota u senzoru v seznamu devices)
       _mqttService.subscribe('D/+/DIST/+/UPDATE');
+      // Vyžádané změření DIST (GET-VALUE, od FW P2L_26062301NT)
+      _mqttService.subscribe('O/+/DIST/+/GET-VALUE');
       _statusMessage = 'Připojeno, čekám na ALIVE…';
       _tickTimer?.cancel();
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -477,6 +479,8 @@ class AppState extends ChangeNotifier {
       _handleBtnUpdate(topic);
     } else if (topic.startsWith('D/') && topic.contains('/DIST/') && topic.endsWith('/UPDATE') && decoded is Map<String, dynamic>) {
       _handleDistUpdate(topic, decoded);
+    } else if (topic.startsWith('O/') && topic.contains('/DIST/') && topic.endsWith('/GET-VALUE') && decoded is Map<String, dynamic>) {
+      _handleGetValueResponse(topic, decoded);
     } else if (topic.startsWith('O/')) {
       // GET-DEVICES odpověď je top-level pole; ostatní O/ odpovědi jsou Map s Code/Message.
       final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
@@ -531,6 +535,69 @@ class AppState extends ChangeNotifier {
   /// Poslední naměřená vzdálenost [mm] DIST senzoru, nebo null (zatím nepřišla).
   int? distanceFor(String unitId, int address) =>
       _distValues['${_normUnitId(unitId)}:$address'];
+
+  // Vyžádané změření DIST (GET-VALUE) — completer dokončí odpověď nebo timeout.
+  final Map<String, Completer<({int? distance, bool ok, String? message})?>>
+      _distValueCompleters = {};
+
+  /// Vyžádá aktuální měření DIST senzoru přes GET-VALUE (od FW `P2L_26062301NT`).
+  /// Vrátí `distance` [mm] + `ok` (Code==0) + `message`, nebo null při timeoutu.
+  /// Úspěšné měření zároveň aktualizuje živou hodnotu ([distanceFor]).
+  Future<({int? distance, bool ok, String? message})?> requestDistValue(
+      String unitId, int address) {
+    final id = _normUnitId(unitId);
+    final key = '$id:$address';
+    final existing = _distValueCompleters[key];
+    if (existing != null) return existing.future;
+
+    final completer = Completer<({int? distance, bool ok, String? message})?>();
+    _distValueCompleters[key] = completer;
+    final displayId = int.tryParse(id)?.toString() ?? id;
+    _setStatus('Měřím senzor $address na jednotce $displayId…');
+    notifyListeners();
+
+    final cmd =
+        CommandService.buildGetValueCommand(unitId: id, distAddress: address);
+    _mqttService.publish(cmd.topic, cmd.payload);
+
+    Future.delayed(const Duration(seconds: 10), () {
+      final c = _distValueCompleters.remove(key);
+      if (c == null || c.isCompleted) return;
+      _setStatus('Měření senzoru $address: bez odpovědi (starší firmware?)',
+          isError: true);
+      notifyListeners();
+      c.complete(null);
+    });
+
+    return completer.future;
+  }
+
+  /// Topic: `O/<unit>/DIST/04<addr>/GET-VALUE`, payload
+  /// `{"Distance":<mm>,"Code":0,"Message":"OK","Level":"INFO"}`.
+  void _handleGetValueResponse(String topic, Map<String, dynamic> json) {
+    final parts = topic.split('/');
+    if (parts.length < 5) return;
+    final unitId = _normUnitId(parts[1]);
+    final deviceId = parts[3];
+    if (deviceId.length < 4) return;
+    final addr = int.tryParse(deviceId.substring(deviceId.length - 4));
+    if (addr == null) return;
+
+    final key = '$unitId:$addr';
+    final code = json['Code'];
+    final ok = code == 0 || code == '0';
+    final dist = json['Distance'];
+    final distance = dist is num ? dist.toInt() : null;
+    // Živou hodnotu přepisujeme jen při úspěchu (při poruše je Distance stará).
+    if (ok && distance != null) _distValues[key] = distance;
+
+    final completer = _distValueCompleters.remove(key);
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(
+          (distance: distance, ok: ok, message: json['Message'] as String?));
+    }
+    notifyListeners();
+  }
 
   void _handleDeviceResponse(
       String topic, Map<String, dynamic> json, dynamic message) {

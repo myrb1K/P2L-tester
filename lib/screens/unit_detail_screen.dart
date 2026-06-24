@@ -99,6 +99,25 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     }
   }
 
+  /// Vyžádané změření DIST senzoru (GET-VALUE) — výsledek/poruchu ukáže hláškou.
+  Future<void> _measureDist(AppState state, PumaModule module) async {
+    final result =
+        await state.requestDistValue(widget.unitId, module.baseAddress);
+    if (!mounted || result == null) return; // null = timeout (hláška ve status baru)
+    final messenger = ScaffoldMessenger.of(context);
+    if (result.ok) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Senzor ${module.baseAddress}: '
+            '${result.distance != null ? '${result.distance} mm' : 'bez hodnoty'}'),
+      ));
+    } else {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Senzor ${module.baseAddress}: porucha'
+            '${result.message != null ? ' — ${result.message}' : ''}'),
+      ));
+    }
+  }
+
   Future<void> _editModule(AppState state, PumaModule module) async {
     final existing = (state.modulesForUnit(widget.unitId) ?? const [])
         .map((m) => m.baseAddress)
@@ -474,6 +493,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                             state.sendLedsOn(unitId: widget.unitId, ledsAddress: m.baseAddress),
                         onLedsOff: (m) =>
                             state.sendLedsOff(unitId: widget.unitId, ledsAddress: m.baseAddress),
+                        onMeasure: (m) => _measureDist(state, m),
                         canReplace: _canReplace,
                       ),
               ),
@@ -592,6 +612,7 @@ class _ModulesGroupedList extends StatelessWidget {
   final void Function(PumaModule) onClearDisplay;
   final void Function(PumaModule) onLedsOn;
   final void Function(PumaModule) onLedsOff;
+  final void Function(PumaModule) onMeasure;
   final bool Function(PumaModule) canReplace;
 
   const _ModulesGroupedList({
@@ -609,6 +630,7 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.onClearDisplay,
     required this.onLedsOn,
     required this.onLedsOff,
+    required this.onMeasure,
     required this.canReplace,
   });
 
@@ -683,6 +705,7 @@ class _ModulesGroupedList extends StatelessWidget {
               onClearDisplay: cat == 'PUM-A' ? onClearDisplay : null,
               onLedsOn: (cat == 'PUM-A' || cat == 'PUM-B') ? onLedsOn : null,
               onLedsOff: (cat == 'PUM-A' || cat == 'PUM-B') ? onLedsOff : null,
+              onMeasure: cat == 'SENZOR' ? onMeasure : null,
             ),
       ],
     );
@@ -706,6 +729,7 @@ class _GroupSection extends StatelessWidget {
   final void Function(PumaModule)? onClearDisplay;
   final void Function(PumaModule)? onLedsOn;
   final void Function(PumaModule)? onLedsOff;
+  final void Function(PumaModule)? onMeasure;
   final bool Function(PumaModule) canReplace;
 
   const _GroupSection({
@@ -726,6 +750,7 @@ class _GroupSection extends StatelessWidget {
     this.onClearDisplay,
     this.onLedsOn,
     this.onLedsOff,
+    this.onMeasure,
   });
 
   @override
@@ -835,6 +860,7 @@ class _GroupSection extends StatelessWidget {
                   onClearDisplay: onClearDisplay != null ? () => onClearDisplay!(m) : null,
                   onLedsOn: onLedsOn != null && m.hasLeds ? () => onLedsOn!(m) : null,
                   onLedsOff: onLedsOff != null && m.hasLeds ? () => onLedsOff!(m) : null,
+                  onMeasure: onMeasure != null ? () => onMeasure!(m) : null,
                 ),
               for (final g in ghosts)
                 _GhostChip(
@@ -904,6 +930,7 @@ class _AddressChip extends StatelessWidget {
   final VoidCallback? onClearDisplay;
   final VoidCallback? onLedsOn;
   final VoidCallback? onLedsOff;
+  final VoidCallback? onMeasure;
 
   const _AddressChip({
     required this.unitId,
@@ -919,6 +946,7 @@ class _AddressChip extends StatelessWidget {
     this.onClearDisplay,
     this.onLedsOn,
     this.onLedsOff,
+    this.onMeasure,
   });
 
   Color _effectiveColor() {
@@ -963,6 +991,7 @@ class _AddressChip extends StatelessWidget {
         if (v == 'clear_disp') onClearDisplay?.call();
         if (v == 'leds_on') onLedsOn?.call();
         if (v == 'leds_off') onLedsOff?.call();
+        if (v == 'measure') onMeasure?.call();
       },
       itemBuilder: (_) => [
         PopupMenuItem(
@@ -973,6 +1002,17 @@ class _AddressChip extends StatelessWidget {
           ),
         ),
         const PopupMenuDivider(),
+        if (onMeasure != null)
+          const PopupMenuItem(
+            value: 'measure',
+            child: Row(
+              children: [
+                Icon(Icons.straighten, size: 18, color: Colors.teal),
+                SizedBox(width: 8),
+                Text('Změřit teď'),
+              ],
+            ),
+          ),
         if (onTestDisplay != null)
           const PopupMenuItem(
             value: 'test_disp',
