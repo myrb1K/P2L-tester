@@ -87,6 +87,9 @@ class AppState extends ChangeNotifier {
   // Rozsah posledního odeslaného skenu (odpověď ho neobsahuje, ale porovnání ho
   // potřebuje, aby sken jen DIST nehlásil PUM moduly jako „chybí").
   final Map<String, BusScanScope> _unitBusScanScope = {};
+  // Adresa posledního skenu jedné adresy (`{"Id":N}`), nebo chybí pro rozsahový
+  // sken — porovnání ji potřebuje, aby omezilo diagnostiku jen na tu adresu.
+  final Map<String, int> _unitBusScanId = {};
   List<DeviceTemplate> _templates = [];
   String _deviceActionStatus = '';
   // true = poslední hláška je chybová (Code != 0) → v UI červeně.
@@ -687,9 +690,13 @@ class AppState extends ChangeNotifier {
           isError: true);
     } else {
       final scope = _unitBusScanScope[unitId] ?? BusScanScope.all;
-      final scan = BusScanResult.fromJson(json, DateTime.now(), scope: scope);
+      final scanId = _unitBusScanId[unitId];
+      final scan = BusScanResult.fromJson(json, DateTime.now(),
+          scope: scope, scanId: scanId);
       _unitBusScan[unitId] = scan;
-      _setStatus('Sken sběrnice $displayId: nalezeno ${scan.total} čipů');
+      _setStatus(scanId != null
+          ? 'Sken adresy $scanId na $displayId: nalezeno ${scan.total} čipů'
+          : 'Sken sběrnice $displayId: nalezeno ${scan.total} čipů');
     }
     notifyListeners();
   }
@@ -1128,6 +1135,7 @@ class AppState extends ChangeNotifier {
     _unitBusScan.remove(id);
     _unitBusScanPending.remove(id);
     _unitBusScanScope.remove(id);
+    _unitBusScanId.remove(id);
     _unitDeviceFaults.remove(id);
 
     final newIdStr = newId.toString().padLeft(4, '0');
@@ -1157,15 +1165,23 @@ class AppState extends ChangeNotifier {
   /// čipy bez zápisu do konfigurace jednotky. Vyžaduje FW ≥ P2L_26061801NT;
   /// starší FW neodpoví a po timeoutu se zobrazí hláška.
   Future<void> scanBus(String unitId,
-      {BusScanScope scope = BusScanScope.all}) async {
+      {BusScanScope scope = BusScanScope.all, int? scanId}) async {
     final id = _normUnitId(unitId);
     _unitBusScanPending.add(id);
     _unitBusScanScope[id] = scope;
-    _setStatus(
-        'Skenuji sběrnici jednotky ${int.tryParse(id)?.toString() ?? id}… (může trvat i přes 10 s)');
+    if (scanId != null) {
+      _unitBusScanId[id] = scanId;
+    } else {
+      _unitBusScanId.remove(id);
+    }
+    final displayId = int.tryParse(id)?.toString() ?? id;
+    _setStatus(scanId != null
+        ? 'Skenuji adresu $scanId na sběrnici jednotky $displayId…'
+        : 'Skenuji sběrnici jednotky $displayId… (může trvat i přes 10 s)');
     notifyListeners();
 
-    final cmd = CommandService.buildScanDevicesCommand(unitId: id, scope: scope);
+    final cmd = CommandService.buildScanDevicesCommand(
+        unitId: id, scope: scope, scanId: scanId);
     _mqttService.publish(cmd.topic, cmd.payload);
 
     // Sken sběrnice je pomalý — reálně trvá i přes 20 s (ověřeno tracem).
@@ -1194,6 +1210,7 @@ class AppState extends ChangeNotifier {
   void _invalidateBusScan(String id) {
     _unitBusScan.remove(id);
     _unitBusScanScope.remove(id);
+    _unitBusScanId.remove(id);
   }
 
   final Set<String> _pendingRestart = {};

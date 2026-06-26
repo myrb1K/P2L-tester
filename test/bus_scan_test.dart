@@ -79,6 +79,36 @@ void main() {
       expect(rows.single.status, BusScanStatus.unregistered);
     });
 
+    test('sken jedné adresy (scanId) porovnává jen tu adresu', () {
+      // Config má víc modulů, ale skenovala se jen adresa 130 (nalezena).
+      final modules = [
+        const PumaModule.pumA(address: 128),
+        const PumaModule.pumA(address: 130),
+        PumaModule.dist(address: 67),
+      ];
+      final scan = BusScanResult.fromJson(
+          jsonDecode('{"PUM-A":[130]}') as Map<String, dynamic>, at,
+          scanId: 130);
+      final rows = diagnoseBus(modules, scan);
+      // Jen řádek pro 130 — ostatní moduly se nehlásí jako „chybí".
+      expect(rows.map((r) => r.address), [130]);
+      expect(rows.single.status, BusScanStatus.ok);
+    });
+
+    test('sken jedné adresy: nakonfigurovaná, ale fyzicky chybí', () {
+      final modules = [
+        const PumaModule.pumA(address: 128),
+        const PumaModule.pumA(address: 130),
+      ];
+      // Sken 130 nic nenašel (prázdná odpověď) → 130 chybí, 128 se neřeší.
+      final scan = BusScanResult.fromJson(
+          jsonDecode('{}') as Map<String, dynamic>, at,
+          scanId: 130);
+      final rows = diagnoseBus(modules, scan);
+      expect(rows.map((r) => r.address), [130]);
+      expect(rows.single.status, BusScanStatus.missing);
+    });
+
     test('PUM-A v konfiguraci vs PUM-C na sběrnici = nesoulad typu', () {
       final modules = [const PumaModule.pumA(address: 128)];
       final scan = BusScanResult.fromJson(

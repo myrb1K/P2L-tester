@@ -64,6 +64,18 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
     }
   }
 
+  /// Dialog pro sken jedné RS485 adresy (`SCAN-DEVICES {"Id":N}`). Firmware si
+  /// typ (DIST 1–127 / PUM 128–247) odvodí z rozsahu adresy sám.
+  Future<void> _promptScanId(BuildContext context, AppState state) async {
+    final addr = await showDialog<int>(
+      context: context,
+      builder: (_) => const _ScanIdDialog(),
+    );
+    if (addr != null) {
+      await state.scanBus(widget.unitId, scanId: addr);
+    }
+  }
+
   /// Přidání modulu z diagnostiky sběrnice — předvyplní adresu i typ nalezené
   /// scanem. U `PUM-X` (starší PUMA bez registru typu) typ neznáme → necháme
   /// na uživateli.
@@ -384,17 +396,29 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 tooltip: 'Načíst devices',
                 onPressed: () => state.fetchDevices(widget.unitId),
               ),
-              PopupMenuButton<BusScanScope>(
+              PopupMenuButton<String>(
                 icon: const Icon(Icons.radar),
                 tooltip: 'Skenovat sběrnici (diagnostika)',
                 enabled: !state.isBusScanPending(widget.unitId),
-                onSelected: (scope) =>
-                    state.scanBus(widget.unitId, scope: scope),
+                // Pozn.: hodnoty musí být nenulové — PopupMenuButton bere
+                // `null` jako „zrušeno" a onSelected by se nezavolal.
+                onSelected: (choice) {
+                  switch (choice) {
+                    case 'id':
+                      _promptScanId(context, state);
+                    case 'pum':
+                      state.scanBus(widget.unitId, scope: BusScanScope.pum);
+                    case 'dist':
+                      state.scanBus(widget.unitId, scope: BusScanScope.dist);
+                    default:
+                      state.scanBus(widget.unitId, scope: BusScanScope.all);
+                  }
+                },
                 itemBuilder: (_) => const [
-                  PopupMenuItem(value: BusScanScope.all, child: Text('Vše')),
-                  PopupMenuItem(value: BusScanScope.pum, child: Text('PUM-X')),
-                  PopupMenuItem(
-                      value: BusScanScope.dist, child: Text('SENZORY')),
+                  PopupMenuItem(value: 'all', child: Text('Vše')),
+                  PopupMenuItem(value: 'pum', child: Text('PUM-X')),
+                  PopupMenuItem(value: 'dist', child: Text('SENZORY')),
+                  PopupMenuItem(value: 'id', child: Text('ID…')),
                 ],
               ),
               IconButton(
@@ -1356,7 +1380,8 @@ class _BusScanPanel extends StatelessWidget {
           children: [
             const Icon(Icons.radar, size: 18),
             const SizedBox(width: 8),
-            Text('${_scopeLabel(scan.scope)} · ${scan.total} čipů',
+            Text(
+                '${scan.scanId != null ? 'ID ${scan.scanId}' : _scopeLabel(scan.scope)} · ${scan.total} čipů',
                 style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(width: 16),
             Expanded(
@@ -1402,6 +1427,66 @@ class _BusScanPanel extends StatelessWidget {
         Icon(icon, size: 14, color: color),
         const SizedBox(width: 4),
         Text(label, style: TextStyle(fontSize: 12, color: color)),
+      ],
+    );
+  }
+}
+
+/// Dialog na zadání jedné RS485 adresy pro sken (`SCAN-DEVICES {"Id":N}`).
+/// Vrací zadanou adresu přes `Navigator.pop`, nebo `null` při zrušení.
+/// Vlastní StatefulWidget (ne inline StatefulBuilder), aby controller žil
+/// po dobu života dialogu a uvolnil se až v dispose() — jinak by se
+/// dispose-ul ještě během zavírací animace a TextField by spadl.
+class _ScanIdDialog extends StatefulWidget {
+  const _ScanIdDialog();
+
+  @override
+  State<_ScanIdDialog> createState() => _ScanIdDialogState();
+}
+
+class _ScanIdDialogState extends State<_ScanIdDialog> {
+  final _controller = TextEditingController();
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final v = int.tryParse(_controller.text.trim());
+    if (v == null || v < 1 || v > 247) {
+      setState(() => _errorText = 'Zadej adresu 1–247');
+      return;
+    }
+    Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Skenovat adresu'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(
+          labelText: 'RS485 adresa',
+          hintText: '1–247 (DIST 1–127, PUM 128–247)',
+          errorText: _errorText,
+        ),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Skenovat'),
+        ),
       ],
     );
   }

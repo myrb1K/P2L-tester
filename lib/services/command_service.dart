@@ -483,15 +483,22 @@ class CommandService {
   static ({String topic, String payload}) buildScanDevicesCommand({
     required String unitId,
     BusScanScope scope = BusScanScope.all,
+    int? scanId,
   }) {
     final args = <String, dynamic>{};
-    switch (scope) {
-      case BusScanScope.dist:
-        args['Type'] = 'DIST';
-      case BusScanScope.pum:
-        args['Type'] = 'PUM';
-      case BusScanScope.all:
-        break;
+    if (scanId != null) {
+      // Sken jedné adresy: firmware si typ (DIST/PUM) odvodí z rozsahu,
+      // `Type` se neposílá.
+      args['Id'] = scanId;
+    } else {
+      switch (scope) {
+        case BusScanScope.dist:
+          args['Type'] = 'DIST';
+        case BusScanScope.pum:
+          args['Type'] = 'PUM';
+        case BusScanScope.all:
+          break;
+      }
     }
     return (
       topic: getUnitCommandTopic(unitId, 'SCAN-DEVICES'),

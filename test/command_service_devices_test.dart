@@ -71,6 +71,22 @@ void main() {
       );
     });
 
+    test('SCAN-DEVICES — scanId → {"Id":N}, bez Type (typ z rozsahu)', () {
+      final cmd = CommandService.buildScanDevicesCommand(
+          unitId: '001001', scanId: 132);
+      expect(cmd.topic, 'I/001001/UNIT/001001/SCAN-DEVICES');
+      expect(cmd.payload, '{"Id":132}');
+    });
+
+    test('SCAN-DEVICES — scanId má přednost před scope', () {
+      expect(
+        CommandService.buildScanDevicesCommand(
+                unitId: '001001', scope: BusScanScope.dist, scanId: 50)
+            .payload,
+        '{"Id":50}',
+      );
+    });
+
     test('GET-VALUE — DIST device topic, prázdný payload', () {
       final cmd =
           CommandService.buildGetValueCommand(unitId: '1017', distAddress: 67);

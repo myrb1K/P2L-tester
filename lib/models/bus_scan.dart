@@ -26,11 +26,17 @@ class BusScanResult {
   /// porovnávat (sken jen DIST nesmí hlásit PUM moduly jako „chybí").
   final BusScanScope scope;
 
+  /// Adresa skenovaná přes `{"Id":N}` (sken jedné adresy), nebo `null` pro
+  /// rozsahový sken. Když je nastavená, porovnání ([diagnoseBus]) se omezí
+  /// jen na tuto adresu — jinak by všechny ostatní konfigurované moduly
+  /// vyšly jako „chybí".
+  final int? scanId;
+
   const BusScanResult(this.byType, this.scannedAt,
-      {this.scope = BusScanScope.all});
+      {this.scope = BusScanScope.all, this.scanId});
 
   factory BusScanResult.fromJson(Map<String, dynamic> json, DateTime at,
-      {BusScanScope scope = BusScanScope.all}) {
+      {BusScanScope scope = BusScanScope.all, int? scanId}) {
     final map = <String, List<int>>{};
     json.forEach((key, value) {
       if (value is List) {
@@ -39,7 +45,7 @@ class BusScanResult {
         if (addrs.isNotEmpty) map[key] = addrs;
       }
     });
-    return BusScanResult(map, at, scope: scope);
+    return BusScanResult(map, at, scope: scope, scanId: scanId);
   }
 
   /// Počet nalezených čipů celkem.
@@ -114,9 +120,14 @@ List<BusScanRow> diagnoseBus(List<PumaModule> modules, BusScanResult scan) {
         BusScanScope.pum => t != ModuleType.dist,
       };
 
+  // Sken jedné adresy (`{"Id":N}`) porovnáváme jen na té adrese — jinak by
+  // ostatní konfigurované moduly vyšly jako „chybí na sběrnici".
+  bool addrInScan(int addr) => scan.scanId == null || addr == scan.scanId;
+
   final configByAddr = <int, String>{
     for (final m in modules)
-      if (inScope(m.type)) m.baseAddress: m.type.label,
+      if (inScope(m.type) && addrInScan(m.baseAddress))
+        m.baseAddress: m.type.label,
   };
   final busByAddr = scan.addressTypes;
 
