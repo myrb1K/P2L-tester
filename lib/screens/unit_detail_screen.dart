@@ -953,13 +953,10 @@ class _GroupSection extends StatelessWidget {
   }
 
   Future<void> _bulkDisp(BuildContext context, String text) async {
-    // Nový FW neumí broadcast na DISP 0 ("unknown ID") — pošleme na každý
-    // displej zvlášť (modules = PUM-A skupina) se 100ms pauzou.
+    // Broadcast na všechny displeje přes DISP 050000 (adresa 0) — jeden příkaz.
+    // (Ověřeno na novém FW; starší FW broadcast odmítal, viz historie v2.71.)
     final state = context.read<AppState>();
-    for (final m in modules) {
-      await state.sendDispData(unitId: unitId, dispAddress: m.baseAddress, data: text);
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
+    await state.sendDispData(unitId: unitId, dispAddress: 0, data: text);
   }
 
   Future<void> _bulkDispAddresses(BuildContext context) async {

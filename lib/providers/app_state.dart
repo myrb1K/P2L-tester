@@ -1434,9 +1434,11 @@ class AppState extends ChangeNotifier {
       data: data,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
+    // Adresa 0 = broadcast na všechny displeje (DISP 050000).
+    final target = dispAddress == 0 ? 'všechny displeje' : 'DISP @$dispAddress';
     _setStatus(data.isEmpty
-        ? 'DISP @$dispAddress na $id: smazáno'
-        : 'DISP @$dispAddress na $id: "$data"');
+        ? '$target na $id: smazáno'
+        : '$target na $id: "$data"');
     notifyListeners();
   }
 
