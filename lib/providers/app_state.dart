@@ -90,6 +90,16 @@ class AppState extends ChangeNotifier {
   // Adresa posledního skenu jedné adresy (`{"Id":N}`), nebo chybí pro rozsahový
   // sken — porovnání ji potřebuje, aby omezilo diagnostiku jen na tu adresu.
   final Map<String, int> _unitBusScanId = {};
+  // Adresa, kterou po následném GET-DEVICES ověříme cíleným SCAN-DEVICES
+  // {"Id":N} (instant kontrola fyzické přítomnosti) — po přidání i po smazání
+  // device (zjistí, zda čip na sběrnici fyzicky zůstal).
+  final Map<String, int> _pendingAddVerify = {};
+  // Probíhající probe adresy (ověření před výměnou) — completer doplní odpověď
+  // SCAN-DEVICES. Klíč `unitId:address`. Na rozdíl od skenu výsledek neukládá.
+  final Map<String, Completer<bool?>> _busProbes = {};
+  // Nová adresa PUM-A displeje po přečíslování (DEVICE-SET-ID) — po potvrzení
+  // se na displej pošle, aby se nová adresa fyzicky zobrazila.
+  final Map<String, int> _pendingDispAddrAfterSetId = {};
   List<DeviceTemplate> _templates = [];
   String _deviceActionStatus = '';
   // true = poslední hláška je chybová (Code != 0) → v UI červeně.
@@ -627,10 +637,19 @@ class AppState extends ChangeNotifier {
           isError: !ok);
       _unitModulesPending.remove(unitId);
       if (ok) {
-        // Operace prošla → fyzický stav sběrnice i config se změnily, starý
-        // sken je neplatný. Při chybě (Code != 0) sken zachováme, ať uživatel
-        // nemusí znovu skenovat.
-        _invalidateBusScan(unitId);
+        // Re-adresování (REPLACE/SET-ID) mění fyzické adresy čipů → starý sken
+        // je neplatný. ADD/RECREATE/DELETE mění jen konfiguraci jednotky, ale
+        // fyzická sběrnice je beze změny → sken NEzahazujeme: diagnostika se
+        // přepočítá proti novému configu (přidaný device zezelená, ostatní
+        // ghost devices zůstanou viditelné). Při chybě sken vždy zachováme.
+        if (cmd == 'DEVICE-REPLACE' || cmd == 'DEVICE-SET-ID') {
+          _invalidateBusScan(unitId);
+        }
+        // Přečíslovaný PUM-A → zobraz novou adresu na jeho displeji (jen bez
+        // restartu — po restartu by se displej stejně překreslil).
+        final dispAddr = cmd == 'DEVICE-SET-ID'
+            ? _pendingDispAddrAfterSetId.remove(unitId)
+            : null;
         if (_pendingRestart.remove(unitId)) {
           // S restartem: GET-DEVICES posílat až po návratu jednotky online (první ALIVE).
           _awaitingAliveAfterRestart.add(unitId);
@@ -638,9 +657,22 @@ class AppState extends ChangeNotifier {
           Future.microtask(() => restartUnit(unitId));
         } else {
           Future.microtask(() => fetchDevices(unitId));
+          if (dispAddr != null) {
+            // Krátká prodleva, ať se čip stihne přemapovat na novou adresu.
+            Future.delayed(const Duration(milliseconds: 300), () {
+              sendDispData(
+                unitId: unitId,
+                dispAddress: dispAddr,
+                data: dispAddr.toString().padLeft(4, '0'),
+              );
+            });
+          }
         }
       } else {
         _pendingRestart.remove(unitId);
+        // Add selhal → GET-DEVICES neproběhne, ověřovací sken zahodíme.
+        _pendingAddVerify.remove(unitId);
+        _pendingDispAddrAfterSetId.remove(unitId);
       }
       notifyListeners();
     }
@@ -671,6 +703,14 @@ class AppState extends ChangeNotifier {
       _unitModules[unitId] = reconstructModules(devices);
       _unitModulesFetchedAt[unitId] = DateTime.now();
       _setStatus('Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)');
+      // Ověření právě přidaného device cíleným skenem jeho adresy (až teď, kdy
+      // je config aktuální). Výsledek se v `_handleScanDevicesResponse`
+      // vmerguje do případného existujícího skenu, takže ostatní ghost devices
+      // v seznamu zůstanou.
+      final verifyAddr = _pendingAddVerify.remove(unitId);
+      if (verifyAddr != null) {
+        Future.microtask(() => scanBus(unitId, scanId: verifyAddr));
+      }
     } else {
       _setStatus('GET-DEVICES $unitId: neočekávaný formát odpovědi', isError: true);
     }
@@ -684,6 +724,28 @@ class AppState extends ChangeNotifier {
     _unitBusScanPending.remove(unitId);
     final displayId = int.tryParse(unitId)?.toString() ?? unitId;
     final code = json['Code'];
+
+    // Čekající probe (ověření adresy, např. před výměnou)? Doplň completer
+    // podle toho, zda sken adresu našel — a NEukládej do zobrazeného skenu.
+    final probeKey = _busProbes.keys
+        .firstWhere((k) => k.startsWith('$unitId:'), orElse: () => '');
+    if (probeKey.isNotEmpty) {
+      final completer = _busProbes.remove(probeKey);
+      final addr = int.tryParse(probeKey.split(':').last);
+      if (completer != null && !completer.isCompleted) {
+        final isError = code != null && code != 0 && code != '0';
+        if (isError || addr == null) {
+          completer.complete(null);
+        } else {
+          final found = BusScanResult.fromJson(json, DateTime.now())
+              .addressTypes
+              .containsKey(addr);
+          completer.complete(found);
+        }
+      }
+      return;
+    }
+
     if (code != null && code != 0 && code != '0') {
       final msg = json['Message'] as String?;
       _setStatus('Sken sběrnice $displayId: chyba${msg != null ? " — $msg" : ""}',
@@ -691,12 +753,28 @@ class AppState extends ChangeNotifier {
     } else {
       final scope = _unitBusScanScope[unitId] ?? BusScanScope.all;
       final scanId = _unitBusScanId[unitId];
-      final scan = BusScanResult.fromJson(json, DateTime.now(),
-          scope: scope, scanId: scanId);
+      final existing = _unitBusScan[unitId];
+      final BusScanResult scan;
+      if (scanId != null &&
+          existing != null &&
+          existing.scanId == null &&
+          existing.scope.containsAddress(scanId)) {
+        // Cílené ověření adresy proti existujícímu rozsahovému skenu →
+        // aktualizuj jen tuhle adresu, ostatní nalezené devices zachovej.
+        scan = existing.withUpdatedAddress(scanId, json, DateTime.now());
+      } else {
+        scan = BusScanResult.fromJson(json, DateTime.now(),
+            scope: scope, scanId: scanId);
+      }
       _unitBusScan[unitId] = scan;
-      _setStatus(scanId != null
-          ? 'Sken adresy $scanId na $displayId: nalezeno ${scan.total} čipů'
-          : 'Sken sběrnice $displayId: nalezeno ${scan.total} čipů');
+      if (scanId != null) {
+        final type = scan.addressTypes[scanId];
+        _setStatus(type != null
+            ? 'Ověření adresy $scanId na $displayId: připojeno ($type)'
+            : 'Ověření adresy $scanId na $displayId: na sběrnici nenalezeno');
+      } else {
+        _setStatus('Sken sběrnice $displayId: nalezeno ${scan.total} čipů');
+      }
     }
     notifyListeners();
   }
@@ -1136,6 +1214,12 @@ class AppState extends ChangeNotifier {
     _unitBusScanPending.remove(id);
     _unitBusScanScope.remove(id);
     _unitBusScanId.remove(id);
+    _pendingAddVerify.remove(id);
+    _pendingDispAddrAfterSetId.remove(id);
+    for (final key in _busProbes.keys.where((k) => k.startsWith('$id:')).toList()) {
+      final c = _busProbes.remove(key);
+      if (c != null && !c.isCompleted) c.complete(null);
+    }
     _unitDeviceFaults.remove(id);
 
     final newIdStr = newId.toString().padLeft(4, '0');
@@ -1197,6 +1281,36 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  /// Ověří jednu adresu cíleným `SCAN-DEVICES {"Id":N}` a vrátí, zda je na ní
+  /// device fyzicky připojen: `true` = nalezen, `false` = sken odpověděl, ale
+  /// nic tam není, `null` = bez odpovědi (starší firmware / timeout).
+  /// Na rozdíl od [scanBus] výsledek **neukládá** do zobrazeného skenu — slouží
+  /// jen jako kontrola (např. nový kus před výměnou).
+  Future<bool?> probeBusAddress(String unitId, int address) {
+    final id = _normUnitId(unitId);
+    final key = '$id:$address';
+    final existing = _busProbes[key];
+    if (existing != null) return existing.future;
+
+    final completer = Completer<bool?>();
+    _busProbes[key] = completer;
+    final displayId = int.tryParse(id)?.toString() ?? id;
+    _setStatus('Ověřuji adresu $address na sběrnici jednotky $displayId…');
+    notifyListeners();
+
+    final cmd =
+        CommandService.buildScanDevicesCommand(unitId: id, scanId: address);
+    _mqttService.publish(cmd.topic, cmd.payload);
+
+    Future.delayed(const Duration(seconds: 15), () {
+      final c = _busProbes.remove(key);
+      if (c == null || c.isCompleted) return;
+      c.complete(null); // bez odpovědi
+    });
+
+    return completer.future;
+  }
+
   /// Zahodí výsledek skenu sběrnice (zavření diagnostického panelu).
   void clearBusScan(String unitId) {
     final id = _normUnitId(unitId);
@@ -1231,6 +1345,14 @@ class AppState extends ChangeNotifier {
     _unitModulesPending.add(id);
     _setStatus('Přidávám devices do ${int.tryParse(id)?.toString() ?? id}…');
     if (restartAfter) _pendingRestart.add(id);
+    // Po přidání jednoho device ho rovnou ověříme cíleným skenem jeho adresy
+    // (proběhne až po následném GET-DEVICES). Při přidání více devices najednou
+    // (import) auto-ověření přeskočíme — jeden ID-sken víc adres nepokryje.
+    if (modules.length == 1) {
+      _pendingAddVerify[id] = modules.first.baseAddress;
+    } else {
+      _pendingAddVerify.remove(id);
+    }
     notifyListeners();
 
     final cmd = CommandService.buildAddDevicesCommand(id, modules);
@@ -1410,6 +1532,9 @@ class AppState extends ChangeNotifier {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
     _setStatus('Mažu ${module.displayLabel} na ${int.tryParse(id)?.toString() ?? id}…');
+    // Po smazání ověříme adresu skenem — když je čip pořád fyzicky na sběrnici,
+    // ukáže se jako šedý „ghost" (v configu už není, na sběrnici ano).
+    _pendingAddVerify[id] = module.baseAddress;
     notifyListeners();
 
     final cmd = CommandService.buildDeleteDevicesCommand(id, [module]);
@@ -1461,6 +1586,12 @@ class AppState extends ChangeNotifier {
     _setStatus(
         'Přečíslování ${type.code} @$oldAddress → $newAddress na $id…');
     if (restartAfter) _pendingRestart.add(id);
+    // PUM-A (displej) → po potvrzení zobrazíme novou adresu na displeji.
+    if (type == DeviceType.disp) {
+      _pendingDispAddrAfterSetId[id] = newAddress;
+    } else {
+      _pendingDispAddrAfterSetId.remove(id);
+    }
     notifyListeners();
 
     final cmd = CommandService.buildDeviceSetIdCommand(

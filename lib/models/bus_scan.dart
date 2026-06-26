@@ -9,6 +9,17 @@ import 'module.dart';
 /// (DIST/DISP/BTN…), proto vlastní enum.
 enum BusScanScope { all, dist, pum }
 
+extension BusScanScopeRange on BusScanScope {
+  /// Spadá adresa do rozsahu tohoto skenu? `all` = vše, `dist` = 1–127,
+  /// `pum` = 128–247. Slouží k rozhodnutí, zda rozsahový sken už danou
+  /// adresu „pokrývá" (a není tedy nutné ji ověřovat zvlášť).
+  bool containsAddress(int address) => switch (this) {
+        BusScanScope.all => true,
+        BusScanScope.dist => address >= 1 && address <= 127,
+        BusScanScope.pum => address >= 128 && address <= 247,
+      };
+}
+
 /// Výsledek read-only scanu RS485 sběrnice (`SCAN-DEVICES`, od FW
 /// `P2L_26061801NT`). Na rozdíl od `GET-DEVICES` reportuje **fyzicky připojené**
 /// čipy, nikoli uloženou konfiguraci jednotky, a nic do jednotky nezapisuje.
@@ -50,6 +61,33 @@ class BusScanResult {
 
   /// Počet nalezených čipů celkem.
   int get total => byType.values.fold(0, (sum, list) => sum + list.length);
+
+  /// Vrátí kopii skenu s aktualizovaným stavem **jediné adresy** podle výsledku
+  /// cíleného single-ID skenu (`singleScanJson`). Adresa se nejdřív odebere ze
+  /// všech typů, pak se přidá pod typ, který ji sken ohlásil — pokud ho ohlásil;
+  /// když sken nic nenašel, zůstane odebraná (= fyzicky nepřítomná, v
+  /// diagnostice „chybí"). `scope` se zachová a `scanId` se vynuluje, takže
+  /// porovnání pokrývá celou množinu a **ostatní dříve nalezené devices
+  /// zůstanou viditelné** (na rozdíl od nahrazení celého skenu single-ID
+  /// výsledkem).
+  BusScanResult withUpdatedAddress(
+      int address, Map<String, dynamic> singleScanJson, DateTime at) {
+    final merged = <String, List<int>>{
+      for (final e in byType.entries)
+        e.key: (List<int>.from(e.value)..remove(address)),
+    };
+    singleScanJson.forEach((key, value) {
+      if (value is List &&
+          value.whereType<num>().any((e) => e.toInt() == address)) {
+        (merged[key] ??= []).add(address);
+      }
+    });
+    merged.removeWhere((_, v) => v.isEmpty);
+    for (final list in merged.values) {
+      list.sort();
+    }
+    return BusScanResult(merged, at, scope: scope);
+  }
 
   /// Adresa → typ čipu (zploštěná mapa pro porovnání s konfigurací).
   Map<int, String> get addressTypes {

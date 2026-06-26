@@ -22,6 +22,55 @@ void main() {
     });
   });
 
+  group('BusScanResult.withUpdatedAddress', () {
+    final base = BusScanResult.fromJson(
+        jsonDecode('{"PUM-A":[133],"PUM-C":[134]}') as Map<String, dynamic>,
+        at,
+        scope: BusScanScope.pum);
+
+    test('ověření nalezené adresy zachová ostatní devices a vynuluje scanId', () {
+      final merged = base.withUpdatedAddress(
+          133, jsonDecode('{"PUM-A":[133]}') as Map<String, dynamic>, at);
+      expect(merged.byType['PUM-A'], [133]);
+      expect(merged.byType['PUM-C'], [134]); // druhý device zůstane
+      expect(merged.scanId, isNull); // porovnání pokrývá celou množinu
+      expect(merged.scope, BusScanScope.pum);
+    });
+
+    test('adresa nenalezená skenem se odebere (= fyzicky chybí)', () {
+      final merged = base.withUpdatedAddress(
+          133, jsonDecode('{}') as Map<String, dynamic>, at);
+      expect(merged.addressTypes.containsKey(133), isFalse);
+      expect(merged.byType['PUM-C'], [134]);
+    });
+
+    test('aktualizuje typ adresy (PUM-X → PUM-A)', () {
+      final start = BusScanResult.fromJson(
+          jsonDecode('{"PUM-X":[133]}') as Map<String, dynamic>, at);
+      final merged = start.withUpdatedAddress(
+          133, jsonDecode('{"PUM-A":[133]}') as Map<String, dynamic>, at);
+      expect(merged.byType.containsKey('PUM-X'), isFalse);
+      expect(merged.byType['PUM-A'], [133]);
+    });
+  });
+
+  group('BusScanScope.containsAddress', () {
+    test('all pokrývá vše', () {
+      expect(BusScanScope.all.containsAddress(1), isTrue);
+      expect(BusScanScope.all.containsAddress(247), isTrue);
+    });
+    test('dist jen 1–127', () {
+      expect(BusScanScope.dist.containsAddress(1), isTrue);
+      expect(BusScanScope.dist.containsAddress(127), isTrue);
+      expect(BusScanScope.dist.containsAddress(128), isFalse);
+    });
+    test('pum jen 128–247', () {
+      expect(BusScanScope.pum.containsAddress(127), isFalse);
+      expect(BusScanScope.pum.containsAddress(128), isTrue);
+      expect(BusScanScope.pum.containsAddress(247), isTrue);
+    });
+  });
+
   group('diagnoseBus', () {
     test('OK / chybí na sběrnici / nezaregistrované', () {
       final modules = [
@@ -107,6 +156,22 @@ void main() {
       final rows = diagnoseBus(modules, scan);
       expect(rows.map((r) => r.address), [130]);
       expect(rows.single.status, BusScanStatus.missing);
+    });
+
+    test('po přidání jednoho ghostu zůstane druhý ghost viditelný', () {
+      // Rozsahový PUM sken našel dva neuložené devices: 133 a 134.
+      final scan = BusScanResult.fromJson(
+          jsonDecode('{"PUM-A":[133],"PUM-C":[134]}') as Map<String, dynamic>,
+          at,
+          scope: BusScanScope.pum);
+      // Uživatel přidal 133 do configu (sken se NEzahazuje, jen se přepočítá).
+      final modulesAfterAdd = [const PumaModule.pumA(address: 133)];
+      final rows = {
+        for (final r in diagnoseBus(modulesAfterAdd, scan)) r.address: r
+      };
+      expect(rows[133]!.status, BusScanStatus.ok); // přidaný → zezelená
+      expect(rows[134]!.status,
+          BusScanStatus.unregistered); // druhý ghost zůstane
     });
 
     test('PUM-A v konfiguraci vs PUM-C na sběrnici = nesoulad typu', () {

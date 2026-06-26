@@ -120,15 +120,18 @@ V dialogu **Přidat device** zvol:
 - **SENZOR (DIST):** konfigurace měření (perioda, timeout, počet měření, max. odchylka, offset, dosah Short/Middle/Long).
 - Volitelně **Po úpravě restartovat P2L modul**.
 
+Po přidání jednoho device se jeho adresa **automaticky ověří cíleným skenem** (`SCAN-DEVICES` na danou adresu) — hned po načtení configu uvidíš, jestli je device fyzicky připojený (🟢 OK) nebo na sběrnici chybí (🔴). Pokud jsi předtím skenoval celou sběrnici (např. přidáváš device z šedého „ghostu"), výsledek ověření se do toho skenu **vmerguje** — aktualizuje se jen ověřovaná adresa a **ostatní ghost devices v seznamu zůstanou**, takže je můžeš přidat taky. Vyžaduje firmware se `SCAN-DEVICES`. Při importu více devices najednou se auto-ověření nedělá — sken spusť ručně.
+
 ### Akce na čipu (popup menu na adrese)
 
+- **Rescan** — pošle cílený sken adresy toho device (`SCAN-DEVICES` na jeho adresu) a podle odpovědi ho označí 🟢 OK (fyzicky na sběrnici) nebo 🔴 chybí (nekomunikuje). Hláška dole napíše konkrétní výsledek. Ostatní devices v seznamu zůstanou beze změny. Vyžaduje firmware se `SCAN-DEVICES`.
 - **Test displeje (AHOJ)** / **Adresa na displej** / **Smazat text** — jen PUM-A.
 - **Rozsvítit / Zhasnout LED** — moduly s LEDS.
 - **Změřit teď** — jen SENZOR (DIST): vyžádá si okamžité změření vzdálenosti (`GET-VALUE`, od FW `P2L_26062301NT`). Výsledek se ukáže v hlášce dole (vzdálenost v mm, nebo porucha / TIMEOUT). Vyžaduje novější firmware — starší jednotka neodpoví a po ~10 s se hlásí „bez odpovědi".
 - **Upravit** — konfigurace DIST.
 - **Vyměnit** — výměna vadného kusu (viz §7).
 - **Přečíslovat** — změna adresy funkčního device (viz §7).
-- **Smazat** — odebere device z jednotky.
+- **Smazat** — odebere device z jednotky. Poté se adresa ověří skenem: pokud je čip pořád fyzicky na sběrnici, zobrazí se jako šedý „ghost" (v configu už není, ale připojený je) — můžeš ho rovnou zase přidat, nebo fyzicky odpojit.
 
 Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / adresu / smazat text na všechny displeje (postupně na každý se 100ms pauzou).
 
@@ -170,11 +173,11 @@ Nový firmware řeší obojí příkazy na úrovni jednotky; firmware atomicky p
 
 ### Vyměnit (vadný kus)
 
-Když je device fyzicky vadný, vyměníš ho za nový kus s **factory default adresou**. V menu čipu zvol **Vyměnit**, potvrď default adresu nového kusu — jednotka přečipuje nový na ID původního (`DEVICE-REPLACE`).
+Když je device fyzicky vadný, vyměníš ho za nový kus s **factory default adresou**. V menu čipu zvol **Vyměnit**, potvrď default adresu nového kusu. Aplikace nejdřív **ověří skenem, že je nový kus na své default adrese fyzicky na sběrnici**, a teprve pak pošle přečipování nového na ID původního (`DEVICE-REPLACE`). Když nový kus nenajde (nebo to nejde ověřit — starší firmware), zeptá se, jestli přesto pokračovat.
 
 ### Přečíslovat (funkční device)
 
-Změna adresy funkčního device: v menu čipu **Přečíslovat**, zadej novou adresu v platném rozsahu (aplikace hlídá kolize). Jednotka přemapuje device (`DEVICE-SET-ID`).
+Změna adresy funkčního device: v menu čipu **Přečíslovat**, zadej novou adresu v platném rozsahu (aplikace hlídá kolize). Jednotka přemapuje device (`DEVICE-SET-ID`). U **PUM-A** se po přečíslování nová adresa rovnou zobrazí na jeho displeji (pro fyzické ověření).
 
 Po obou operacích jednotka potvrdí a aplikace si automaticky vyžádá aktuální `GET-DEVICES`.
 

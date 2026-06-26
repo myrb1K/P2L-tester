@@ -156,15 +156,44 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
       context: context,
       builder: (_) => ReplaceDeviceDialog(module: module, existingAddresses: existing),
     );
-    if (result != null) {
-      await state.replaceDevice(
-        unitId: widget.unitId,
-        type: result.type,
-        oldAddress: result.oldAddress,
-        newDefaultAddress: result.newDefaultAddress,
-        restartAfter: result.restartAfter,
+    if (result == null) return;
+
+    // Před přečipováním ověříme, že nový kus je na své default adrese fyzicky
+    // na sběrnici. Když není (nebo to nejde ověřit), zeptáme se, zda pokračovat.
+    final found =
+        await state.probeBusAddress(widget.unitId, result.newDefaultAddress);
+    if (!mounted) return;
+    if (found != true) {
+      final msg = found == false
+          ? 'Nový kus na adrese ${result.newDefaultAddress} nebyl na sběrnici nalezen — možná není připojený.'
+          : 'Nový kus na adrese ${result.newDefaultAddress} se nepodařilo ověřit (starší firmware bez SCAN-DEVICES?).';
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Nový kus neověřen'),
+          content: Text('$msg\n\nPřesto provést výměnu?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Zrušit'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Přesto vyměnit'),
+            ),
+          ],
+        ),
       );
+      if (proceed != true) return;
     }
+
+    await state.replaceDevice(
+      unitId: widget.unitId,
+      type: result.type,
+      oldAddress: result.oldAddress,
+      newDefaultAddress: result.newDefaultAddress,
+      restartAfter: result.restartAfter,
+    );
   }
 
   Future<void> _setIdModule(AppState state, PumaModule module) async {
@@ -518,6 +547,8 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                         onLedsOff: (m) =>
                             state.sendLedsOff(unitId: widget.unitId, ledsAddress: m.baseAddress),
                         onMeasure: (m) => _measureDist(state, m),
+                        onRescan: (m) =>
+                            state.scanBus(widget.unitId, scanId: m.baseAddress),
                         canReplace: _canReplace,
                       ),
               ),
@@ -637,6 +668,7 @@ class _ModulesGroupedList extends StatelessWidget {
   final void Function(PumaModule) onLedsOn;
   final void Function(PumaModule) onLedsOff;
   final void Function(PumaModule) onMeasure;
+  final void Function(PumaModule) onRescan;
   final bool Function(PumaModule) canReplace;
 
   const _ModulesGroupedList({
@@ -655,6 +687,7 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.onLedsOn,
     required this.onLedsOff,
     required this.onMeasure,
+    required this.onRescan,
     required this.canReplace,
   });
 
@@ -730,6 +763,7 @@ class _ModulesGroupedList extends StatelessWidget {
               onLedsOn: (cat == 'PUM-A' || cat == 'PUM-B') ? onLedsOn : null,
               onLedsOff: (cat == 'PUM-A' || cat == 'PUM-B') ? onLedsOff : null,
               onMeasure: cat == 'SENZOR' ? onMeasure : null,
+              onRescan: onRescan,
             ),
       ],
     );
@@ -754,6 +788,7 @@ class _GroupSection extends StatelessWidget {
   final void Function(PumaModule)? onLedsOn;
   final void Function(PumaModule)? onLedsOff;
   final void Function(PumaModule)? onMeasure;
+  final void Function(PumaModule) onRescan;
   final bool Function(PumaModule) canReplace;
 
   const _GroupSection({
@@ -767,6 +802,7 @@ class _GroupSection extends StatelessWidget {
     required this.onReplace,
     required this.onSetId,
     required this.onDelete,
+    required this.onRescan,
     required this.canReplace,
     this.onEdit,
     this.onTestDisplay,
@@ -885,6 +921,7 @@ class _GroupSection extends StatelessWidget {
                   onLedsOn: onLedsOn != null && m.hasLeds ? () => onLedsOn!(m) : null,
                   onLedsOff: onLedsOff != null && m.hasLeds ? () => onLedsOff!(m) : null,
                   onMeasure: onMeasure != null ? () => onMeasure!(m) : null,
+                  onRescan: () => onRescan(m),
                 ),
               for (final g in ghosts)
                 _GhostChip(
@@ -955,6 +992,7 @@ class _AddressChip extends StatelessWidget {
   final VoidCallback? onLedsOn;
   final VoidCallback? onLedsOff;
   final VoidCallback? onMeasure;
+  final VoidCallback? onRescan;
 
   const _AddressChip({
     required this.unitId,
@@ -971,6 +1009,7 @@ class _AddressChip extends StatelessWidget {
     this.onLedsOn,
     this.onLedsOff,
     this.onMeasure,
+    this.onRescan,
   });
 
   Color _effectiveColor() {
@@ -1016,6 +1055,7 @@ class _AddressChip extends StatelessWidget {
         if (v == 'leds_on') onLedsOn?.call();
         if (v == 'leds_off') onLedsOff?.call();
         if (v == 'measure') onMeasure?.call();
+        if (v == 'rescan') onRescan?.call();
       },
       itemBuilder: (_) => [
         PopupMenuItem(
@@ -1026,6 +1066,17 @@ class _AddressChip extends StatelessWidget {
           ),
         ),
         const PopupMenuDivider(),
+        if (onRescan != null)
+          const PopupMenuItem(
+            value: 'rescan',
+            child: Row(
+              children: [
+                Icon(Icons.radar, size: 18, color: Colors.teal),
+                SizedBox(width: 8),
+                Text('Rescan'),
+              ],
+            ),
+          ),
         if (onMeasure != null)
           const PopupMenuItem(
             value: 'measure',
