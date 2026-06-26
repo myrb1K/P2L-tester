@@ -354,6 +354,31 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Navrhne unikátní název profilu na základě [base] (přidá " (2)", " (3)"…).
+  String suggestUniqueProfileName(String base) {
+    final trimmed = base.trim();
+    if (!isProfileNameTaken(trimmed)) return trimmed;
+    for (var i = 2; i < 1000; i++) {
+      final candidate = '$trimmed ($i)';
+      if (!isProfileNameTaken(candidate)) return candidate;
+    }
+    return '$trimmed (${DateTime.now().millisecondsSinceEpoch})';
+  }
+
+  /// Duplikuje profil na [index] — vytvoří kopii s unikátním názvem a vloží ji
+  /// hned za originál (bez aktivace, bez přepnutí připojení).
+  Future<void> duplicateProfile(int index) async {
+    if (index < 0 || index >= _profiles.length) return;
+    final src = _profiles[index];
+    final clone = BrokerProfile.fromJson(src.toJson())
+      ..name = suggestUniqueProfileName(src.name);
+    _profiles.insert(index + 1, clone);
+    // Aktivní index se posune, pokud byl za vloženým prvkem.
+    if (_activeProfileIndex > index) _activeProfileIndex++;
+    await _saveProfiles();
+    notifyListeners();
+  }
+
   /// Přesune profil z [oldIndex] na [newIndex] a udrží `_activeProfileIndex`
   /// ukazující na původně aktivní profil.
   Future<void> reorderProfiles(int oldIndex, int newIndex) async {
