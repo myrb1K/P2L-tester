@@ -134,7 +134,7 @@ Po přidání jednoho device se jeho adresa **automaticky ověří cíleným ske
 - **Přečíslovat** — změna adresy funkčního device (viz §7).
 - **Smazat** — odebere device z jednotky. Poté se adresa ověří skenem: pokud je čip pořád fyzicky na sběrnici, zobrazí se jako šedý „ghost" (v configu už není, ale připojený je) — můžeš ho rovnou zase přidat, nebo fyzicky odpojit.
 
-Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / smazat text na všechny displeje (jeden broadcast), nebo poslat každému displeji jeho adresu (postupně na každý se 100ms pauzou — různá data).
+Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / smazat text na všechny displeje (jeden broadcast), poslat každému displeji jeho adresu (postupně na každý se 100ms pauzou — různá data), nebo nechat displeje zobrazit vlastní adresu (ikona `?`) — jeden broadcast „????", adresu vykreslí samotné Pum-A (vyžaduje Pum-A FW v3.01+).
 
 **Stisk tlačítka naživo:** když na sběrnici stiskneš fyzické tlačítko, na chvíli (1 s) se zvýrazní příslušná hrana buňky devicu a v ní se ukáže **číslo stisknutého tlačítka** (0–3). Tlačítka 1 a 3 (levá strana displeje) zvýrazní levou hranu, tlačítka 0 a 2 (pravá strana) pravou. U SENZORU (DIST) chip průběžně ukazuje naměřenou vzdálenost v mm.
 
