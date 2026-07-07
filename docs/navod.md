@@ -98,7 +98,7 @@ Otevřeš ikonou **Seznam devices** na kartě jednotky. Devices jsou seskupené 
 - **Načíst devices** (`↻`) — znovu načte seznam ze sběrnice (`GET-DEVICES`).
 - **Skenovat sběrnici** (`radar`) — diagnostika: read-only sken RS485 (`SCAN-DEVICES`), který zjistí **fyzicky připojené** čipy, aniž by cokoli přepsal. Po klepnutí vybereš rozsah — **Vše** / **PUM-X** (PUMA moduly) / **SENZORY** (DIST) / **ID…** (jedna konkrétní adresa — zadáš ji v dialogu, 1–247; typ DIST/PUM se odvodí z rozsahu). Rozsahový sken může chvíli trvat (i přes 10 s); sken jedné adresy je rychlý a porovnává se jen s tou jednou adresou. Nahoře se ukáže souhrnný proužek (počty OK / chybí / neuloženo), výsledek se ale promítne hlavně přímo do seznamu devices:
   - 🟢 normální barevný chip — device je v konfiguraci i na sběrnici,
-  - 🔴 **červený okraj** — device je v konfiguraci, ale na sběrnici nekomunikuje (odpojené / vadné),
+  - 🔴 **červený okraj** — device je v konfiguraci, ale na sběrnici nekomunikuje (odpojené / vadné). Když modul sdružuje víc částí (PUM-A = displej + LEDS + tlačítka), přibude v chipu **červený odznak ⚠ s počtem** vadných částí; **která konkrétní část** nekomunikuje se ukáže v tooltipu (najetí myší / podržení prstu), např. „⚠ Nekomunikuje: displej, tlačítko 1". Poruchu hlásí periodické ALIVE nebo si ji vyžádáš akcí **Alive** (viz níže),
   - ⬜ **šedý chip** — device je na sběrnici, ale není uložený v jednotce; klepnutím ho **přidáš** (předvyplní se adresa i typ). Neznámý podtyp PUMA (`PUM-X`) se zobrazí jako samostatná šedá sekce — u něj typ doplníš ručně.
   
   Vyžaduje novější firmware jednotky; starší FW na sken neodpoví (proužek to oznámí). Proužek i zvýraznění zavřeš křížkem.

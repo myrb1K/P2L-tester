@@ -323,4 +323,42 @@ void main() {
       expect(devices[0].id, 98);
     });
   });
+
+  group('PumaModule.partLabel', () {
+    test('PUM-A: displej, LED a tlačítka podle čísla', () {
+      const m = PumaModule.pumA(
+        address: 128,
+        buttons: {PumaButton.rightInner, PumaButton.leftInner},
+        hasLeds: true,
+      );
+      expect(m.partLabel(const Device(type: DeviceType.disp, id: 128)),
+          'displej');
+      expect(m.partLabel(const Device(type: DeviceType.leds, id: 128)), 'LED');
+      // tl. 0 = holé N, tl. 1 = 1000+N (číslo = addr ~/ 1000).
+      expect(m.partLabel(const Device(type: DeviceType.btn, id: 128)),
+          'tlačítko 0');
+      expect(m.partLabel(const Device(type: DeviceType.btn, id: 1128)),
+          'tlačítko 1');
+    });
+
+    test('PUM-C: +/− podle offsetu', () {
+      const m = PumaModule.pumC(address: 130);
+      expect(m.partLabel(const Device(type: DeviceType.btn, id: 1130)),
+          'tlačítko +');
+      expect(m.partLabel(const Device(type: DeviceType.btn, id: 130)),
+          'tlačítko −');
+    });
+
+    test('PUM-B: holé „tlačítko"', () {
+      const m = PumaModule.pumB(address: 200);
+      expect(m.partLabel(const Device(type: DeviceType.btn, id: 200)),
+          'tlačítko');
+    });
+
+    test('DIST: senzor', () {
+      final m = PumaModule.dist(address: 67);
+      expect(m.partLabel(const Device(type: DeviceType.dist, id: 67)),
+          'senzor');
+    });
+  });
 }

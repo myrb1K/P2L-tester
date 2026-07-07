@@ -919,6 +919,23 @@ class AppState extends ChangeNotifier {
     return out;
   }
 
+  /// Konkrétní atomické části modulu, které v posledním ALIVE hlásily poruchu
+  /// (Code != 0 / timeout). Porovnává `module.toDevices()` s poruchami jednotky
+  /// přes `deviceId` (`<typeCode><addr4>`, např. `050246`). Prázdný seznam = OK.
+  /// Slouží k odznaku „⚠ N" + tooltipu na chipu (viz `_AddressChip`).
+  List<Device> faultyPartsForModule(String unitId, PumaModule module) {
+    final faults = _unitDeviceFaults[_normUnitId(unitId)];
+    if (faults == null || faults.isEmpty) return const [];
+    final out = <Device>[];
+    for (final dev in module.toDevices()) {
+      final prefix = dev.type.addressPrefix;
+      if (prefix == null) continue;
+      final devId = '$prefix${dev.id.toString().padLeft(4, '0')}';
+      if (faults.contains(devId)) out.add(dev);
+    }
+    return out;
+  }
+
   void _handleResponse(String topic, Map<String, dynamic> json) {
     if (json['cmd'] == 'get_param' && json['args'] != null) {
       final args = json['args'] as Map<String, dynamic>;
