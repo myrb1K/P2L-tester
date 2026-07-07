@@ -1503,6 +1503,34 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// GET-ALIVE (FW `P2L_26070201NT`+): vynutí okamžité ALIVE na **všech
+  /// částech** modulu bez čekání na periodický 5min interval. Pokrývá celý
+  /// fyzický čip: PUM-A = DISP + LEDS (pokud osazené) + tlačítka; PUM-B = BTN
+  /// (+ LEDS); PUM-C = obě tlačítka; DIST = senzor. Posílá 1 GET-ALIVE na
+  /// atomickou část se 100ms pauzou (jednotlivé ALIVE se vrátí na `D/` topicy
+  /// a promítnou do zdraví devices přes `_handleDeviceAlive`).
+  Future<void> sendModuleAlive({
+    required String unitId,
+    required PumaModule module,
+  }) async {
+    final id = _normUnitId(unitId);
+    final devices = module.toDevices();
+    for (var i = 0; i < devices.length; i++) {
+      final dev = devices[i];
+      final cmd = CommandService.buildGetAliveCommand(
+        unitId: id,
+        type: dev.type,
+        address: dev.id,
+      );
+      _mqttService.publish(cmd.topic, cmd.payload);
+      if (i < devices.length - 1) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    _setStatus('GET-ALIVE: ${module.displayLabel} (${devices.length}×)');
+    notifyListeners();
+  }
+
   /// Aktualizuje konfiguraci DIST sensoru (SET-CONFIG). Lokálně updatne model.
   Future<void> updateDistConfig({
     required String unitId,

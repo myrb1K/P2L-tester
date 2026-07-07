@@ -93,6 +93,31 @@ void main() {
       expect(cmd.topic, 'I/001017/DIST/040067/GET-VALUE');
       expect(cmd.payload, '{}');
     });
+
+    test('GET-ALIVE — device topic dle typu (prefix + adresa), prázdný payload',
+        () {
+      final disp = CommandService.buildGetAliveCommand(
+          unitId: '1017', type: DeviceType.disp, address: 246);
+      expect(disp.topic, 'I/001017/DISP/050246/GET-ALIVE');
+      expect(disp.payload, '{}');
+
+      final leds = CommandService.buildGetAliveCommand(
+          unitId: '1017', type: DeviceType.leds, address: 128);
+      expect(leds.topic, 'I/001017/LEDS/110128/GET-ALIVE');
+
+      final btn = CommandService.buildGetAliveCommand(
+          unitId: '1017', type: DeviceType.btn, address: 128);
+      expect(btn.topic, 'I/001017/BTN/060128/GET-ALIVE');
+
+      // PUM-A tlačítko s offsetem (1000+128) → BTN 061128.
+      final btnOffset = CommandService.buildGetAliveCommand(
+          unitId: '1017', type: DeviceType.btn, address: 1128);
+      expect(btnOffset.topic, 'I/001017/BTN/061128/GET-ALIVE');
+
+      final dist = CommandService.buildGetAliveCommand(
+          unitId: '1017', type: DeviceType.dist, address: 67);
+      expect(dist.topic, 'I/001017/DIST/040067/GET-ALIVE');
+    });
   });
 
   group('ADD-DEVICES payload', () {
