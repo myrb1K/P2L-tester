@@ -1050,8 +1050,14 @@ class _AddressChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Vadné části modulu (device ALIVE Code != 0 / timeout). Reaktivita řídí
+    // Consumer<AppState> ve stromu výš (_handleDeviceAlive volá notifyListeners).
+    final faultParts = context.read<AppState>().faultyPartsForModule(unitId, module);
     return PopupMenuButton<String>(
-      tooltip: module.displayLabel,
+      tooltip: faultParts.isEmpty
+          ? module.displayLabel
+          : '${module.displayLabel}\n⚠ Nekomunikuje: '
+              '${faultParts.map(module.partLabel).join(", ")}',
       offset: const Offset(0, 32),
       onSelected: (v) {
         if (v == 'replace') onReplace?.call();
@@ -1259,6 +1265,19 @@ class _AddressChip extends StatelessWidget {
                       if (showLed) ...[
                         const SizedBox(width: 4),
                         Icon(Icons.lightbulb, size: 14, color: Colors.amber.shade700),
+                      ],
+                      if (faultParts.isNotEmpty) ...[
+                        const SizedBox(width: 4),
+                        const Icon(Icons.warning_amber_rounded,
+                            size: 13, color: Colors.red),
+                        Text(
+                          '${faultParts.length}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.red,
+                          ),
+                        ),
                       ],
                     ],
                   ),

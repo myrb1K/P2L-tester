@@ -206,6 +206,28 @@ class PumaModule {
     }
   }
 
+  /// Lidský popisek atomické části modulu (pro diagnostiku ALIVE / poruch).
+  /// U tlačítek rozlišuje: PUM-A podle čísla (0–3), PUM-C podle +/−,
+  /// PUM-B holé „tlačítko".
+  String partLabel(Device dev) {
+    switch (dev.type) {
+      case DeviceType.disp:
+        return 'displej';
+      case DeviceType.leds:
+        return 'LED';
+      case DeviceType.dist:
+        return 'senzor';
+      case DeviceType.btn:
+        if (type == ModuleType.pumC) {
+          return dev.id >= 1000 ? 'tlačítko +' : 'tlačítko −';
+        }
+        if (type == ModuleType.pumA) {
+          return 'tlačítko ${dev.id ~/ 1000}';
+        }
+        return 'tlačítko';
+    }
+  }
+
   String get displayLabel {
     switch (type) {
       case ModuleType.pumA:
