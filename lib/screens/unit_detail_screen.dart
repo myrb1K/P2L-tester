@@ -902,7 +902,8 @@ class _GroupSection extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   iconSize: 18,
-                  tooltip: 'Adresu zobrazí displeje samy („????", Pum-A FW v3.01+)',
+                  tooltip: 'Displeje ukážou své SKUTEČNÉ uložené ID z čipu '
+                      '(„????") — odhalí fyzickou výměnu (Pum-A FW v3.01+)',
                   icon: const Icon(Icons.question_mark, color: Colors.blue),
                   onPressed: () => _bulkDisp(context, '????'),
                 ),

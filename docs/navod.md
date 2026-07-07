@@ -134,7 +134,14 @@ Po přidání jednoho device se jeho adresa **automaticky ověří cíleným ske
 - **Přečíslovat** — změna adresy funkčního device (viz §7).
 - **Smazat** — odebere device z jednotky. Poté se adresa ověří skenem: pokud je čip pořád fyzicky na sběrnici, zobrazí se jako šedý „ghost" (v configu už není, ale připojený je) — můžeš ho rovnou zase přidat, nebo fyzicky odpojit.
 
-Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / smazat text na všechny displeje (jeden broadcast), poslat každému displeji jeho adresu (postupně na každý se 100ms pauzou — různá data), nebo nechat displeje zobrazit vlastní adresu (ikona `?`) — jeden broadcast „????", adresu vykreslí samotné Pum-A (vyžaduje Pum-A FW v3.01+).
+Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A poslat „AHOJ" / smazat text na všechny displeje (jeden broadcast), poslat každému displeji jeho adresu (ikona `pin` — postupně na každý se 100ms pauzou), nebo nechat displeje ukázat jejich **skutečné uložené ID** (ikona `?`, „????").
+
+**Rozdíl mezi oběma „adresovými" akcemi je důležitý:**
+
+- **`pin` (adresa na každý displej)** — appka pošle na displej adresu **z konfigurace** (co si appka o modulu myslí).
+- **`?` („????")** — jeden broadcast, každý displej vykreslí **skutečné ID uložené ve svém čipu** (funkce Pum-A FW v3.01+, funguje i na displeje mimo `GET-DEVICES`).
+
+Proto je `?` diagnostický nástroj: když někdo fyzicky vymění kus za jiný s jiným uloženým ID (např. místo 128 osadí 222), na displeji uvidíš **222** místo očekávané 128 — nesoulad mezi konfigurací a fyzickým čipem poznáš hned. Pokud se skutečné ID liší od konfigurace, adresu srovnáš přes **Přečíslovat** (viz §7).
 
 **Stisk tlačítka naživo:** když na sběrnici stiskneš fyzické tlačítko, na chvíli (1 s) se zvýrazní příslušná hrana buňky devicu a v ní se ukáže **číslo stisknutého tlačítka** (0–3). Tlačítka 1 a 3 (levá strana displeje) zvýrazní levou hranu, tlačítka 0 a 2 (pravá strana) pravou. U SENZORU (DIST) chip průběžně ukazuje naměřenou vzdálenost v mm.
 

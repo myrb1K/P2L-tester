@@ -1478,9 +1478,12 @@ class AppState extends ChangeNotifier {
     _mqttService.publish(cmd.topic, cmd.payload);
     // Adresa 0 = broadcast na všechny displeje (DISP 050000).
     final target = dispAddress == 0 ? 'všechny displeje' : 'DISP @$dispAddress';
-    _setStatus(data.isEmpty
-        ? '$target na $id: smazáno'
-        : '$target na $id: "$data"');
+    // "????" = displej vykreslí své skutečné uložené ID z čipu (FW v3.01+).
+    _setStatus(switch (data) {
+      '' => '$target na $id: smazáno',
+      '????' => '$target na $id: zobrazují své skutečné ID',
+      _ => '$target na $id: "$data"',
+    });
     notifyListeners();
   }
 
