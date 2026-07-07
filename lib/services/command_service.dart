@@ -435,6 +435,21 @@ class CommandService {
     );
   }
 
+  /// GET-ALIVE na konkrétní device (od FW `P2L_26070201NT`): vynutí okamžité
+  /// odeslání ALIVE na topic `D/<unit>/<TYPE>/<DEVICE_ID>/ALIVE` bez čekání na
+  /// periodický 5min interval. U DISP/LEDS firmware před odesláním provede RS485
+  /// kontrolu. Payload `{}`. Odpověď chodí na `D/` topic (žádná extra `O/`).
+  static ({String topic, String payload}) buildGetAliveCommand({
+    required String unitId,
+    required DeviceType type,
+    required int address,
+  }) {
+    return (
+      topic: getDeviceCommandTopic(unitId, type, address, 'GET-ALIVE'),
+      payload: '{}',
+    );
+  }
+
   /// RESTART jednotky: SW restart. Payload prázdný objekt.
   static ({String topic, String payload}) buildRestartCommand(String unitId) {
     return (

@@ -124,6 +124,7 @@ Po přidání jednoho device se jeho adresa **automaticky ověří cíleným ske
 
 ### Akce na čipu (popup menu na adrese)
 
+- **Alive** — vynutí okamžité ohlášení (`GET-ALIVE`, od FW `P2L_26070201NT`) na **všech částech** modulu bez čekání na periodický 5min interval: u PUM-A na displeji, LEDS i všech tlačítkách, u PUM-B na tlačítku (+ LEDS), u PUM-C na obou tlačítkách, u SENZORU na senzoru. Zdraví částí se pak promítne do jejich stavu (🟢 OK / 🔴 porucha) stejně jako u periodického ALIVE. Vyžaduje novější firmware.
 - **Rescan** — pošle cílený sken adresy toho device (`SCAN-DEVICES` na jeho adresu) a podle odpovědi ho označí 🟢 OK (fyzicky na sběrnici) nebo 🔴 chybí (nekomunikuje). Hláška dole napíše konkrétní výsledek. Ostatní devices v seznamu zůstanou beze změny. Vyžaduje firmware se `SCAN-DEVICES`.
 - **Test displeje (AHOJ)** / **Adresa na displej** / **Smazat text** — jen PUM-A.
 - **Rozsvítit / Zhasnout LED** — moduly s LEDS.

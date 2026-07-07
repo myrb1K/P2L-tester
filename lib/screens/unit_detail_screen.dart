@@ -549,6 +549,10 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                         onMeasure: (m) => _measureDist(state, m),
                         onRescan: (m) =>
                             state.scanBus(widget.unitId, scanId: m.baseAddress),
+                        onAlive: (m) => state.sendModuleAlive(
+                          unitId: widget.unitId,
+                          module: m,
+                        ),
                         canReplace: _canReplace,
                       ),
               ),
@@ -669,6 +673,7 @@ class _ModulesGroupedList extends StatelessWidget {
   final void Function(PumaModule) onLedsOff;
   final void Function(PumaModule) onMeasure;
   final void Function(PumaModule) onRescan;
+  final void Function(PumaModule) onAlive;
   final bool Function(PumaModule) canReplace;
 
   const _ModulesGroupedList({
@@ -688,6 +693,7 @@ class _ModulesGroupedList extends StatelessWidget {
     required this.onLedsOff,
     required this.onMeasure,
     required this.onRescan,
+    required this.onAlive,
     required this.canReplace,
   });
 
@@ -764,6 +770,7 @@ class _ModulesGroupedList extends StatelessWidget {
               onLedsOff: (cat == 'PUM-A' || cat == 'PUM-B') ? onLedsOff : null,
               onMeasure: cat == 'SENZOR' ? onMeasure : null,
               onRescan: onRescan,
+              onAlive: onAlive,
             ),
       ],
     );
@@ -789,6 +796,7 @@ class _GroupSection extends StatelessWidget {
   final void Function(PumaModule)? onLedsOff;
   final void Function(PumaModule)? onMeasure;
   final void Function(PumaModule) onRescan;
+  final void Function(PumaModule) onAlive;
   final bool Function(PumaModule) canReplace;
 
   const _GroupSection({
@@ -803,6 +811,7 @@ class _GroupSection extends StatelessWidget {
     required this.onSetId,
     required this.onDelete,
     required this.onRescan,
+    required this.onAlive,
     required this.canReplace,
     this.onEdit,
     this.onTestDisplay,
@@ -922,6 +931,7 @@ class _GroupSection extends StatelessWidget {
                   onLedsOff: onLedsOff != null && m.hasLeds ? () => onLedsOff!(m) : null,
                   onMeasure: onMeasure != null ? () => onMeasure!(m) : null,
                   onRescan: () => onRescan(m),
+                  onAlive: () => onAlive(m),
                 ),
               for (final g in ghosts)
                 _GhostChip(
@@ -990,6 +1000,7 @@ class _AddressChip extends StatelessWidget {
   final VoidCallback? onLedsOff;
   final VoidCallback? onMeasure;
   final VoidCallback? onRescan;
+  final VoidCallback? onAlive;
 
   const _AddressChip({
     required this.unitId,
@@ -1007,6 +1018,7 @@ class _AddressChip extends StatelessWidget {
     this.onLedsOff,
     this.onMeasure,
     this.onRescan,
+    this.onAlive,
   });
 
   Color _effectiveColor() {
@@ -1053,6 +1065,7 @@ class _AddressChip extends StatelessWidget {
         if (v == 'leds_off') onLedsOff?.call();
         if (v == 'measure') onMeasure?.call();
         if (v == 'rescan') onRescan?.call();
+        if (v == 'alive') onAlive?.call();
       },
       itemBuilder: (_) => [
         PopupMenuItem(
@@ -1063,6 +1076,17 @@ class _AddressChip extends StatelessWidget {
           ),
         ),
         const PopupMenuDivider(),
+        if (onAlive != null)
+          const PopupMenuItem(
+            value: 'alive',
+            child: Row(
+              children: [
+                Icon(Icons.monitor_heart, size: 18, color: Colors.pink),
+                SizedBox(width: 8),
+                Text('Alive'),
+              ],
+            ),
+          ),
         if (onRescan != null)
           const PopupMenuItem(
             value: 'rescan',
