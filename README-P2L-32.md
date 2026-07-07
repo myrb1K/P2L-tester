@@ -14,8 +14,16 @@ Requesty se posilaji na topic ve tvaru: `I/<UNIT_ID>/<DEVICE_TYPE>/<DEVICE_ID>/<
   *  05 DISP
   *  06 BTN
   *  11 LEDS
-    
-**COMMAND**: Příkazy pro jednotlivá zařízení např. SET-CONFIG, GET-CONFIG, SCAN, SCAN-DEVICES ..., popsáno dále.
+
+**Broadcast (RS485 adresa 0):**\
+Pro hromadné ovládání všech zařízení daného typu na sběrnici RS485 lze použít DeviceId s adresou `0000`:
+  * **DISP:** `050000` — příkaz se provede na všech displejích
+  * **LEDS:** `110000` — příkaz se provede na všech LED modulech Pum-A
+
+Broadcast je virtuální zařízení v P2L (není uloženo v NVS). Na MQTT neposílá periodické ALIVE. Příkazy `GET-ALIVE`, `SET-ID` a `REPLACE-FROM` na broadcast ID nejsou podporovány (`unknown ID`).\
+Na RS485 adrese 0 zařízení na broadcast neodpovídají; P2L po odeslání příkazu vrátí `{"Code":0,"Message":"OK"}` (u DISP `SET-DATA`/`SET-CONFIG` je odpověď OK ihned, RS485 proběhne asynchronně).
+
+**COMMAND**: Příkazy pro jednotlivá zařízení např. SET-CONFIG, GET-CONFIG, GET-ALIVE, SCAN, SCAN-DEVICES ..., popsáno dále.
 
 Payload obsahuje požadované parametry ve formátu JSON dle jednotlivých <COMMAND>s, popsáno dále.
 
@@ -226,6 +234,17 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
 
 * **SET-CONFIG**: Zatím nepodporováno\
 * **GET-CONFIG**: Zatím nepodporováno\
+* **GET-ALIVE**: od verze P2L_26070201NT. Okamžitě odešle ALIVE jednotky na topic `D/<UNIT_ID>/UNIT/<UNIT_ID>/ALIVE` bez čekání na periodický interval (5 min). Nepotřebuje parametry, PAYLOAD musí být ve formátu JSON, tedy `{}`.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/UNIT/001001/GET-ALIVE
+  ```
+  PAYLOAD:
+  ```jsonc
+  {}
+  ```
+  ***Response:*** ALIVE na topic `D/001001/UNIT/001001/ALIVE` (stejný formát jako periodické ALIVE – HWModel, HWPart, Firmware, Battery, Code, Message, Level). Extra odpověď na `O/` topic se neposílá.
 ## P2L - ovládání LED - kód zařízení 01
 ***COMANDs:***
 * **CMD**:   \
@@ -327,6 +346,18 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
   ```jsonc
   {"Distance": 1234, "Code": -10, "Message": "TIMEOUT", "Level": "INFO"}
   ```
+* **GET-ALIVE**: od verze P2L_26070201NT. Okamžitě odešle ALIVE senzoru na topic `D/<UNIT_ID>/DIST/<DEVICE_ID>/ALIVE` bez čekání na periodický interval (5 min). Použije aktuální stav senzoru v paměti (Code/Message/Level). Nepotřebuje parametry.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/DIST/040001/GET-ALIVE
+  ```
+  PAYLOAD:
+  ```jsonc
+  {}
+  ```
+  ***Response:*** ALIVE na topic `D/001001/DIST/040001/ALIVE` (stejný formát jako periodické ALIVE).\
+  Chybové odpovědi na `O/001001/DIST/040001/GET-ALIVE`: `unknown ID` (-2), `not DIST sensor` (-3).
 * **REPLACE-FROM**:  od verze P2L_26033101NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
   Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatnim ID (standartně 127). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
   Parametr:
@@ -341,7 +372,8 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     {"Id": 127}
     ```
 ## DISP - PUMA DISPLAY - kód zařízení 05
-***COMANDs:***
+***COMANDs:***\
+**Broadcast `050000`:** viz [Broadcast](#obecný-formát-nového-requestu-na-jednotku). Podporované příkazy: `SET-DATA`, `SET-CONFIG`.
 * **SET-ID**: změna ID displeje , stačí zadat novou adresu displeje, typ device se doplní automaticky v tomto připadě 05   \
   Rozsah adres je 127-246, 247 je defaultni adresa nového disleje, kterou je nutno změnit.\
   Parametr:
@@ -356,9 +388,8 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     {"Id":127}
     ```
 * **SET-DATA**: nastavení textu na displeji   \
-  DeviceId 050000 je možno použít jako broadcast a data se zobrazí na všech dostumných displejích\
   Parametr:
-  * **Data**: 4 místný text\
+  * **Data**: 4 místný text. Od firmware Pum-A v3.01 lze pro zobrazení RS485 adresy displeje použít `"????"` (adresu zobrazí samotné zařízení Pum-A).\
     ***Example:***\
     TOPIC:
     ```
@@ -368,12 +399,24 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     ```jsonc
     {"Data":"AHOJ"}
     ```
+    ***Example broadcast (všechny displeje):***\
+    TOPIC:
+    ```
+    I/001001/DISP/050000/SET-DATA
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"Data":"AHOJ"}
+    ```
+    PAYLOAD zobrazení adresy (Pum-A v3.01+):
+    ```jsonc
+    {"Data":"????"}
+    ```
     PAYLOAD smazání dispeje:
     ```jsonc
     {"Data":""}
     ```  
 * **SET-CONFIG**: \
-  DeviceId 050000 je možno použít jako broadcast a parametry se změní na všech dostumných displejích\
   Parametr:
   * **Intesity**: nastavení intensity displeje, rozsah 0-6   \
     ***Example:***\
@@ -385,6 +428,27 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     ```jsonc
     {"Intensity": 3}
     ```
+    ***Example broadcast (všechny displeje):***\
+    TOPIC:
+    ```
+    I/001001/DISP/050000/SET-CONFIG
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"Intensity": 3}
+    ```
+* **GET-ALIVE**: od verze P2L_26070201NT. Okamžitě odešle ALIVE displeje na topic `D/<UNIT_ID>/DISP/<DEVICE_ID>/ALIVE` bez čekání na periodický interval (5 min). Před odesláním provede kontrolu displeje přes RS485 (stejně jako periodické ALIVE). Nepotřebuje parametry.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/DISP/050246/GET-ALIVE
+  ```
+  PAYLOAD:
+  ```jsonc
+  {}
+  ```
+  ***Response:*** ALIVE na topic `D/001001/DISP/050246/ALIVE`.\
+  Chybové odpovědi na `O/001001/DISP/050246/GET-ALIVE`: `unknown ID` (-2), `not DISP` (-3).
 * **REPLACE-FROM**: funční od verze P2L_26033101NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
   Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatnim ID (standartně 247). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
   Parametr:
@@ -399,7 +463,8 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     {"Id": 247}
     ```
 ## LEDS - PUMA LEDS - kód zařízení 11
-***COMANDs:***
+***COMANDs:***\
+**Broadcast `110000`:** viz [Broadcast](#obecný-formát-nového-requestu-na-jednotku). Podporované příkazy: `SET-LEDS`, `SET-RGB`, `CLEAR-LEDS`.
 * **SET-LEDS**:\
   Rozsvícení Ledek.\
     ```jsonc
@@ -435,12 +500,30 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     ```jsonc
     {"Style": 0,"Color": 1}
     ```
+    ***Example broadcast (všechny LED moduly):***\
+    TOPIC:
+    ```
+    I/001001/LEDS/110000/SET-LEDS
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"Style": 0,"Color": 1}
+    ```
 * **CLEAR-LEDS**:\
   Zhasnutí Ledek, payload může být prázdný.
     ***Example:***\
     TOPIC:
     ```
     I/001001/LEDS/110247/CLEAR-LEDS
+    ```
+    PAYLOAD:
+    ```jsonc
+    {}
+    ```
+    ***Example broadcast (všechny LED moduly):***\
+    TOPIC:
+    ```
+    I/001001/LEDS/110000/CLEAR-LEDS
     ```
     PAYLOAD:
     ```jsonc
@@ -458,6 +541,27 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     ```jsonc
     {"R":255,"G":0,"B":0,"Style":0}
     ```
+    ***Example broadcast (všechny LED moduly):***\
+    TOPIC:
+    ```
+    I/001001/LEDS/110000/SET-RGB
+    ```
+    PAYLOAD:
+    ```jsonc
+    {"R":255,"G":255,"B":0,"Style":0}
+    ```
+* **GET-ALIVE**: od verze P2L_26070201NT. Okamžitě odešle ALIVE LED modulu na topic `D/<UNIT_ID>/LEDS/<DEVICE_ID>/ALIVE` bez čekání na periodický interval (5 min). Před odesláním provede kontrolu modulu přes RS485 (stejně jako periodické ALIVE). Nepotřebuje parametry.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/LEDS/110247/GET-ALIVE
+  ```
+  PAYLOAD:
+  ```jsonc
+  {}
+  ```
+  ***Response:*** ALIVE na topic `D/001001/LEDS/110247/ALIVE`.\
+  Chybové odpovědi na `O/001001/LEDS/110247/GET-ALIVE`: `unknown ID` (-2), `not LEDS` (-3).
 * **REPLACE-FROM**: funční od verze P2L_26061001NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
   Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatnim ID (standartně 247). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
   Parametr:
@@ -473,6 +577,18 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
     ```
 ## BTN - PUMA BTN - kód zařízení 06
 ***COMANDs:***
+* **GET-ALIVE**: od verze P2L_26070201NT. Okamžitě odešle ALIVE konkrétního tlačítka na topic `D/<UNIT_ID>/BTN/<DEVICE_ID>/ALIVE` bez čekání na periodický interval (5 min). Použije aktuální stav v paměti. U modulu s více tlačítky se ALIVE odešle jen pro `DEVICE_ID` zadané v topicu (např. `060128`, `061128`). Nepotřebuje parametry.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/BTN/060128/GET-ALIVE
+  ```
+  PAYLOAD:
+  ```jsonc
+  {}
+  ```
+  ***Response:*** ALIVE na topic `D/001001/BTN/060128/ALIVE`.\
+  Chybové odpovědi na `O/001001/BTN/060128/GET-ALIVE`: `unknown ID` (-2), `not BTN` (-3).
 * **REPLACE-FROM**: funční od verze P2L_26061001NT. Od verze P2L_26061101NT možno nahradit univerzalnim REPLACE-DEVICE v UNIT \
   Používá se pro náhradu vadného. Pokud dane zařízení nefunguje, vymění se fyzicky za nové s unikatním ID (standartně 247). Tento povel změní ID nového na ID původního. Tím dojde k náhradě poškozeného \
   Parametr:
