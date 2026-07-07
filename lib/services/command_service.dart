@@ -351,8 +351,9 @@ class CommandService {
   }
 
   /// SET-DATA na DISP: zobrazí 4-znakový text. Prázdný řetězec = smazání displeje.
-  /// Pozn.: nový FW neumí broadcast přes adresu 0 (vrací „unknown ID") — posílej
-  /// na konkrétní DISP adresu, pro „všechny" iteruj.
+  /// `dispAddress: 0` = broadcast (DISP 050000) na všechny displeje — nový FW
+  /// broadcast pro SET-DATA podporuje (na rozdíl od SET-CONFIG). Speciální text
+  /// `"????"` = displej si sám zobrazí svou RS485 adresu (Pum-A FW v3.01+).
   static ({String topic, String payload}) buildSetDispDataCommand({
     required String unitId,
     required int dispAddress,
