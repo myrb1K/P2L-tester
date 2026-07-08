@@ -24,7 +24,7 @@ Dlouhým stiskem broker ikony (nebo klepnutím na ikonu Wi-Fi) se od brokeru **o
 
 ### Založení / úprava broker profilu (Nastavení)
 
-V **Nastavení** (ozubené kolo) v sekci *Uložené profily*:
+V **Nastavení** (menu **☰** vpravo nahoře → *Nastavení*) v sekci *Uložené profily*:
 
 - **Nový profil** — tlačítko nahoře. Vyplň *Název*, *Broker adresa*, *Port*, volitelně *Username* / *Password*.
 - **SSL/TLS** — zapni pro šifrované připojení (MQTTS).
@@ -151,7 +151,7 @@ Proto je `?` diagnostický nástroj: když někdo fyzicky vymění kus za jiný 
 
 Šablona = pojmenovaná skladba modulů pro rychlé nasazení na jednotku.
 
-Otevři **Šablony** (`folder_special`) v liště:
+Otevři **Šablony** (menu **☰** vpravo nahoře → *Šablony*):
 
 - **Nová šablona** (tlačítko `+`) — otevře editor: pojmenuj a přidávej moduly stejně jako v detailu jednotky.
 - **Upravit / Duplikovat / Exportovat / Smazat** — v menu (`⋮`) u každé šablony.
@@ -203,6 +203,8 @@ Na webu se export vždy **stáhne** jako soubor; nativně lze i sdílet.
 ---
 
 ## 9. Nastavení
+
+Otevři přes menu **☰** vpravo nahoře → *Nastavení*.
 
 - **Schéma LED pásku** — kolik LED svítí / nesvítí a barva pro LED test.
 - **Broker profily** — viz §1.

@@ -64,15 +64,31 @@ class _AuthGateState extends State<AuthGate> {
     });
   }
 
+  /// Obalí obrazovku vlastním [Overlay]. AuthGate je v [main.dart] vložen přes
+  /// `MaterialApp.builder` NAD Navigator, takže stavy, které vrací něco jiného
+  /// než `widget.child` (checking / error / login), běží mimo Navigator a nemají
+  /// tedy Overlay ancestor. `EditableText` (textová pole na LoginScreenu),
+  /// SnackBary i tooltipy ale Overlay vyžadují → jinak "No Overlay widget found".
+  /// Stav `loggedIn` obaluje `widget.child` (= Navigator), který Overlay má sám.
+  ///
+  /// `key: ValueKey(_state)` je nutný: [Overlay] čte `initialEntries` jen při
+  /// prvním mountu. Bez klíče by Flutter při přechodu (checking → loggedOut)
+  /// recykloval stejný State a `initialEntries` ignoroval → zůstal by viset
+  /// první obsah (spinner). Rozdílný klíč per stav vynutí přemount s novým childem.
+  Widget _overlayHost(Widget child) => Overlay(
+        key: ValueKey(_state),
+        initialEntries: [OverlayEntry(builder: (_) => child)],
+      );
+
   @override
   Widget build(BuildContext context) {
     switch (_state) {
       case _AuthState.checking:
-        return const Scaffold(
+        return _overlayHost(const Scaffold(
           body: Center(child: CircularProgressIndicator()),
-        );
+        ));
       case _AuthState.networkError:
-        return Scaffold(
+        return _overlayHost(Scaffold(
           body: Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -101,9 +117,9 @@ class _AuthGateState extends State<AuthGate> {
               ),
             ),
           ),
-        );
+        ));
       case _AuthState.loggedOut:
-        return LoginScreen(api: _api, onLoggedIn: _onLoggedIn);
+        return _overlayHost(LoginScreen(api: _api, onLoggedIn: _onLoggedIn));
       case _AuthState.loggedIn:
         return _AuthScope(
           api: _api,

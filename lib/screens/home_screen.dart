@@ -292,13 +292,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   tooltip: 'Vybrat broker',
                   onPressed: () => _showBrokerPicker(context, state),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.folder_special),
-                  tooltip: 'Šablony',
-                  onPressed: () => Navigator.of(
-                    context,
-                  ).push(MaterialPageRoute(builder: (_) => const TemplatesScreen())),
-                ),
                 const BulkConfigMenu(),
                 if (state.units.isNotEmpty)
                   IconButton(
@@ -306,12 +299,43 @@ class _HomeScreenState extends State<HomeScreen> {
                     tooltip: 'Vyčistit seznam',
                     onPressed: () => state.clearUnits(),
                   ),
-                IconButton(
-                  icon: const Icon(Icons.settings),
-                  tooltip: 'Nastavení',
-                  onPressed: () => Navigator.of(
-                    context,
-                  ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                PopupMenuButton<String>(
+                  tooltip: 'Menu',
+                  icon: const Icon(Icons.menu),
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'templates':
+                        Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => const TemplatesScreen()));
+                        break;
+                      case 'settings':
+                        Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => const SettingsScreen()));
+                        break;
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem<String>(
+                      value: 'templates',
+                      child: Row(
+                        children: [
+                          Icon(Icons.folder_special, size: 18),
+                          SizedBox(width: 8),
+                          Text('Šablony'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem<String>(
+                      value: 'settings',
+                      child: Row(
+                        children: [
+                          Icon(Icons.settings, size: 18),
+                          SizedBox(width: 8),
+                          Text('Nastavení'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 if (kIsWeb && AuthScope.userOf(context) != null)
                   _UserMenu(user: AuthScope.userOf(context)!),
