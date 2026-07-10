@@ -15,6 +15,7 @@ import '../models/unit.dart';
 import '../services/command_service.dart';
 import '../services/module_reconstruction.dart';
 import '../services/mqtt_service.dart';
+import '../services/unit_db_service.dart';
 import '../services/unit_ids_io.dart';
 
 class AppState extends ChangeNotifier {
@@ -728,6 +729,12 @@ class AppState extends ChangeNotifier {
       _unitModules[unitId] = reconstructModules(devices);
       _unitModulesFetchedAt[unitId] = DateTime.now();
       _setStatus('Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)');
+      // Centrální DB (DB3): observed s čerstvým seznamem devices.
+      final dbUnit = _units[unitId];
+      if (dbUnit != null) {
+        unawaited(UnitDbService.instance.pushObserved(dbUnit,
+            modules: _unitModules[unitId], seenOnBroker: broker));
+      }
       // Ověření právě přidaného device cíleným skenem jeho adresy (až teď, kdy
       // je config aktuální). Výsledek se v `_handleScanDevicesResponse`
       // vmerguje do případného existujícího skenu, takže ostatní ghost devices
@@ -842,6 +849,12 @@ class AppState extends ChangeNotifier {
       _units[unitId] = P2LUnit.fromAlive(unitId, json, isNewGen: isNewGen);
       _statusMessage = 'Nalezeno ${_units.length} P2L modulů';
     }
+
+    // Centrální DB jednotek (DB3): observed z ALIVE, throttle 30 s/jednotku.
+    // seenOnBroker = host aktivního připojení — ALIVE broker nenese, ale
+    // appka ví, přes který broker zprávu dostala (drift detekce).
+    unawaited(UnitDbService.instance
+        .pushObserved(_units[unitId]!, throttled: true, seenOnBroker: broker));
 
     // Po restartu: první ALIVE mimo grace window → dotáhni devices.
     if (_awaitingAliveAfterRestart.contains(unitId)) {
@@ -958,6 +971,11 @@ class AppState extends ChangeNotifier {
         _statusMessage = 'Nalezeno ${_units.length} P2L modulů';
         effectiveId = lookupId;
       }
+
+      // Centrální DB (DB3): get_param nese plný observed (IP, MAC, SSID,
+      // aktuální broker, jas) — push bez throttle.
+      unawaited(UnitDbService.instance.pushObserved(_units[effectiveId]!,
+          includeParams: true, seenOnBroker: broker));
 
       // Po manuálním ověření (get_param) dotáhni devices hned, ať uživatel
       // nemusí čekat na další ALIVE. Guard přes _initialFetchDone zajistí,
@@ -1080,6 +1098,17 @@ class AppState extends ChangeNotifier {
     for (final unitId in targets) {
       final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
+      // Centrální DB (DB3): desired.broker — jediné místo, kde credentials
+      // brokeru existují mimo okamžik odeslání.
+      unawaited(UnitDbService.instance.pushDesired(_normUnitId(unitId), {
+        'broker': {
+          'address': profile.broker,
+          'port': profile.port,
+          'user': profile.username,
+          'password': profile.password,
+          'insecure': !profile.useSsl,
+        },
+      }));
       sent++;
       _statusMessage = 'Broker: $sent / ${targets.length} (${profile.name})';
       notifyListeners();
@@ -1103,6 +1132,9 @@ class AppState extends ChangeNotifier {
     for (final unitId in targets) {
       final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
+      // Centrální DB (DB3): desired.brightness.
+      unawaited(UnitDbService.instance
+          .pushDesired(_normUnitId(unitId), {'brightness': clamped}));
       sent++;
       _statusMessage = 'Jas jednotky: $sent / ${targets.length} ($clamped%)';
       notifyListeners();
@@ -1144,6 +1176,9 @@ class AppState extends ChangeNotifier {
         skipped++;
         continue;
       }
+      // Centrální DB (DB3): desired.dispBrightness (jas PUM-A displejů).
+      unawaited(UnitDbService.instance
+          .pushDesired(_normUnitId(unitId), {'dispBrightness': clamped}));
       for (final addr in disps) {
         final cmd = CommandService.buildSetDispConfigCommand(
           unitId: _normUnitId(unitId),
@@ -1171,6 +1206,10 @@ class AppState extends ChangeNotifier {
     for (final unitId in targets) {
       final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
+      // Centrální DB (DB3): desired.wifi — heslo jinde neexistuje.
+      unawaited(UnitDbService.instance.pushDesired(_normUnitId(unitId), {
+        'wifi': {'ssid': ssid, 'password': password},
+      }));
       sent++;
       _statusMessage = 'WiFi: $sent / ${targets.length}';
       notifyListeners();
@@ -1206,6 +1245,8 @@ class AppState extends ChangeNotifier {
       _mqttService.publish(topic, payload);
       final id = _normUnitId(unitId);
       _markUnitOfflineUntilAlive(id);
+      // Centrální DB (DB3): desired.fwUrl (poslední odeslané OTA).
+      unawaited(UnitDbService.instance.pushDesired(id, {'fwUrl': fileName}));
       sent++;
       _statusMessage = 'FW: $sent / ${targets.length}';
       notifyListeners();
@@ -1240,6 +1281,9 @@ class AppState extends ChangeNotifier {
       isNewGen: isNewGen,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
+
+    // Centrální DB (DB3): přenést kartu na nové ID (vč. historie).
+    unawaited(UnitDbService.instance.pushChangeId(id, newId));
 
     // Po set_id se firmware restartuje, na starý topic už neodpoví.
     // Pročistit lokální stav — nová entry přijde s prvním ALIVE z new ID.

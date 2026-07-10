@@ -9,20 +9,8 @@
 // Pozn.: FLASH samotný proxy nepotřebuje — firmware si stahuje jednotka sama.
 
 const express = require('express');
-const jwt = require('jsonwebtoken');
 
-const { SESSION_COOKIE } = require('./auth');
-
-function requireAuth(req, res, next) {
-  const token = req.cookies?.[SESSION_COOKIE];
-  if (!token) return res.status(401).json({ error: 'no_session' });
-  try {
-    jwt.verify(token, process.env.JWT_SECRET);
-    next();
-  } catch {
-    return res.status(401).json({ error: 'invalid_session' });
-  }
-}
+const { requireAuth } = require('./auth'); // cookie (web) nebo Bearer (nativ)
 
 function makeRouter() {
   const router = express.Router();

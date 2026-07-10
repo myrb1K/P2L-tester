@@ -9,7 +9,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 
-const { SESSION_COOKIE } = require('./auth');
+const { tokenFromReq } = require('./auth');
 const {
   listUsers,
   createUser,
@@ -19,7 +19,7 @@ const {
 } = require('../db/users');
 
 function requireAdmin(req, res, next) {
-  const token = req.cookies?.[SESSION_COOKIE];
+  const token = tokenFromReq(req); // cookie (web) nebo Bearer (nativ, DB1)
   if (!token) return res.status(401).json({ error: 'no_session' });
 
   try {

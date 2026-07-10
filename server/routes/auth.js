@@ -1,6 +1,11 @@
 // Login / logout / me endpointy. JWT v httpOnly cookie.
 // V M4 ne-používáme refresh tokeny ani blacklist — JWT po 24h sám vyprší,
 // rememberMe prodlouží expiraci na 7 dní.
+//
+// DB1 (PRD-DB): nativní klienti (EXE/APK) cookies nedrží — login proto vrací
+// token i v response body a všechny chráněné endpointy přijímají
+// `Authorization: Bearer <JWT>` jako alternativu k cookie (viz tokenFromReq).
+// Web se nemění: cookie má přednost, token v body prohlížeč ignoruje.
 
 const express = require('express');
 const bcrypt = require('bcrypt');
@@ -26,6 +31,35 @@ function signToken(user, ttlSec) {
     process.env.JWT_SECRET,
     { expiresIn: ttlSec }
   );
+}
+
+// Middleware: vyžaduje platnou session (cookie nebo Bearer) a naplní
+// req.user = { username, isAdmin }. Sdílené pro firmware a units routes;
+// admin.js má vlastní requireAdmin (navíc kontroluje isAdmin claim).
+function requireAuth(req, res, next) {
+  const token = tokenFromReq(req);
+  if (!token) return res.status(401).json({ error: 'no_session' });
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { username: payload.sub, isAdmin: !!payload.isAdmin };
+    next();
+  } catch {
+    return res.status(401).json({ error: 'invalid_session' });
+  }
+}
+
+// Vytáhne JWT z requestu: session cookie (web) nebo Authorization: Bearer
+// header (nativní klienti). Cookie má přednost — prohlížeč Bearer neposílá,
+// takže kolize nehrozí.
+function tokenFromReq(req) {
+  const cookieToken = req.cookies?.[SESSION_COOKIE];
+  if (cookieToken) return cookieToken;
+  const header = req.get('authorization') || '';
+  if (header.startsWith('Bearer ')) {
+    const t = header.slice('Bearer '.length).trim();
+    if (t) return t;
+  }
+  return null;
 }
 
 function makeRouter(db) {
@@ -57,6 +91,8 @@ function makeRouter(db) {
     res.cookie(SESSION_COOKIE, token, cookieOptions(ttl));
     res.json({
       ok: true,
+      // token v body pro nativní klienty (DB1) — web ho ignoruje, cookie stačí
+      token,
       user: { username: user.username, isAdmin: !!user.is_admin },
     });
   });
@@ -67,7 +103,7 @@ function makeRouter(db) {
   });
 
   router.get('/me', (req, res) => {
-    const token = req.cookies?.[SESSION_COOKIE];
+    const token = tokenFromReq(req);
     if (!token) return res.status(401).json({ error: 'no_session' });
 
     try {
@@ -84,4 +120,4 @@ function makeRouter(db) {
   return router;
 }
 
-module.exports = { makeRouter, SESSION_COOKIE };
+module.exports = { makeRouter, SESSION_COOKIE, tokenFromReq, requireAuth };
