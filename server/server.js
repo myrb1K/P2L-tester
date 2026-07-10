@@ -9,10 +9,12 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 const { openDb } = require('./db');
+const { openUnitsDb } = require('./db/units');
 const { seedInitialAdmin } = require('./db/init');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const firmwareRoutes = require('./routes/firmware');
+const unitsRoutes = require('./routes/units');
 
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 
@@ -22,6 +24,7 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 }
 
 const db = openDb();
+const unitsDb = openUnitsDb(); // centrální DB jednotek (PRD-DB, DB2)
 const seedResult = seedInitialAdmin(db);
 if (seedResult.seeded) {
   console.log(`[init] Initial admin '${seedResult.username}' created from env.`);
@@ -61,13 +64,17 @@ const loginLimiter = rateLimit({
 });
 app.use('/api/login', loginLimiter);
 
-app.use('/api', authRoutes.makeRouter(db));
-app.use('/api/admin', adminRoutes.makeRouter(db));
-app.use('/api', firmwareRoutes.makeRouter());
-
+// Health check PŘED routery — firmware router (mount na '/api') pouští svůj
+// requireAuth pro všechny /api/* requesty, které skrz něj protečou, takže
+// health registrovaný až za ním vracel 401 (pre-existing bug, fix v DB2).
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
+
+app.use('/api', authRoutes.makeRouter(db));
+app.use('/api/admin', adminRoutes.makeRouter(db));
+app.use('/api/units', unitsRoutes.makeRouter(unitsDb));
+app.use('/api', firmwareRoutes.makeRouter());
 
 app.use((err, req, res, next) => {
   console.error('[error]', err);

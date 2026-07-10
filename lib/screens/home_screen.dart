@@ -16,14 +16,14 @@ import '../models/device.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
 import '../providers/app_state.dart';
-import '../services/auth_api.dart';
+import '../services/auth_session.dart';
 import '../services/file_export.dart';
 import '../services/mqtt_service.dart';
 import '../services/unit_ids_io.dart';
 import '../widgets/bulk_config_menu.dart';
-import 'auth_gate.dart';
 import 'settings_screen.dart';
 import 'templates_screen.dart';
+import 'unit_db_screen.dart';
 import 'unit_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -304,6 +304,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: const Icon(Icons.menu),
                   onSelected: (value) {
                     switch (value) {
+                      case 'unitdb':
+                        Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => const UnitDbListScreen()));
+                        break;
                       case 'templates':
                         Navigator.of(context).push(MaterialPageRoute(
                             builder: (_) => const TemplatesScreen()));
@@ -314,8 +318,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         break;
                     }
                   },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem<String>(
+                  // Databáze jednotek jen pro přihlášené (web = vždy za
+                  // AuthGate, nativ = opt-in login) — nepřihlášený nativ
+                  // vidí menu beze změny (PRD-DB §6.1).
+                  itemBuilder: (context) => [
+                    if (kIsWeb || AuthSession.instance.isLoggedIn)
+                      const PopupMenuItem<String>(
+                        value: 'unitdb',
+                        child: Row(
+                          children: [
+                            Icon(Icons.inventory_2_outlined, size: 18),
+                            SizedBox(width: 8),
+                            Text('Databáze jednotek'),
+                          ],
+                        ),
+                      ),
+                    const PopupMenuItem<String>(
                       value: 'templates',
                       child: Row(
                         children: [
@@ -325,7 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ),
-                    PopupMenuItem<String>(
+                    const PopupMenuItem<String>(
                       value: 'settings',
                       child: Row(
                         children: [
@@ -337,8 +355,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
-                if (kIsWeb && AuthScope.userOf(context) != null)
-                  _UserMenu(user: AuthScope.userOf(context)!),
               ],
             ),
             body: GestureDetector(
@@ -1382,57 +1398,3 @@ class _BinOldToggle extends StatelessWidget {
   }
 }
 
-class _UserMenu extends StatelessWidget {
-  final AuthUser user;
-  const _UserMenu({required this.user});
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      tooltip: 'Účet',
-      icon: const Icon(Icons.account_circle_outlined),
-      onSelected: (value) async {
-        if (value == 'logout') {
-          await AuthScope.logout(context);
-        }
-      },
-      itemBuilder: (context) => [
-        PopupMenuItem<String>(
-          enabled: false,
-          child: Row(
-            children: [
-              const Icon(Icons.person_outline, size: 18, color: Colors.grey),
-              const SizedBox(width: 8),
-              Text(user.username,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              if (user.isAdmin) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade100,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text('admin',
-                      style: TextStyle(fontSize: 10, color: Colors.blue)),
-                ),
-              ],
-            ],
-          ),
-        ),
-        const PopupMenuDivider(),
-        const PopupMenuItem<String>(
-          value: 'logout',
-          child: Row(
-            children: [
-              Icon(Icons.logout, size: 18),
-              SizedBox(width: 8),
-              Text('Odhlásit'),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}

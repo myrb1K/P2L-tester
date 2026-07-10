@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node --test",
     "add-user": "node scripts/add-user.js",
     "del-user": "node scripts/del-user.js",
     "reset-pwd": "node scripts/reset-pwd.js",

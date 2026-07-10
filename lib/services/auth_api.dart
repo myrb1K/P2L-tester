@@ -1,7 +1,8 @@
 // HTTP klient pro auth backend (PRD-WEB/02-auth-bezpecnost.md).
 //
-// V M4 se používá jen na webu (login screen pro Flutter Web). Na nativu
-// se nevolá — kód je guardovaný `kIsWeb` v UI vrstvě.
+// Web (M4): session drží httpOnly cookie, vstup hlídá AuthGate.
+// Nativ (DB1, PRD-DB): opt-in login přes AuthSession — session drží bearer
+// token (viz [lastLoginToken] a auth_http_client_io.dart).
 //
 // Base URL je konfigurovatelná přes --dart-define=AUTH_API_BASE=...
 // - Dev (default): http://localhost:3001/api (backend na jiném portu)
@@ -64,6 +65,11 @@ class AuthApi {
   final http.Client _client;
   final String _base;
 
+  /// JWT z posledního úspěšného [login] (pole `token` v response body,
+  /// backend ho vrací od DB1). Čte ho nativní AuthSession a ukládá ho pro
+  /// bearer autentizaci; web ho ignoruje (session drží httpOnly cookie).
+  String? lastLoginToken;
+
   AuthApi({http.Client? client, String? base})
       : _client = client ?? createAuthClient(),
         _base = base ?? authApiBase;
@@ -100,6 +106,7 @@ class AuthApi {
 
     if (res.statusCode == 200) {
       final json = jsonDecode(res.body) as Map<String, dynamic>;
+      lastLoginToken = json['token'] as String?;
       return AuthUser.fromJson(json['user'] as Map<String, dynamic>);
     }
     if (res.statusCode == 401) {

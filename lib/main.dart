@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,11 +9,16 @@ import 'screens/auth_gate.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
+import 'services/auth_session.dart';
 
 const String appVersion = '2.76';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Tichá obnova uložené auth session na nativu (opt-in login, PRD-DB DB1).
+  // Fire-and-forget — nesmí zdržet start; výsledek se projeví v Nastavení
+  // (sekce Účet). Web session řeší AuthGate přes cookie.
+  if (!kIsWeb) unawaited(AuthSession.instance.restore());
   runApp(const P2LTesterApp());
 }
 

@@ -10,6 +10,7 @@ import '../main.dart';
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
 import '../services/file_export.dart';
+import '../widgets/account_section.dart';
 import 'admin_users_screen.dart';
 import 'auth_gate.dart';
 import 'help_screen.dart';
@@ -860,6 +861,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   icon: const Icon(Icons.save),
                   label: const Text('Uložit schéma'),
                 ),
+                // Sekce Účet — jediné místo v UI pro účet (v AppBaru ikona
+                // není). Web: přihlášený uživatel + odhlášení; nativ: opt-in
+                // login pro centrální DB jednotek (PRD-DB, DB1). Záměrně na
+                // konci: bez přihlášení se nativ nijak nemění.
+                const SizedBox(height: 24),
+                const Text(
+                  'Účet',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const AccountSection(),
               ],
             ),
           ),

@@ -210,12 +210,34 @@ Otevři přes menu **☰** vpravo nahoře → *Nastavení*.
 - **Broker profily** — viz §1.
 - **Export / Import nastavení** (`import_export`) — kompletní záloha profilů, šablon a LED schématu do JSON. Import přepíše stávající.
 - **Administrace uživatelů** — jen ve webové verzi pro adminy (správa přihlašovacích účtů).
+- **Účet** (sekce dole) — jediné místo pro správu účtu (v horní liště žádná ikona účtu není).
+  - *Windows/Android:* **volitelné** přihlášení k firemnímu serveru (stejné účty jako webová verze). Bez přihlášení appka funguje beze změny; přihlášení je potřeba pro centrální databázi jednotek (§10). Zadává se adresa serveru (např. `192.168.1.10:3001`), jméno a heslo. Přihlášení se pamatuje (7 dní) — po restartu appky se obnoví samo. Když je server nedostupný, sekce ukáže „Server nedostupný" s tlačítkem *Zkusit znovu*; na zbytek aplikace to nemá vliv.
+  - *Web:* ukazuje přihlášeného uživatele a tlačítko **Odhlásit se** (přihlášení řeší vstupní obrazovka).
 
 ---
 
-## 10. Webová verze
+## 10. Databáze jednotek
+
+Centrální evidence P2L modulů na firemním serveru. Otevři přes menu **☰** → *Databáze jednotek* — položka je vidět **jen po přihlášení** (na Windows/Android přes *Nastavení → Účet*, na webu vždy).
+
+Karty jednotek **vznikají a aktualizují se samy** běžnou prací s appkou: jakmile je uživatel přihlášený, každé ALIVE, načtení detailu (`get_param`), seznam devices i každá konfigurační akce (broker, WiFi, jas, firmware) se zapíší na kartu jednotky. Nic se nezadává ručně — kromě údajů níže.
+
+**Seznam:** vyhledávací pole (filtruje najednou přes ID, název i umístění) + chipy stavu (*Vše / Aktivní / Vadná / Sklad / Vyřazená*). Řádek ukazuje ID, název, stav, jak dávno se jednotka ozvala a firmware; jednotka s rozporem mezi evidencí a skutečným stavem má **oranžový trojúhelník ⚠** (detail rozdílů na kartě). Tažením dolů se seznam obnoví.
+
+**Karta jednotky** (klepnutím na řádek) má tři části:
+
+- **Údaje (meta)** — název, umístění, poznámka, stav. Jediná ručně editovatelná část — ikona **✏** v liště.
+- **Jednotka hlásí (observed)** — co jednotka sama naposledy ohlásila: firmware, IP, MAC, baterie, aktuální WiFi/broker/jas, seznam devices.
+- **Odesláno appkou (desired)** — co bylo na jednotku poslané přes appku: broker a WiFi **včetně hesel** (maskovaná, oko je odkryje), jasy, poslední OTA. Tohle jinde neexistuje — jednotka hesla zpětně nevrací.
+
+Pod tím je **historie** změn (kdo, kdy, co — hesla se do historie nikdy nezapisují). Když se to, co jednotka hlásí, liší od evidence (např. ji někdo přenastavil mimo appku), karta nahoře ukáže oranžové **„Nesouhlasí s evidencí"** s konkrétními rozdíly. Pokud je změna záměrná, tlačítko **„Převzít skutečnost do evidence"** srovná evidenci podle reálného stavu (hesla v evidenci zůstávají původní — jednotka je nehlásí; pokud se změnila taky, pošli konfiguraci přes appku).
+
+---
+
+## 11. Webová verze
 
 - Vyžaduje **přihlášení** (uživatel + heslo); *Zapamatovat (7 dní)* prodlouží platnost session.
+- **Odhlásit se** lze v *Nastavení → Účet* (dole).
 - Broker musí mít **WebSocket listener** a profil musí mít zapnutý přepínač **WebSocket**.
 - Export souborů probíhá stažením přes prohlížeč.
 
