@@ -119,6 +119,9 @@ class AppState extends ChangeNotifier {
 
   // Poslední naměřená vzdálenost DIST senzoru [mm]. Klíč: "<unitId>:<addr>".
   final Map<String, int> _distValues = {};
+  // Segmentový režim DIST: poslední segment senzoru (název + zda je naměřená
+  // hodnota uvnitř segmentu) z `D/.../DIST/.../UPDATE` polí `segmentID`+`state`.
+  final Map<String, ({String id, bool inSegment})> _distSegments = {};
 
   // Devices jednotky, které v posledním ALIVE hlásily Code != 0 (porucha).
   // Klíč = unitId, hodnota = set deviceId. Prázdný/chybějící = vše OK.
@@ -556,7 +559,9 @@ class AppState extends ChangeNotifier {
   }
 
   /// Topic: `D/<unit>/DIST/<deviceId>/UPDATE`, deviceId = `04<addr4>`,
-  /// payload `{"distance": <mm>}`. Uloží poslední naměřenou vzdálenost senzoru.
+  /// payload `{"distance": <mm>}`. V segmentovém režimu payload navíc obsahuje
+  /// `segmentID` (název pásma) a `state` (**string** `"true"`/`"false"` — je-li
+  /// naměřená hodnota uvnitř segmentu). Uloží vzdálenost i segment senzoru.
   void _handleDistUpdate(String topic, Map<String, dynamic> json) {
     final parts = topic.split('/');
     if (parts.length < 5) return;
@@ -568,12 +573,26 @@ class AppState extends ChangeNotifier {
     if (addr == null || distance is! num) return;
 
     _distValues['$unitId:$addr'] = distance.toInt();
+
+    // Segmentový režim (volitelný): `segmentID` + `state`. FW posílá `state`
+    // jako string, tolerujeme i bool.
+    final segId = json['segmentID'];
+    if (segId is String && segId.isNotEmpty) {
+      final state = json['state'];
+      final inSegment = state == true || state == 'true';
+      _distSegments['$unitId:$addr'] = (id: segId, inSegment: inSegment);
+    }
     notifyListeners();
   }
 
   /// Poslední naměřená vzdálenost [mm] DIST senzoru, nebo null (zatím nepřišla).
   int? distanceFor(String unitId, int address) =>
       _distValues['${_normUnitId(unitId)}:$address'];
+
+  /// Poslední segment DIST senzoru v segmentovém režimu (název pásma + zda je
+  /// naměřená hodnota uvnitř), nebo null (režim měření vzdálenosti / bez UPDATE).
+  ({String id, bool inSegment})? distSegmentFor(String unitId, int address) =>
+      _distSegments['${_normUnitId(unitId)}:$address'];
 
   // Vyžádané změření DIST (GET-VALUE) — completer dokončí odpověď nebo timeout.
   final Map<String, Completer<({int? distance, bool ok, String? message})?>>
@@ -726,7 +745,8 @@ class AppState extends ChangeNotifier {
 
     if (devicesField != null) {
       final devices = parseGetDevicesPayload(devicesField);
-      _unitModules[unitId] = reconstructModules(devices);
+      final distConfigs = parseDistConfigs(devicesField);
+      _unitModules[unitId] = reconstructModules(devices, distConfigs: distConfigs);
       _unitModulesFetchedAt[unitId] = DateTime.now();
       _setStatus('Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)');
       // Centrální DB (DB3): observed s čerstvým seznamem devices.

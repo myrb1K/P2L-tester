@@ -324,6 +324,58 @@ void main() {
     });
   });
 
+  group('parseDistConfigs — segmenty', () {
+    // Reálný GET-DEVICES z jednotky 1209 (segmenty 3-prvkové bez PositionId).
+    final payload = [
+      {
+        'Type': 'DIST',
+        'Id': [
+          [
+            97, 50, 10, 0, 20, 4, 2,
+            [
+              ['R01.A01', 0, 200],
+              ['R01.A02', 300, 500],
+            ]
+          ],
+        ],
+      },
+    ];
+
+    test('naparsuje skalární config i segmenty ve správném pořadí', () {
+      final cfgs = parseDistConfigs(payload);
+      expect(cfgs.keys, [97]);
+      final c = cfgs[97]!;
+      expect(c.measurePeriod, 50);
+      expect(c.timeout, 10);
+      expect(c.offset, 0);
+      expect(c.maxDeviation, 20);
+      expect(c.countMeasures, 4);
+      expect(c.measureType, 2);
+      expect(c.segments.length, 2);
+      expect(c.segments[0].id, 'R01.A01');
+      expect(c.segments[0].from, 0);
+      expect(c.segments[0].to, 200);
+      expect(c.segments[1].id, 'R01.A02');
+      expect(c.segments[1].from, 300);
+      expect(c.segments[1].to, 500);
+    });
+
+    test('reconstructModules přiřadí config se segmenty DIST modulu', () {
+      final devices = parseGetDevicesPayload(payload);
+      final cfgs = parseDistConfigs(payload);
+      final modules = reconstructModules(devices, distConfigs: cfgs);
+      final dist = modules.firstWhere((m) => m.type == ModuleType.dist);
+      expect(dist.baseAddress, 97);
+      expect(dist.distConfig!.segments.length, 2);
+      expect(dist.distConfig!.segments.first.id, 'R01.A01');
+    });
+
+    test('segment round-trip zachová 3-prvkový tvar (bez PositionId)', () {
+      final seg = parseDistConfigs(payload)[97]!.segments.first;
+      expect(seg.toPositional(), ['R01.A01', 0, 200]);
+    });
+  });
+
   group('PumaModule.partLabel', () {
     test('PUM-A: displej, LED a tlačítka podle čísla', () {
       const m = PumaModule.pumA(

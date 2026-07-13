@@ -73,6 +73,54 @@ extension PumaButtonExt on PumaButton {
       };
 }
 
+/// Jeden segment (pásmo) DIST senzoru v segmentovém režimu. Místo surové
+/// vzdálenosti senzor hlásí, do kterého pojmenovaného pásma měřená hodnota
+/// spadá. `positionId` se v jednotce neukládá (GET-DEVICES ho typicky nevrací)
+/// — slouží nadřazenému CI4 ke spárování segmentu s pozicí.
+class DistSegment {
+  final String id; // SegmentId / název pozice, např. "R01.A01"
+  final int from; // začátek pásma [mm]
+  final int to; // konec pásma [mm]
+  final int positionId;
+
+  const DistSegment({
+    required this.id,
+    required this.from,
+    required this.to,
+    this.positionId = 0,
+  });
+
+  /// Objektový tvar pro SET-CONFIG payload a perzistenci šablon.
+  Map<String, dynamic> toJson() => {
+        'SegmentId': id,
+        'From': from,
+        'To': to,
+        'PositionId': positionId,
+      };
+
+  factory DistSegment.fromJson(Map<String, dynamic> json) => DistSegment(
+        // Tolerantní i k `segmentID` z UPDATE zpráv a lowercase klíčům.
+        id: (json['SegmentId'] ?? json['segmentID'] ?? json['id'] ?? '')
+            .toString(),
+        from: (json['From'] ?? json['from'] ?? 0) as int,
+        to: (json['To'] ?? json['to'] ?? 0) as int,
+        positionId: (json['PositionId'] ?? json['positionId'] ?? 0) as int,
+      );
+
+  /// Poziční tvar pro RECREATE/ADD-DEVICES. Firmware reálně posílá 3 prvky
+  /// `["Name", From, To]` (README uvádí i 4. `PositionId`); posíláme stejný
+  /// tvar — 4 prvky jen když `positionId` opravdu máme.
+  List<dynamic> toPositional() =>
+      positionId != 0 ? [id, from, to, positionId] : [id, from, to];
+
+  factory DistSegment.fromPositional(List<dynamic> l) => DistSegment(
+        id: l.isNotEmpty ? l[0].toString() : '',
+        from: l.length > 1 && l[1] is num ? (l[1] as num).toInt() : 0,
+        to: l.length > 2 && l[2] is num ? (l[2] as num).toInt() : 0,
+        positionId: l.length > 3 && l[3] is num ? (l[3] as num).toInt() : 0,
+      );
+}
+
 class DistConfig {
   final int measurePeriod;
   final int timeout;
@@ -80,6 +128,7 @@ class DistConfig {
   final int maxDeviation;
   final int offset;
   final int measureType; // 1=Short(do 1m), 2=Middle(do 2m), 3=Long(do 3m)
+  final List<DistSegment> segments; // prázdné = režim měření vzdálenosti
 
   const DistConfig({
     this.measurePeriod = 50,
@@ -88,6 +137,7 @@ class DistConfig {
     this.maxDeviation = 20,
     this.offset = 0,
     this.measureType = 2,
+    this.segments = const [],
   });
 
   DistConfig copyWith({
@@ -97,6 +147,7 @@ class DistConfig {
     int? maxDeviation,
     int? offset,
     int? measureType,
+    List<DistSegment>? segments,
   }) =>
       DistConfig(
         measurePeriod: measurePeriod ?? this.measurePeriod,
@@ -105,6 +156,7 @@ class DistConfig {
         maxDeviation: maxDeviation ?? this.maxDeviation,
         offset: offset ?? this.offset,
         measureType: measureType ?? this.measureType,
+        segments: segments ?? this.segments,
       );
 
   Map<String, dynamic> toJson() => {
@@ -114,6 +166,8 @@ class DistConfig {
         'MaxDeviation': maxDeviation,
         'Offset': offset,
         'MeasureType': measureType,
+        if (segments.isNotEmpty)
+          'Segments': segments.map((s) => s.toJson()).toList(),
       };
 
   factory DistConfig.fromJson(Map<String, dynamic> json) => DistConfig(
@@ -123,6 +177,12 @@ class DistConfig {
         maxDeviation: json['MaxDeviation'] as int? ?? json['maxDeviation'] as int? ?? 20,
         offset: json['Offset'] as int? ?? json['offset'] as int? ?? 0,
         measureType: json['MeasureType'] as int? ?? json['measureType'] as int? ?? 2,
+        segments: (json['Segments'] ?? json['segments']) is List
+            ? [
+                for (final s in (json['Segments'] ?? json['segments']) as List)
+                  if (s is Map<String, dynamic>) DistSegment.fromJson(s)
+              ]
+            : const [],
       );
 }
 

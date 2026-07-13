@@ -129,7 +129,7 @@ Po přidání jednoho device se jeho adresa **automaticky ověří cíleným ske
 - **Test displeje (AHOJ)** / **Adresa na displej** / **Smazat text** — jen PUM-A.
 - **Rozsvítit / Zhasnout LED** — moduly s LEDS.
 - **Změřit teď** — jen SENZOR (DIST): vyžádá si okamžité změření vzdálenosti (`GET-VALUE`, od FW `P2L_26062301NT`). Výsledek se ukáže v hlášce dole (vzdálenost v mm, nebo porucha / TIMEOUT). Vyžaduje novější firmware — starší jednotka neodpoví a po ~10 s se hlásí „bez odpovědi".
-- **Upravit** — konfigurace DIST.
+- **Upravit** — konfigurace DIST. Modal ukazuje **aktuální nastavení senzoru** načtené z `GET-DEVICES` (perioda, timeout, offset, max. odchylka, počet měření, dosah). Je-li senzor v **segmentovém režimu**, dole je i výpis segmentů (název + rozsah `od – do mm`) — **jen ke čtení**. Tlačítko **Obnovit** (vlevo dole) vrátí konfiguraci na tovární výchozí (50 / 10 / 0 / 20 / 4 / Middle); **adresu ani segmenty nemění**. Změny se odešlou až po **OK**.
 - **Vyměnit** — výměna vadného kusu (viz §7).
 - **Přečíslovat** — změna adresy funkčního device (viz §7).
 - **Smazat** — odebere device z jednotky. Poté se adresa ověří skenem: pokud je čip pořád fyzicky na sběrnici, zobrazí se jako šedý „ghost" (v configu už není, ale připojený je) — můžeš ho rovnou zase přidat, nebo fyzicky odpojit.
@@ -143,7 +143,7 @@ Hlavičky skupin mají rychlé akce: rozsvítit/zhasnout všechny LEDS, u PUM-A 
 
 Proto je `?` diagnostický nástroj: když někdo fyzicky vymění kus za jiný s jiným uloženým ID (např. místo 128 osadí 222), na displeji uvidíš **222** místo očekávané 128 — nesoulad mezi konfigurací a fyzickým čipem poznáš hned. Pokud se skutečné ID liší od konfigurace, adresu srovnáš přes **Přečíslovat** (viz §7).
 
-**Stisk tlačítka naživo:** když na sběrnici stiskneš fyzické tlačítko, na chvíli (1 s) se zvýrazní příslušná hrana buňky devicu a v ní se ukáže **číslo stisknutého tlačítka** (0–3). Tlačítka 1 a 3 (levá strana displeje) zvýrazní levou hranu, tlačítka 0 a 2 (pravá strana) pravou. U SENZORU (DIST) chip průběžně ukazuje naměřenou vzdálenost v mm.
+**Stisk tlačítka naživo:** když na sběrnici stiskneš fyzické tlačítko, na chvíli (1 s) se zvýrazní příslušná hrana buňky devicu a v ní se ukáže **číslo stisknutého tlačítka** (0–3). Tlačítka 1 a 3 (levá strana displeje) zvýrazní levou hranu, tlačítka 0 a 2 (pravá strana) pravou. U SENZORU (DIST) chip průběžně ukazuje naměřenou vzdálenost v mm; v **segmentovém režimu** pod ní i **název aktuálního segmentu** — zeleně, když je měřená hodnota uvnitř pásma, šedě, když mimo.
 
 ---
 
