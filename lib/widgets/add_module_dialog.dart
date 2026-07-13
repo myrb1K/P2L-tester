@@ -47,6 +47,8 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
   late TextEditingController _distMaxDevCtrl;
   late TextEditingController _distOffsetCtrl;
   int _distMeasureType = 2;
+  // Segmenty jen ke čtení (z GET-DEVICES) — needitujeme je, jen zachováme.
+  List<DistSegment> _segments = const [];
 
   @override
   void initState() {
@@ -78,6 +80,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     _distMaxDevCtrl = TextEditingController(text: cfg.maxDeviation.toString());
     _distOffsetCtrl = TextEditingController(text: cfg.offset.toString());
     _distMeasureType = cfg.measureType;
+    _segments = cfg.segments;
   }
 
   @override
@@ -150,6 +153,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
             maxDeviation: int.tryParse(_distMaxDevCtrl.text) ?? 20,
             offset: int.tryParse(_distOffsetCtrl.text) ?? 0,
             measureType: _distMeasureType,
+            segments: _segments, // needitujeme, jen zachováme (jinak by se smazaly)
           ),
         );
     }
@@ -157,6 +161,20 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
       context,
       AddModuleResult(module: module, restartAfter: _restartAfter),
     );
+  }
+
+  /// Vrátí konfiguraci senzoru na tovární výchozí (50, 10, 0, 20, 4, Middle).
+  /// Adresu ani segmenty (jen ke čtení) nemění — přepíše jen pole configu.
+  void _resetDistDefaults() {
+    const d = DistConfig();
+    setState(() {
+      _distPeriodCtrl.text = d.measurePeriod.toString();
+      _distTimeoutCtrl.text = d.timeout.toString();
+      _distCountCtrl.text = d.countMeasures.toString();
+      _distMaxDevCtrl.text = d.maxDeviation.toString();
+      _distOffsetCtrl.text = d.offset.toString();
+      _distMeasureType = d.measureType;
+    });
   }
 
   /// Vizuální výběr 0–4 tlačítek PUM-A okolo displeje.
@@ -391,6 +409,58 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                   ),
                 ),
               ]),
+              if (_segments.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Row(children: [
+                  const Icon(Icons.view_week_outlined, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Segmenty (${_segments.length})',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                ]),
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 2, horizontal: 12),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < _segments.length; i++) ...[
+                        if (i > 0) const Divider(height: 1),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(_segments[i].id,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600)),
+                              ),
+                              Text('${_segments[i].from} – ${_segments[i].to} mm',
+                                  style: const TextStyle(fontFeatures: [
+                                    FontFeature.tabularFigures()
+                                  ])),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Segmenty jsou jen ke čtení (režim „segments").',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ],
             const SizedBox(height: 8),
             CheckboxListTile(
@@ -410,11 +480,23 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Zrušit'),
+        Row(
+          children: [
+            // Obnovit tovární config senzoru (jen DIST) — vlevo dole.
+            if (_type == ModuleType.dist)
+              TextButton.icon(
+                onPressed: _resetDistDefaults,
+                icon: const Icon(Icons.settings_backup_restore, size: 18),
+                label: const Text('Obnovit'),
+              ),
+            const Spacer(),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Zrušit'),
+            ),
+            FilledButton(onPressed: _submit, child: const Text('OK')),
+          ],
         ),
-        FilledButton(onPressed: _submit, child: const Text('OK')),
       ],
     );
   }

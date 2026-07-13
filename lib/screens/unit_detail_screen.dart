@@ -1234,7 +1234,7 @@ class _AddressChip extends StatelessWidget {
                 // číslice → všechny senzorové chipy mají stejnou šířku bez ohledu
                 // na počet cifer adresy i hodnoty.
                 ? SizedBox(
-                    width: 34,
+                    width: 48,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -1260,6 +1260,30 @@ class _AddressChip extends StatelessWidget {
                               fontFeatures: const [FontFeature.tabularFigures()],
                             ),
                           ),
+                        ),
+                        // Segmentový režim: název pásma zeleně (uvnitř) / šedě (mimo).
+                        Selector<AppState, ({String id, bool inSegment})?>(
+                          selector: (_, s) =>
+                              s.distSegmentFor(unitId, module.baseAddress),
+                          builder: (_, seg, _) => seg == null
+                              ? const SizedBox.shrink()
+                              : Text(
+                                  seg.id,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    height: 1.1,
+                                    fontWeight: FontWeight.bold,
+                                    color: seg.inSegment
+                                        ? Colors.green.shade600
+                                        : Colors.grey,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures()
+                                    ],
+                                  ),
+                                ),
                         ),
                       ],
                     ),

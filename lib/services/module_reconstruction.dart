@@ -3,7 +3,8 @@ import '../models/module.dart';
 
 /// Rekonstrukce fyzických PUMA modulů z atomického seznamu Device (GET-DEVICES payload).
 /// Algoritmus viz POSTUP.MD sekce "Rekonstrukce fyzických modulů z GET-DEVICES".
-List<PumaModule> reconstructModules(List<Device> rawDevices) {
+List<PumaModule> reconstructModules(List<Device> rawDevices,
+    {Map<int, DistConfig> distConfigs = const {}}) {
   final dispIds = rawDevices.where((d) => d.type == DeviceType.disp).map((d) => d.id).toSet();
   final ledsIds = rawDevices.where((d) => d.type == DeviceType.leds).map((d) => d.id).toSet();
   final btnIds = rawDevices.where((d) => d.type == DeviceType.btn).map((d) => d.id).toSet();
@@ -54,10 +55,10 @@ List<PumaModule> reconstructModules(List<Device> rawDevices) {
     modules.add(PumaModule.pumB(address: id, hasLeds: hasLeds));
   }
 
-  // 4. DIST
+  // 4. DIST (s konfigurací vč. segmentů, pokud byla v GET-DEVICES)
   final sortedDists = distIds.toList()..sort();
   for (final id in sortedDists) {
-    modules.add(PumaModule.dist(address: id));
+    modules.add(PumaModule.dist(address: id, config: distConfigs[id]));
   }
 
   modules.sort((a, b) {
@@ -119,6 +120,13 @@ Map<int, DistConfig> parseDistConfigs(dynamic payload) {
             maxDeviation: rawId[4] as int,
             countMeasures: rawId[5] as int,
             measureType: rawId[6] as int,
+            // 8. prvek = segmenty [["Name",From,To(,PositionId)], …]
+            segments: rawId.length > 7 && rawId[7] is List
+                ? [
+                    for (final seg in rawId[7] as List)
+                      if (seg is List) DistSegment.fromPositional(seg)
+                  ]
+                : const [],
           );
         } catch (_) {
           // ignore malformed entries

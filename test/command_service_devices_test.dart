@@ -191,6 +191,61 @@ void main() {
     });
   });
 
+  group('DIST segmenty', () {
+    const cfgWithSegments = DistConfig(
+      measurePeriod: 50,
+      timeout: 10,
+      offset: 0,
+      maxDeviation: 20,
+      countMeasures: 4,
+      measureType: 2,
+      segments: [
+        DistSegment(id: 'R01.A01', from: 0, to: 200),
+        DistSegment(id: 'R01.A02', from: 300, to: 500),
+      ],
+    );
+
+    test('SET-CONFIG přiloží Segments (objektový tvar) → zachová režim', () {
+      final cmd = CommandService.buildSetDistConfigCommand(
+        unitId: '001001',
+        distAddress: 97,
+        config: cfgWithSegments,
+      );
+      final decoded = jsonDecode(cmd.payload) as Map<String, dynamic>;
+      expect(decoded['MeasurePeriod'], 50);
+      final segs = decoded['Segments'] as List;
+      expect(segs.length, 2);
+      expect((segs[0] as Map)['SegmentId'], 'R01.A01');
+      expect((segs[0] as Map)['From'], 0);
+      expect((segs[0] as Map)['To'], 200);
+    });
+
+    test('SET-CONFIG bez segmentů pole Segments neposílá', () {
+      final cmd = CommandService.buildSetDistConfigCommand(
+        unitId: '001001',
+        distAddress: 97,
+        config: const DistConfig(),
+      );
+      final decoded = jsonDecode(cmd.payload) as Map<String, dynamic>;
+      expect(decoded.containsKey('Segments'), false);
+    });
+
+    test('ADD-DEVICES vloží segmenty jako 8. prvek (poziční, 3 prvky)', () {
+      final cmd = CommandService.buildAddDevicesCommand(
+        '001001',
+        [PumaModule.dist(address: 97, config: cfgWithSegments)],
+      );
+      final decoded = jsonDecode(cmd.payload) as List;
+      final dist = decoded.firstWhere((e) => (e as Map)['Type'] == 'DIST') as Map;
+      final entry = (dist['Id'] as List)[0] as List;
+      expect(entry[0], 97);
+      expect(entry.length, 8);
+      final segs = entry[7] as List;
+      expect(segs.length, 2);
+      expect(segs[0], ['R01.A01', 0, 200]);
+    });
+  });
+
   group('Factory default addresses', () {
     test('DIST default = 127', () {
       expect(CommandService.defaultReplacementAddress(DeviceType.dist), 127);

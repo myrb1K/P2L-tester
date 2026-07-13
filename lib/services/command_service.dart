@@ -269,7 +269,8 @@ class CommandService {
           cfg.maxDeviation,
           cfg.countMeasures,
           cfg.measureType,
-          [], // segments — první iterace nepodporuje, prázdný seznam
+          // 8. prvek = segmenty (poziční tvar); prázdné = režim vzdálenosti
+          cfg.segments.map((s) => s.toPositional()).toList(),
         ]);
       } else {
         for (final dev in module.toDevices()) {
@@ -419,6 +420,10 @@ class CommandService {
         'MaxDeviation': config.maxDeviation,
         'Offset': config.offset,
         'MeasureType': config.measureType,
+        // Segmenty se posílají jen když existují — bez pole `Segments` firmware
+        // přepne senzor zpět do režimu měření vzdálenosti (viz README-P2L-32).
+        if (config.segments.isNotEmpty)
+          'Segments': config.segments.map((s) => s.toJson()).toList(),
       }),
     );
   }
