@@ -136,7 +136,19 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
         .toSet();
     final result = await showDialog<AddModuleResult>(
       context: context,
-      builder: (_) => AddModuleDialog(existingAddresses: existing, initial: module),
+      builder: (_) => AddModuleDialog(
+        existingAddresses: existing,
+        initial: module,
+        // Živé měření jen pro SENZOR — polling GET-VALUE každých 500 ms.
+        onMeasure: module.type == ModuleType.dist
+            ? () async {
+                final r = await state.requestDistValue(
+                    widget.unitId, module.baseAddress,
+                    silent: true);
+                return r != null && r.ok ? r.distance : null;
+              }
+            : null,
+      ),
     );
     if (result == null) return;
     if (result.module.type == ModuleType.dist && result.module.distConfig != null) {
