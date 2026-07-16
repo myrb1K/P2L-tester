@@ -232,8 +232,46 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
   *Rozsviti prvnich 16 Ledek na portu 1 stylem 0 barvou 2*\
   ```0301 0000 0F00 00 01 02``` 
 
-* **SET-CONFIG**: Zatím nepodporováno\
-* **GET-CONFIG**: Zatím nepodporováno\
+* **SET-CONFIG**: od verze P2L_26071501NT. Nastavení konfigurace jednotky (Id, WiFi, MQTT, síť). Všechny parametry jsou volitelné — změní se jen ty, které payload obsahuje. Po změně sítě/Id/certifikátu se jednotka restartuje.\
+  Parametry:
+  * **Id**: nové Id jednotky (nahrazuje i samostatný SET-ID)
+  * **SSID**, **PSWD**: přihlášení k WiFi
+  * **mqttAddress**, **mqttPort**, **mqttUser**, **mqttPassword**: připojení k MQTT brokeru
+  * **mqttCertUrl**: URL (http) CA certifikátu ve formátu PEM. Jednotka si certifikát stáhne a uloží do NVS — při TLS připojení má pak přednost před kořenem zabudovaným ve firmware (ISRG Root X1, Let's Encrypt, platí do 2035). Pro brokery s certifikátem od Let's Encrypt tedy není potřeba. Slouží pro self-signed/privátní CA a pro budoucí výměnu kořene bez nového firmware. Pokud se s uloženým certifikátem nejde připojit, jednotka automaticky zkusí zabudovaný kořen.
+  * **mqttInsec**: true = nevalidovat certifikát serveru
+  * **ip**, **dns**, **gateway**, **subnet**: statická IP konfigurace ("0.0.0.0" v "ip" vypne statickou IP, přejde na DHCP)
+
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/UNIT/001001/SET-CONFIG
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"SSID":"ssid","PSWD":"password","mqttAddress":"mqtt.demo1.smartci4.com","mqttPort":1883,"mqttUser":"smartbox_user","mqttPassword":"smartbox2022","mqttInsec":false,"ip":"10.0.0.72","dns":"10.0.0.10","gateway":"10.0.0.10","subnet":"255.255.255.0"}
+  ```
+  ***Response:*** na topic `O/001001/UNIT/001001/SET-CONFIG` ve formátu `{"Level":"INFO","Code":0,"Message":"OK"}`. Při chybě stahování certifikátu je Code záporný a konfigurace se nezmění.
+* **GET-CONFIG**: od verze P2L_26071501NT. Vrátí aktuální konfiguraci jednotky. Nepotřebuje parametry, PAYLOAD musí být ve formátu JSON, tedy `{}`.\
+  Hesla se maskují — místo hodnoty se vrací jen `true`/`false` (zda jsou nastavena), u certifikátu `mqttCert` jen zda je uložen.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/UNIT/001001/GET-CONFIG
+  ```
+  ***Response:*** na topic `O/001001/UNIT/001001/GET-CONFIG`:
+  ```jsonc
+  {"Id":1001,"ver":"26071501NT","mac":"AA:BB:CC:DD:EE:FF","SSID":"ssid","PSWD":true,"mqttAddress":"mqtt.demo1.smartci4.com","mqttPort":1883,"mqttUser":"smartbox_user","mqttPassword":true,"mqttInsec":false,"mqttCert":false,"ip":"10.0.0.72","dns":"10.0.0.10","gateway":"10.0.0.10","subnet":"255.255.255.0","actualIp":"10.0.0.72","actualSSID":"ssid"}
+  ```
+* **UPDATE**: od verze P2L_26071501NT. OTA update firmware z plné URL (http i https). Jednotka pošle odpověď OK, stáhne firmware a restartuje se.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/UNIT/001001/UPDATE
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"url": "http://185.149.129.164/download/P2L_26071501NT.bin"}
+  ```
 * **GET-ALIVE**: od verze P2L_26070201NT. Okamžitě odešle ALIVE jednotky na topic `D/<UNIT_ID>/UNIT/<UNIT_ID>/ALIVE` bez čekání na periodický interval (5 min). Nepotřebuje parametry, PAYLOAD musí být ve formátu JSON, tedy `{}`.\
   ***Example:***\
   TOPIC:
@@ -246,8 +284,70 @@ Změní ID (RS485 adresu) všech nastavených zařizení na adrese "From" na "To
   ```
   ***Response:*** ALIVE na topic `D/001001/UNIT/001001/ALIVE` (stejný formát jako periodické ALIVE – HWModel, HWPart, Firmware, Battery, Code, Message, Level). Extra odpověď na `O/` topic se neposílá.
 ## P2L - ovládání LED - kód zařízení 01
+Od verze P2L_26071501NT je povel přímo v topicu `I/<UNIT_ID>/P2L/<P2L_ID>/<POVEL>` a payload je plochý JSON objekt (nebo pole objektů) bez obalu `cmds`. `<P2L_ID>` je Id LED zařízení = Id jednotky + 10000 (jednotka `001001` → P2L `011001`). Odpovědi se posílají na `O/<UNIT_ID>/P2L/<P2L_ID>/<POVEL>` ve formátu `{"Code":0,"Message":"OK"}`.
+
 ***COMANDs:***
-* **CMD**:   \
+* **CLR-STRIPS**: zhasne LED na zadaných portech; bez parametrů (payload `{}`) zhasne všechny porty.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/P2L/011001/CLR-STRIPS
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"ports":[0,1]}
+  ```
+* **CLR-LEDS**: zhasne LED v rozsahu x1–x2 na portu. Payload může být jeden objekt nebo pole objektů.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/P2L/011001/CLR-LEDS
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"port":0,"x1":0,"x2":9}
+  ```
+* **SET-LEDS**: rozsvítí LED v rozsahu x1–x2 na portu daným stylem a barvou. Payload může být jeden objekt nebo pole objektů (více bloků najednou). Místo `color_id` lze použít pole `colors_id`.\
+  Významy `style_id` a `color_id` viz [P2L-modul](https://github.com/Smart-Product-Solution-s-r-o/p2l-modul/blob/main/README.md).\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/P2L/011001/SET-LEDS
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"port":0,"x1":0,"x2":10,"style_id":0,"color_id":1}
+  ```
+  PAYLOAD (více bloků):
+  ```jsonc
+  [{"port":0,"x1":0,"x2":9,"style_id":0,"color_id":0},{"port":0,"x1":10,"x2":19,"style_id":1,"color_id":1}]
+  ```
+* **SET-CONFIG**: nastavení počtu LED na portech, barev a jasu. Všechny parametry jsou volitelné.\
+  Parametry:
+  * **brightness**: jas 1-100
+  * **ledCounts**: pole `{"port":<number>,"leds":<number>}` — počet LED na portu
+  * **colors**: pole `{"color_id":<number>,"red":<0-255>,"green":<0-255>,"blue":<0-255>,"red2":...,"green2":...,"blue2":...}` — definice barev (red2/green2/blue2 volitelné, využívají styly se střídáním barev)
+
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/P2L/011001/SET-CONFIG
+  ```
+  PAYLOAD:
+  ```jsonc
+  {"brightness":50,"ledCounts":[{"port":0,"leds":60}],"colors":[{"color_id":4,"red":128,"green":84,"blue":0}]}
+  ```
+* **GET-CONFIG**: vrátí aktuální LED konfiguraci (počty LED, barvy hex, jas). Nepotřebuje parametry, PAYLOAD musí být ve formátu JSON, tedy `{}`.\
+  ***Example:***\
+  TOPIC:
+  ```
+  I/001001/P2L/011001/GET-CONFIG
+  ```
+  ***Response:*** na topic `O/001001/P2L/011001/GET-CONFIG`:
+  ```jsonc
+  {"brightness":50,"leds port0":60,"leds port1":60,"color0":"ff0000","color2_0":"00ff00", /* ... */ }
+  ```
+* **CMD** *(starý formát, zachován pro zpětnou kompatibilitu)*:   \
   Parametry stejné jako u P2L jednotky viz. [P2L-modul](https://github.com/Smart-Product-Solution-s-r-o/p2l-modul/blob/main/README.md)\
   ***Example:***\
   TOPIC:
