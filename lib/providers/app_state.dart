@@ -625,7 +625,7 @@ class AppState extends ChangeNotifier {
     _mqttService.publish(cmd.topic, cmd.payload);
 
     Future.delayed(const Duration(seconds: 10), () {
-      // Sáhnout jen na VLASTNÍ completer — při pollingu (500 ms) mezitím na
+      // Sáhnout jen na VLASTNÍ completer — při pollingu (750 ms) mezitím na
       // stejné adrese vznikl novější požadavek, který nesmí tato stará timeout
       // ozvěna shodit na null (jinak by živé měření po ~10 s přestalo vypisovat).
       if (!identical(_distValueCompleters[key], completer)) return;
