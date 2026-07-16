@@ -601,8 +601,12 @@ class AppState extends ChangeNotifier {
   /// Vyžádá aktuální měření DIST senzoru přes GET-VALUE (od FW `P2L_26062301NT`).
   /// Vrátí `distance` [mm] + `ok` (Code==0) + `message`, nebo null při timeoutu.
   /// Úspěšné měření zároveň aktualizuje živou hodnotu ([distanceFor]).
+  ///
+  /// `silent=true` potlačí hlášky ve status baru — pro průběžný polling
+  /// (např. živé měření v editačním dialogu senzoru), který by jinak status
+  /// bar zaplavil desítkami zpráv za vteřinu.
   Future<({int? distance, bool ok, String? message})?> requestDistValue(
-      String unitId, int address) {
+      String unitId, int address, {bool silent = false}) {
     final id = _normUnitId(unitId);
     final key = '$id:$address';
     final existing = _distValueCompleters[key];
@@ -610,21 +614,29 @@ class AppState extends ChangeNotifier {
 
     final completer = Completer<({int? distance, bool ok, String? message})?>();
     _distValueCompleters[key] = completer;
-    final displayId = int.tryParse(id)?.toString() ?? id;
-    _setStatus('Měřím senzor $address na jednotce $displayId…');
-    notifyListeners();
+    if (!silent) {
+      final displayId = int.tryParse(id)?.toString() ?? id;
+      _setStatus('Měřím senzor $address na jednotce $displayId…');
+      notifyListeners();
+    }
 
     final cmd =
         CommandService.buildGetValueCommand(unitId: id, distAddress: address);
     _mqttService.publish(cmd.topic, cmd.payload);
 
     Future.delayed(const Duration(seconds: 10), () {
-      final c = _distValueCompleters.remove(key);
-      if (c == null || c.isCompleted) return;
-      _setStatus('Měření senzoru $address: bez odpovědi (starší firmware?)',
-          isError: true);
-      notifyListeners();
-      c.complete(null);
+      // Sáhnout jen na VLASTNÍ completer — při pollingu (500 ms) mezitím na
+      // stejné adrese vznikl novější požadavek, který nesmí tato stará timeout
+      // ozvěna shodit na null (jinak by živé měření po ~10 s přestalo vypisovat).
+      if (!identical(_distValueCompleters[key], completer)) return;
+      _distValueCompleters.remove(key);
+      if (completer.isCompleted) return;
+      if (!silent) {
+        _setStatus('Měření senzoru $address: bez odpovědi (starší firmware?)',
+            isError: true);
+        notifyListeners();
+      }
+      completer.complete(null);
     });
 
     return completer.future;

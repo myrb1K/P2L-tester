@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -17,6 +19,11 @@ class AddModuleDialog extends StatefulWidget {
   final int? suggestedAddress;
   // Předvolený typ (např. ze skenu sběrnice — ghost chip zná typ device).
   final ModuleType? suggestedType;
+  // Volitelné živé měření DIST senzoru. Když je předán (jen při editaci
+  // existujícího senzoru na připojené jednotce), v modalu se u SENZORu ukáže
+  // checkbox „Měření"; po zaškrtnutí se callback volá každých 500 ms a vrací
+  // naměřenou vzdálenost [mm] (null = bez hodnoty / porucha / timeout).
+  final Future<int?> Function()? onMeasure;
 
   const AddModuleDialog({
     super.key,
@@ -25,6 +32,7 @@ class AddModuleDialog extends StatefulWidget {
     this.initial,
     this.suggestedAddress,
     this.suggestedType,
+    this.onMeasure,
   });
 
   @override
@@ -49,6 +57,12 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
   int _distMeasureType = 2;
   // Segmenty jen ke čtení (z GET-DEVICES) — needitujeme je, jen zachováme.
   List<DistSegment> _segments = const [];
+
+  // Živé měření DIST (GET-VALUE každých 500 ms).
+  Timer? _measureTimer;
+  bool _measuring = false;
+  bool _measurePending = false; // brání překrytí, když odpověď trvá > 500 ms
+  int? _measuredValue;
 
   @override
   void initState() {
@@ -85,6 +99,7 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
 
   @override
   void dispose() {
+    _measureTimer?.cancel();
     _addrCtrl.dispose();
     _distPeriodCtrl.dispose();
     _distTimeoutCtrl.dispose();
@@ -92,6 +107,64 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
     _distMaxDevCtrl.dispose();
     _distOffsetCtrl.dispose();
     super.dispose();
+  }
+
+  /// Zapne/vypne živé měření senzoru (GET-VALUE každých 200 ms).
+  void _toggleMeasure(bool on) {
+    _measureTimer?.cancel();
+    setState(() {
+      _measuring = on;
+      if (!on) _measuredValue = null;
+    });
+    if (on) {
+      _tickMeasure(); // první měření hned, ať uživatel nečeká 500 ms
+      _measureTimer = Timer.periodic(
+        const Duration(milliseconds: 500),
+        (_) => _tickMeasure(),
+      );
+    } else {
+      _measureTimer = null;
+    }
+  }
+
+  Future<void> _tickMeasure() async {
+    final cb = widget.onMeasure;
+    if (cb == null || _measurePending) return; // předchozí měření ještě běží
+    _measurePending = true;
+    try {
+      final value = await cb();
+      if (!mounted || !_measuring) return;
+      setState(() => _measuredValue = value);
+    } finally {
+      _measurePending = false;
+    }
+  }
+
+  /// Kompaktní ovládání živého měření: checkbox „Měření" + naměřená hodnota.
+  Widget _measureControl(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Checkbox(
+          value: _measuring,
+          onChanged: (v) => _toggleMeasure(v ?? false),
+          visualDensity: VisualDensity.compact,
+        ),
+        const Text('Měření'),
+        if (_measuring) ...[
+          const SizedBox(width: 8),
+          Text(
+            _measuredValue != null ? '$_measuredValue mm' : '…',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   void _onAddrChanged() {
@@ -409,14 +482,32 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                   ),
                 ),
               ]),
+              // Živé měření senzoru (GET-VALUE každých 500 ms) — jen při editaci
+              // existujícího senzoru na připojené jednotce. Se segmenty je
+              // checkbox integrovaný do řádku „Segmenty (N)"; bez segmentů
+              // (řádek neexistuje) se ukáže samostatně.
+              if (widget.onMeasure != null && _segments.isEmpty) ...[
+                const SizedBox(height: 8),
+                _measureControl(context),
+              ],
               if (_segments.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                Row(children: [
-                  const Icon(Icons.view_week_outlined, size: 16),
-                  const SizedBox(width: 6),
-                  Text('Segmenty (${_segments.length})',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                ]),
+                // Wrap: na úzkém okně se měření zalomí pod „Segmenty (N)",
+                // na širším zůstane hned za ním (bez horizontálního overflow).
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 16,
+                  runSpacing: 4,
+                  children: [
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.view_week_outlined, size: 16),
+                      const SizedBox(width: 6),
+                      Text('Segmenty (${_segments.length})',
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                    ]),
+                    if (widget.onMeasure != null) _measureControl(context),
+                  ],
+                ),
                 const SizedBox(height: 6),
                 Container(
                   width: double.infinity,
