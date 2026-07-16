@@ -139,7 +139,7 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
       builder: (_) => AddModuleDialog(
         existingAddresses: existing,
         initial: module,
-        // Živé měření jen pro SENZOR — polling GET-VALUE každých 500 ms.
+        // Živé měření jen pro SENZOR — polling GET-VALUE každých 750 ms.
         onMeasure: module.type == ModuleType.dist
             ? () async {
                 final r = await state.requestDistValue(
@@ -148,6 +148,16 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                 return r != null && r.ok ? r.distance : null;
               }
             : null,
+        // Živá vzdálenost + segment (segmentový režim) — plněné z
+        // D/.../DIST/.../UPDATE i z GET-VALUE, překreslují se přes AppState
+        // notify, takže hodnota naskočí i bez zapnutého „Měření".
+        liveDistance: module.type == ModuleType.dist
+            ? () => state.distanceFor(widget.unitId, module.baseAddress)
+            : null,
+        liveSegment: module.type == ModuleType.dist
+            ? () => state.distSegmentFor(widget.unitId, module.baseAddress)
+            : null,
+        liveSource: module.type == ModuleType.dist ? state : null,
       ),
     );
     if (result == null) return;
@@ -1193,13 +1203,13 @@ class _AddressChip extends StatelessWidget {
             ),
           ),
         if (onEdit != null)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'edit',
             child: Row(
               children: [
-                Icon(Icons.edit, size: 18, color: Colors.blue),
-                SizedBox(width: 8),
-                Text('Upravit'),
+                const Icon(Icons.edit, size: 18, color: Colors.blue),
+                const SizedBox(width: 8),
+                Text(module.type == ModuleType.dist ? 'Nastavení' : 'Upravit'),
               ],
             ),
           ),
