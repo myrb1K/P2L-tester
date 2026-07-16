@@ -8,6 +8,11 @@
 Navazuje na dokončenou webovou variantu ([PRD-WEB](../PRD-WEB/README.md)) — znovu využívá její auth
 backend (`server/`, Node + Express + SQLite + JWT).
 
+> **⚠ Aktualizace 2026-07-16:** §4.1 (inventář observed) a milestones **DB5+** nahrazuje
+> [02-PRD-konfigurace.md](02-PRD-konfigurace.md) — nový FW `P2L_26071501NT` přidal UNIT
+> `GET-CONFIG`/`SET-CONFIG` a mění předpoklad „konfigurace se z jednotky nedá vyčíst".
+> DB1–DB4 zde zůstávají v platnosti.
+
 ---
 
 ## 1. Cíl projektu
