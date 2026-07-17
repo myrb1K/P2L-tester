@@ -16,6 +16,10 @@ class UnitDbSummary {
   final String? ip;
   final double? battery;
 
+  /// Adresa brokeru pro řádek seznamu (server ji odvodí: GET-CONFIG
+  /// mqttAddress → get_param mqtt_server → seen_on_broker). Není tajná.
+  final String? broker;
+
   /// Nesoulad desired vs. observed (broker/SSID/jas) — počítá server, aby
   /// seznam nemusel nést desired (hesla). Detail viz UnitDbCard.driftWarnings.
   final bool drift;
@@ -31,6 +35,7 @@ class UnitDbSummary {
     this.firmware,
     this.ip,
     this.battery,
+    this.broker,
     this.drift = false,
   });
 
@@ -45,6 +50,7 @@ class UnitDbSummary {
         firmware: json['firmware'] as String?,
         ip: json['ip'] as String?,
         battery: (json['battery'] as num?)?.toDouble(),
+        broker: json['broker'] as String?,
         drift: json['drift'] as bool? ?? false,
       );
 
@@ -314,12 +320,12 @@ DateTime? _parseTime(dynamic v) {
   return DateTime.tryParse(s)?.toUtc();
 }
 
-/// Relativní čas pro seznam („před 3 min", „před 2 h", „před 14 dny").
+/// Relativní čas pro seznam („3 min", „2 h", „14 dny") — bez slova „před".
 String relativeTime(DateTime? t) {
   if (t == null) return 'nikdy';
   final diff = DateTime.now().toUtc().difference(t);
-  if (diff.inSeconds < 60) return 'před chvílí';
-  if (diff.inMinutes < 60) return 'před ${diff.inMinutes} min';
-  if (diff.inHours < 24) return 'před ${diff.inHours} h';
-  return 'před ${diff.inDays} dny';
+  if (diff.inSeconds < 60) return 'teď';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min';
+  if (diff.inHours < 24) return '${diff.inHours} h';
+  return '${diff.inDays} dny';
 }

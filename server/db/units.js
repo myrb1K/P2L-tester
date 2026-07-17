@@ -237,7 +237,19 @@ function listUnits(db) {
         seen_on_broker: seenOnBroker,
         ...rest
       } = row;
-      return { ...rest, drift: computeDrift(desiredJson, row) };
+      // Adresa brokeru pro řádek seznamu (není tajná — desired_json s hesly
+      // dál nevracíme). Priorita: uloženo v NVS (GET-CONFIG) → hlášeno
+      // jednotkou (get_param) → kde ji appka viděla (ALIVE).
+      let cfgBroker = null;
+      if (unitConfigJson) {
+        try {
+          cfgBroker = JSON.parse(unitConfigJson).mqttAddress || null;
+        } catch {
+          /* poškozený JSON → ignoruj */
+        }
+      }
+      const broker = cfgBroker || mqttServer || seenOnBroker || null;
+      return { ...rest, broker, drift: computeDrift(desiredJson, row) };
     });
 }
 

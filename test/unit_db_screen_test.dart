@@ -292,7 +292,8 @@ void main() {
           MaterialApp(home: UnitDbListScreen(service: service)));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Vadná'));
+      // „Vadná" je i v legendě barev nad seznamem → cílit přímo filtr chip.
+      await tester.tap(find.widgetWithText(FilterChip, 'Vadná'));
       await tester.pumpAndSettle();
       expect(find.text('128'), findsOneWidget);
       expect(find.text('1209'), findsNothing);

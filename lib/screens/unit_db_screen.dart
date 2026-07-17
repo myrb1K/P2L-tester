@@ -91,7 +91,7 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                         controller: _searchController,
                         onChanged: (_) => setState(() {}),
                         decoration: InputDecoration(
-                          hintText: 'Hledat ID / název / umístění…',
+                          hintText: 'Hledat ID / zákazník / umístění…',
                           prefixIcon: const Icon(Icons.search),
                           suffixIcon: _searchController.text.isEmpty
                               ? null
@@ -137,6 +137,7 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                         ],
                       ),
                     ),
+                    const _StatusLegend(),
                     Expanded(
                       child: _filtered.isEmpty
                           ? Center(
@@ -185,45 +186,24 @@ class _UnitRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 18,
-          backgroundColor: _statusColor(unit.status).withAlpha(30),
-          child: Icon(Icons.memory, size: 20, color: _statusColor(unit.status)),
-        ),
-        title: Row(
-          children: [
-            Text(unit.id, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 8),
-            if (unit.name != null && unit.name!.isNotEmpty)
-              Expanded(
-                child: Text(unit.name!, overflow: TextOverflow.ellipsis),
-              ),
-          ],
-        ),
-        subtitle: Text(
-          [
-            unitDbStatusLabel(unit.status),
-            relativeTime(unit.lastSeen),
-            if (unit.location != null && unit.location!.isNotEmpty) unit.location!,
-            if (unit.firmware != null) unit.firmware!,
-          ].join(' · '),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (unit.drift)
-              const Tooltip(
-                message: 'Nesouhlasí s evidencí',
-                child: Icon(Icons.warning_amber, color: Colors.orange),
-              ),
-            const Icon(Icons.chevron_right),
-          ],
-        ),
+    // Plochý dvouřádkový řádek ve stylu seznamu jednotek na HomeScreen
+    // (Container se spodním okrajem, kompaktní padding, barevná tečka stavu).
+    final statusColor = _statusColor(unit.status);
+    final hasName = unit.name != null && unit.name!.isNotEmpty;
+    final hasBroker = unit.broker != null && unit.broker!.isNotEmpty;
+    // Stav (aktivní/vadná/…) nese barevná tečka vlevo, ne text — legenda barev
+    // je nad seznamem (_StatusLegend).
+    final subtitle = [
+      relativeTime(unit.lastSeen),
+      if (unit.location != null && unit.location!.isNotEmpty) unit.location!,
+      if (unit.firmware != null) unit.firmware!,
+    ].join(' · ');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.grey.withAlpha(50))),
+      ),
+      child: InkWell(
         onTap: () async {
           await Navigator.of(context).push(MaterialPageRoute(
             builder: (_) =>
@@ -231,6 +211,118 @@ class _UnitRow extends StatelessWidget {
           ));
           onReturn();
         },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+          child: Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: statusColor,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          unit.id,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        if (hasName) ...[
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              unit.name!,
+                              style: const TextStyle(fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                        if (hasBroker) ...[
+                          const SizedBox(width: 8),
+                          Icon(Icons.dns_outlined,
+                              size: 13, color: Colors.grey[500]),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              unit.broker!,
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.grey[600]),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (unit.drift) ...[
+                const SizedBox(width: 6),
+                const Tooltip(
+                  message: 'Nesouhlasí s evidencí',
+                  child: Icon(Icons.warning_amber,
+                      color: Colors.orange, size: 20),
+                ),
+              ],
+              const SizedBox(width: 2),
+              Icon(Icons.chevron_right, size: 20, color: Colors.grey[500]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Legenda barev teček stavu nad seznamem (stav se v řádku nevypisuje textem,
+/// jen barevnou tečkou — vysvětlivka je tady).
+class _StatusLegend extends StatelessWidget {
+  const _StatusLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 4,
+        children: [
+          for (final s in unitDbStatuses)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _statusColor(s),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  unitDbStatusLabel(s),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                ),
+              ],
+            ),
+        ],
       ),
     );
   }
@@ -422,7 +514,7 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
                         ),
                       ),
                     _Section(title: 'Údaje (meta)', children: [
-                      _row('Název', card.name),
+                      _row('Zákazník', card.name),
                       _row('Umístění', card.location),
                       _row('Stav', unitDbStatusLabel(card.status)),
                       _row('Poznámka', card.note),
@@ -719,7 +811,7 @@ class _MetaDialogState extends State<_MetaDialog> {
             TextField(
               controller: _name,
               enabled: !_busy,
-              decoration: const InputDecoration(labelText: 'Název'),
+              decoration: const InputDecoration(labelText: 'Zákazník'),
               autofocus: true,
             ),
             const SizedBox(height: 8),
