@@ -1045,11 +1045,14 @@ class AppState extends ChangeNotifier {
       if (wasPlaceholder && json['HWModel'] != null) {
         u.hwModel = json['HWModel'] as String;
       }
-      if (json['battery'] != null) {
-        u.battery = (json['battery'] as num).toDouble();
+      // ALIVE klíče velkými písmeny ("Battery"/"Firmware"); malé jako fallback.
+      final bat = json['Battery'] ?? json['battery'];
+      if (bat is num) {
+        u.battery = bat.toDouble();
       }
-      if (json['firmware'] != null) {
-        u.firmware = json['firmware'] as String;
+      final fw = json['Firmware'] ?? json['firmware'];
+      if (fw is String) {
+        u.firmware = fw;
         u.useBin = CommandService.firmwareSupportsBin(u.firmware);
       }
     } else {
