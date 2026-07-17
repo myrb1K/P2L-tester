@@ -47,6 +47,14 @@ class AppState extends ChangeNotifier {
   Set<String> _dbDriftIds = {};
   Timer? _dbDriftDebounce;
 
+  /// Odeslané potvrzované příkazy (P2L CMD ack): request_id → kontext. Ack
+  /// chodí na `O/.../P2L/.../CMD` (`status:"received"`); do timeoutu bez acku
+  /// = jednotka nepotvrdila (offline). `onConfirmed` se spustí až po potvrzení
+  /// (typicky zápis desired do DB — ať evidence nelže).
+  final Map<int,
+          ({String unitId, String label, Timer timer, VoidCallback onConfirmed})>
+      _pendingCmdAcks = {};
+
   /// True = jednotka má v DB nesoulad s evidencí. Jen orientační (osvěží se
   /// z DB s malým zpožděním). Prázdné u nepřihlášeného.
   bool unitHasDbDrift(String unitId) => _dbDriftIds.contains(_canonId(unitId));
@@ -506,6 +514,9 @@ class AppState extends ChangeNotifier {
       // Uložená konfigurace jednotky (GET-CONFIG, od FW P2L_26071501NT) —
       // observed vrstva pro centrální DB (DB5). Starší FW neodpoví.
       _mqttService.subscribe('O/+/UNIT/+/GET-CONFIG');
+      // Ack na P2L CMD příkazy s request_id != -1 (potvrzení příjmu, např.
+      // set_WiFi/set_Mqtt/update) → `{"request_id":N,"status":"received"}`.
+      _mqttService.subscribe('O/+/P2L/+/CMD');
       _mqttService.subscribe('O/+/UNIT/+/ADD-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/RECREATE-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
@@ -556,6 +567,10 @@ class AppState extends ChangeNotifier {
   void disconnect() {
     _tickTimer?.cancel();
     _dbDriftDebounce?.cancel();
+    for (final p in _pendingCmdAcks.values) {
+      p.timer.cancel();
+    }
+    _pendingCmdAcks.clear();
     _dbDriftIds = {};
     _mqttService.disconnect();
     _units.clear();
@@ -586,6 +601,8 @@ class AppState extends ChangeNotifier {
       _handleDistUpdate(topic, decoded);
     } else if (topic.startsWith('O/') && topic.contains('/DIST/') && topic.endsWith('/GET-VALUE') && decoded is Map<String, dynamic>) {
       _handleGetValueResponse(topic, decoded);
+    } else if (topic.startsWith('O/') && topic.contains('/P2L/') && topic.endsWith('/CMD') && decoded is Map<String, dynamic>) {
+      _handleCmdAck(decoded);
     } else if (topic.startsWith('O/')) {
       // GET-DEVICES odpověď je top-level pole; ostatní O/ odpovědi jsou Map s Code/Message.
       final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
@@ -870,6 +887,64 @@ class AppState extends ChangeNotifier {
         .pushObserved(unit, includeConfig: true, seenOnBroker: broker));
     _scheduleDbDriftRefresh();
     notifyListeners();
+  }
+
+  /// Ack na potvrzovaný P2L CMD příkaz (`O/.../P2L/.../CMD`,
+  /// `{"request_id":N,"status":"received",…}`). Spáruje podle request_id;
+  /// `received` → potvrzeno (spustí `onConfirmed`, typicky zápis desired).
+  void _handleCmdAck(Map<String, dynamic> json) {
+    final reqId = json['request_id'];
+    if (reqId is! int) return;
+    final pending = _pendingCmdAcks.remove(reqId);
+    if (pending == null) return;
+    pending.timer.cancel();
+    final display = int.tryParse(pending.unitId)?.toString() ?? pending.unitId;
+    final status = json['status'];
+    if (status == 'received') {
+      _setStatus('$display: ${pending.label} — jednotka potvrdila příjem.');
+      pending.onConfirmed();
+    } else {
+      _setStatus('$display: ${pending.label} — jednotka vrátila „$status".',
+          isError: true);
+    }
+    notifyListeners();
+  }
+
+  /// Odešle potvrzovaný config příkaz a hlídá ack. Nová generace: request_id
+  /// != -1 → čeká na `status:"received"` (timeout 5 s); potvrzení spustí
+  /// [onConfirmed] (typicky zápis desired — evidence tak nelže, když je
+  /// jednotka offline). Stará gen / neznámá (ack neumí): pošle s -1 a
+  /// [onConfirmed] spustí rovnou (optimisticky, jako dosud).
+  void _sendTrackedConfigCmd({
+    required String unitId,
+    required String label,
+    required String Function(int requestId) build,
+    required VoidCallback onConfirmed,
+    Duration timeout = const Duration(seconds: 5),
+  }) {
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    final topic = _topicFor(unitId);
+    final canAck =
+        unit != null && (unit.isNewGen || CommandService.isNewTopicFormat(id));
+    if (!canAck) {
+      _mqttService.publish(topic, build(-1));
+      onConfirmed();
+      return;
+    }
+    final reqId = CommandService.nextRequestId();
+    final timer = Timer(timeout, () {
+      final p = _pendingCmdAcks.remove(reqId);
+      if (p == null) return;
+      final display = int.tryParse(p.unitId)?.toString() ?? p.unitId;
+      _setStatus(
+          '$display: ${p.label} — jednotka NEPOTVRDILA (offline?), do evidence se nezapsalo.',
+          isError: true);
+      notifyListeners();
+    });
+    _pendingCmdAcks[reqId] =
+        (unitId: id, label: label, timer: timer, onConfirmed: onConfirmed);
+    _mqttService.publish(topic, build(reqId));
   }
 
   /// SCAN-DEVICES: úspěch je přímý JSON objekt s adresami (bez `Code`), chyba
@@ -1210,37 +1285,44 @@ class AppState extends ChangeNotifier {
   /// Hromadná změna brokera: pošle `set_Mqtt` všem vybraným jednotkám s 100ms pauzou.
   Future<void> sendBulkBroker(BrokerProfile profile) async {
     if (_selectedUnits.isEmpty) return;
-    final payload = CommandService.buildSetMqttCommand(
-      address: profile.broker,
-      port: profile.port,
-      user: profile.username,
-      password: profile.password,
-      insecure: !profile.useSsl,
-    );
     final targets = _selectedUnits.toList();
     var sent = 0;
     for (final unitId in targets) {
-      final topic = _topicFor(unitId);
-      _mqttService.publish(topic, payload);
-      // Centrální DB (DB3): desired.broker — jediné místo, kde credentials
-      // brokeru existují mimo okamžik odeslání.
-      unawaited(UnitDbService.instance.pushDesired(_normUnitId(unitId), {
-        'broker': {
-          'address': profile.broker,
-          'port': profile.port,
-          'user': profile.username,
-          'password': profile.password,
-          'insecure': !profile.useSsl,
+      final id = _normUnitId(unitId);
+      _sendTrackedConfigCmd(
+        unitId: unitId,
+        label: 'Broker',
+        build: (reqId) => CommandService.buildSetMqttCommand(
+          address: profile.broker,
+          port: profile.port,
+          user: profile.username,
+          password: profile.password,
+          insecure: !profile.useSsl,
+          requestId: reqId,
+        ),
+        // Desired.broker (jediné místo s credentials mimo odeslání) až po acku.
+        onConfirmed: () {
+          unawaited(UnitDbService.instance.pushDesired(id, {
+            'broker': {
+              'address': profile.broker,
+              'port': profile.port,
+              'user': profile.username,
+              'password': profile.password,
+              'insecure': !profile.useSsl,
+            },
+          }));
+          _scheduleDbDriftRefresh();
         },
-      }));
+      );
       sent++;
-      _statusMessage = 'Broker: $sent / ${targets.length} (${profile.name})';
+      _statusMessage = 'Broker odesláno: $sent / ${targets.length} (${profile.name})';
       notifyListeners();
       if (sent < targets.length) {
         await Future.delayed(const Duration(milliseconds: 100));
       }
     }
-    _statusMessage = 'Broker "${profile.name}" odeslán na $sent P2L jednotek';
+    _statusMessage =
+        'Broker "${profile.name}" odeslán na $sent jednotek (čekám na potvrzení)';
     notifyListeners();
   }
 
@@ -1324,18 +1406,26 @@ class AppState extends ChangeNotifier {
 
   Future<void> sendBulkWifi({required String ssid, required String password}) async {
     if (_selectedUnits.isEmpty) return;
-    final payload = CommandService.buildSetWifiCommand(ssid: ssid, password: password);
     final targets = _selectedUnits.toList();
     var sent = 0;
     for (final unitId in targets) {
-      final topic = _topicFor(unitId);
-      _mqttService.publish(topic, payload);
-      // Centrální DB (DB3): desired.wifi — heslo jinde neexistuje.
-      unawaited(UnitDbService.instance.pushDesired(_normUnitId(unitId), {
-        'wifi': {'ssid': ssid, 'password': password},
-      }));
+      final id = _normUnitId(unitId);
+      // Desired (heslo jinde neexistuje) se zapíše až po potvrzení příjmu —
+      // offline jednotka příkaz nedostane a evidence tak nelže.
+      _sendTrackedConfigCmd(
+        unitId: unitId,
+        label: 'WiFi',
+        build: (reqId) => CommandService.buildSetWifiCommand(
+            ssid: ssid, password: password, requestId: reqId),
+        onConfirmed: () {
+          unawaited(UnitDbService.instance.pushDesired(id, {
+            'wifi': {'ssid': ssid, 'password': password},
+          }));
+          _scheduleDbDriftRefresh();
+        },
+      );
       sent++;
-      _statusMessage = 'WiFi: $sent / ${targets.length}';
+      _statusMessage = 'WiFi odesláno: $sent / ${targets.length}';
       notifyListeners();
       if (sent < targets.length) {
         await Future.delayed(const Duration(milliseconds: 100));
@@ -1346,7 +1436,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('last_wifi_ssid', ssid);
     await prefs.setString('last_wifi_password', password);
-    _statusMessage = 'WiFi "$ssid" odeslána na $sent P2L jednotek';
+    _statusMessage = 'WiFi "$ssid" odesláno na $sent jednotek (čekám na potvrzení)';
     notifyListeners();
   }
 
@@ -1361,24 +1451,31 @@ class AppState extends ChangeNotifier {
   /// proto označíme každou jednotku jako offline-until-alive.
   Future<void> sendBulkFirmwareUpdate({required String fileName}) async {
     if (_selectedUnits.isEmpty) return;
-    final payload = CommandService.buildUpdateCommand(fileName: fileName);
     final targets = _selectedUnits.toList();
     var sent = 0;
     for (final unitId in targets) {
-      final topic = _topicFor(unitId);
-      _mqttService.publish(topic, payload);
       final id = _normUnitId(unitId);
-      _markUnitOfflineUntilAlive(id);
-      // Centrální DB (DB3): desired.fwUrl (poslední odeslané OTA).
-      unawaited(UnitDbService.instance.pushDesired(id, {'fwUrl': fileName}));
+      _sendTrackedConfigCmd(
+        unitId: unitId,
+        label: 'Firmware',
+        build: (reqId) =>
+            CommandService.buildUpdateCommand(fileName: fileName, requestId: reqId),
+        // Offline-until-alive i desired.fwUrl až po potvrzení příjmu —
+        // flash (a tím restart) proběhne jen když jednotka příkaz dostala.
+        onConfirmed: () {
+          _markUnitOfflineUntilAlive(id);
+          unawaited(UnitDbService.instance.pushDesired(id, {'fwUrl': fileName}));
+          _scheduleDbDriftRefresh();
+        },
+      );
       sent++;
-      _statusMessage = 'FW: $sent / ${targets.length}';
+      _statusMessage = 'FW odesláno: $sent / ${targets.length}';
       notifyListeners();
       if (sent < targets.length) {
         await Future.delayed(const Duration(milliseconds: 100));
       }
     }
-    _statusMessage = 'Update odeslán na $sent P2L modulů ($fileName)';
+    _statusMessage = 'Update odeslán na $sent jednotek — $fileName (čekám na potvrzení)';
     notifyListeners();
   }
 

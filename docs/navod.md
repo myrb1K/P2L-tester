@@ -82,6 +82,8 @@ Menu **Hromadná konfigurace** (ikona `settings_remote`) je aktivní jen při v�
 |---------|---------|
 | **Změnit broker** | Přepne vybrané jednotky na jiný broker (`set_Mqtt`). Lze vybrat uložený profil nebo zadat nový (ten se zároveň uloží). Pozor: jednotky se odpojí z aktuálního brokera. |
 | **Změnit WiFi** | Nastaví SSID + heslo (`set_WiFi`). |
+
+> **Potvrzení příjmu (nová generace).** U změny brokera, WiFi i firmwaru appka čeká, až jednotka příkaz **potvrdí** („jednotka potvrdila příjem"). Do evidence (databáze) se změna zapíše **až po potvrzení** — když je jednotka offline a příkaz nedostane, uvidíš „**NEPOTVRDILA (offline?)**" a evidence zůstane pravdivá (nezapíše se něco, co reálně neproběhlo). Stará generace potvrzení neumí, tam se zapíše rovnou jako dřív.
 | **Jas P2L LED** | Jas LED pásků jednotky, 0–100 % (`set_brightness`). |
 | **Aktualizovat firmware** | OTA flash — zadej cestu k serveru, *Ověřit* načte dostupné `*.bin`, vyber a **FLASH**. Jednotky se restartují a budou pár minut nedostupné. |
 | **Restartovat P2L modul** | Pošle restart vybraným jednotkám. |

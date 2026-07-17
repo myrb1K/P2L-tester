@@ -332,4 +332,33 @@ void main() {
       expect(CommandService.firmwareSupportsGetConfig(''), isFalse);
     });
   });
+
+  group('request_id ACK (potvrzení příjmu)', () {
+    test('nextRequestId je monotónní, unikátní a nikdy -1', () {
+      final ids = List.generate(50, (_) => CommandService.nextRequestId());
+      expect(ids.toSet().length, 50); // všechny různé (nesmí se opakovat v 10)
+      for (var i = 1; i < ids.length; i++) {
+        expect(ids[i], greaterThan(ids[i - 1])); // rostoucí
+      }
+      expect(ids.every((id) => id != -1), isTrue);
+    });
+
+    test('buildSetWifiCommand: requestId se propíše, default -1', () {
+      final withId = jsonDecode(CommandService.buildSetWifiCommand(
+          ssid: 'HALA', password: 'x', requestId: 8999)) as Map;
+      expect(withId['request_id'], 8999);
+      final def = jsonDecode(
+          CommandService.buildSetWifiCommand(ssid: 'HALA', password: 'x')) as Map;
+      expect(def['request_id'], -1);
+    });
+
+    test('buildSetMqttCommand a buildUpdateCommand nesou requestId', () {
+      final mqtt = jsonDecode(CommandService.buildSetMqttCommand(
+          address: 'a', port: 1883, user: 'u', password: 'p', requestId: 42)) as Map;
+      expect(mqtt['request_id'], 42);
+      final upd = jsonDecode(CommandService.buildUpdateCommand(
+          fileName: 'f.bin', requestId: 7)) as Map;
+      expect(upd['request_id'], 7);
+    });
+  });
 }

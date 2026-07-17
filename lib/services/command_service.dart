@@ -115,6 +115,14 @@ class CommandService {
     });
   }
 
+  /// Monotónně rostoucí `request_id` pro potvrzované příkazy. Jednotka
+  /// odpoví ackem na `O/.../P2L/.../CMD` (`status:"received"`) jen když
+  /// `request_id != -1`; a **nesmí se opakovat v posledních 10** — monotónní
+  /// čítač to garantuje (na rozdíl od náhody). Seed z času, aby nový běh
+  /// appky začal výš než minulý → nekoliduje ani přes restart.
+  static int _reqIdSeq = DateTime.now().millisecondsSinceEpoch;
+  static int nextRequestId() => ++_reqIdSeq;
+
   /// Zjistí parametry jednotky
   static String buildGetParamCommand() {
     return jsonEncode({
@@ -125,16 +133,18 @@ class CommandService {
     });
   }
 
-  /// Příkaz `set_Mqtt` – hromadná změna brokera.
+  /// Příkaz `set_Mqtt` – hromadná změna brokera. [requestId] != -1 → jednotka
+  /// pošle ack na `O/.../P2L/.../CMD` (potvrzení příjmu).
   static String buildSetMqttCommand({
     required String address,
     required int port,
     required String user,
     required String password,
     bool insecure = false,
+    int requestId = -1,
   }) {
     return jsonEncode({
-      'request_id': -1,
+      'request_id': requestId,
       'cmds': [
         {
           'cmd': 'set_Mqtt',
@@ -167,9 +177,9 @@ class CommandService {
   /// Příkaz `update` – nahrát firmware z dané URL/cesty. Firmware si soubor
   /// stáhne sám a po flashi se restartuje. Funguje na obou generacích
   /// jednotek (JSON cmd, topic řeší volající přes `getCommandTopic`).
-  static String buildUpdateCommand({required String fileName}) {
+  static String buildUpdateCommand({required String fileName, int requestId = -1}) {
     return jsonEncode({
-      'request_id': -1,
+      'request_id': requestId,
       'cmds': [
         {
           'cmd': 'update',
@@ -179,13 +189,15 @@ class CommandService {
     });
   }
 
-  /// Příkaz `set_WiFi` – hromadná změna WiFi.
+  /// Příkaz `set_WiFi` – hromadná změna WiFi. [requestId] != -1 → jednotka
+  /// pošle ack na `O/.../P2L/.../CMD` (potvrzení příjmu).
   static String buildSetWifiCommand({
     required String ssid,
     required String password,
+    int requestId = -1,
   }) {
     return jsonEncode({
-      'request_id': -1,
+      'request_id': requestId,
       'cmds': [
         {
           'cmd': 'set_WiFi',
