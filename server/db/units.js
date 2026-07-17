@@ -20,6 +20,11 @@ const SCHEMA_PATH = path.join(__dirname, 'units-schema.sql');
 
 const VALID_STATUS = ['active', 'faulty', 'stock', 'retired'];
 
+// Retence historie: na jednotku držíme jen posledních N záznamů, zbytek se
+// maže (drobné akce, ne archiv). Ořezává se při každém zápisu i jednorázově
+// při otevření DB (vyčistí přebytky z doby před retencí).
+const HISTORY_RETENTION = 5;
+
 class UnitOpError extends Error {
   constructor(code, message) {
     super(message);
@@ -37,7 +42,22 @@ function openUnitsDb(dbPath = UNITS_DB_PATH) {
   db.pragma('journal_mode = WAL');
   db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
   ensureObservedColumns(db);
+  pruneAllHistory(db);
   return db;
+}
+
+// Jednorázový úklid: u každé jednotky nechá jen posledních HISTORY_RETENTION
+// záznamů historie. Řeší data z doby před zavedením retence.
+function pruneAllHistory(db) {
+  db.prepare(
+    `DELETE FROM unit_history WHERE id NOT IN (
+       SELECT id FROM (
+         SELECT id, ROW_NUMBER() OVER (
+           PARTITION BY unit_id ORDER BY id DESC
+         ) AS rn FROM unit_history
+       ) WHERE rn <= ?
+     )`
+  ).run(HISTORY_RETENTION);
 }
 
 // Mini-migrace: CREATE TABLE IF NOT EXISTS existující DB nerozšíří, takže
@@ -119,6 +139,12 @@ function addHistory(db, unitId, username, action, detail) {
   db.prepare(
     'INSERT INTO unit_history (unit_id, username, action, detail_json) VALUES (?, ?, ?, ?)'
   ).run(unitId, username, action, detail == null ? null : JSON.stringify(scrubSecrets(detail)));
+  // Retence: na jednotku držíme jen posledních HISTORY_RETENTION záznamů.
+  db.prepare(
+    `DELETE FROM unit_history WHERE unit_id = ? AND id NOT IN (
+       SELECT id FROM unit_history WHERE unit_id = ? ORDER BY id DESC LIMIT ?
+     )`
+  ).run(unitId, unitId, HISTORY_RETENTION);
 }
 
 function getHistory(db, rawId, limit = 200) {
