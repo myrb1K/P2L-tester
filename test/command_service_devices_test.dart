@@ -334,13 +334,15 @@ void main() {
   });
 
   group('request_id ACK (potvrzení příjmu)', () {
-    test('nextRequestId je monotónní, unikátní a nikdy -1', () {
+    test('nextRequestId je monotónní, unikátní, ≤ 10 číslic a nikdy -1', () {
       final ids = List.generate(50, (_) => CommandService.nextRequestId());
       expect(ids.toSet().length, 50); // všechny různé (nesmí se opakovat v 10)
       for (var i = 1; i < ids.length; i++) {
         expect(ids[i], greaterThan(ids[i - 1])); // rostoucí
       }
       expect(ids.every((id) => id != -1), isTrue);
+      // FW limit: request_id max 10 číslic (≤ 9 999 999 999).
+      expect(ids.every((id) => id > 0 && id <= 9999999999), isTrue);
     });
 
     test('buildSetWifiCommand: requestId se propíše, default -1', () {

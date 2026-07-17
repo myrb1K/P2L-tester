@@ -118,9 +118,13 @@ class CommandService {
   /// Monotónně rostoucí `request_id` pro potvrzované příkazy. Jednotka
   /// odpoví ackem na `O/.../P2L/.../CMD` (`status:"received"`) jen když
   /// `request_id != -1`; a **nesmí se opakovat v posledních 10** — monotónní
-  /// čítač to garantuje (na rozdíl od náhody). Seed z času, aby nový běh
-  /// appky začal výš než minulý → nekoliduje ani přes restart.
-  static int _reqIdSeq = DateTime.now().millisecondsSinceEpoch;
+  /// čítač to garantuje (na rozdíl od náhody).
+  ///
+  /// Seed = **sekundy od epochy** → drží se do **10 číslic** (FW limit; ~1,78
+  /// mld., 11. místo přijde až kolem r. 2286) a nový běh appky začne výš než
+  /// minulý (čas jde dopředu) → nekoliduje ani přes restart. Inkrement v rámci
+  /// běhu zůstává v 10 číslicích (přeteklo by až po miliardách příkazů).
+  static int _reqIdSeq = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   static int nextRequestId() => ++_reqIdSeq;
 
   /// Zjistí parametry jednotky
