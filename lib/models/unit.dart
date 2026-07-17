@@ -71,12 +71,14 @@ class P2LUnit {
     Map<String, dynamic> json, {
     bool isNewGen = false,
   }) {
-    final fw = json['firmware'] as String?;
+    // ALIVE payload nové gen má klíče velkými písmeny ("Firmware"/"Battery");
+    // malé necháváme jako fallback pro starší formát.
+    final fw = (json['Firmware'] ?? json['firmware']) as String?;
     return P2LUnit(
       id: unitId,
       hwModel: json['HWModel'] as String?,
       firmware: fw,
-      battery: (json['battery'] as num?)?.toDouble(),
+      battery: ((json['Battery'] ?? json['battery']) as num?)?.toDouble(),
       useBin: CommandService.firmwareSupportsBin(fw),
       isNewGen: isNewGen,
     );

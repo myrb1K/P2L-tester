@@ -59,4 +59,33 @@ void main() {
       expect(u.mac, '88:57:21:40:E6:6C');
     });
   });
+
+  group('P2LUnit.fromAlive', () {
+    // Reálný UNIT ALIVE nové gen — klíče VELKÝMI písmeny. firmware musí být
+    // známé hned z ALIVE, jinak fetchConfig (GET-CONFIG) na prvním ALIVE
+    // no-opne (firmwareSupportsGetConfig(null)=false) → falešný drift.
+    test('načte Firmware/Battery z klíčů velkými písmeny', () {
+      final u = P2LUnit.fromAlive('1209', const {
+        'HWModel': 'Unit32',
+        'HWPart': '',
+        'Firmware': '26071501NT',
+        'Battery': 10.8,
+        'Level': 'INFO',
+        'Code': 0,
+        'Message': 'OK',
+      }, isNewGen: true);
+      expect(u.firmware, '26071501NT');
+      expect(u.battery, 10.8);
+      expect(u.hwModel, 'Unit32');
+    });
+
+    test('fallback na malá písmena (starší formát)', () {
+      final u = P2LUnit.fromAlive('472', const {
+        'firmware': '25010101NT',
+        'battery': 42,
+      });
+      expect(u.firmware, '25010101NT');
+      expect(u.battery, 42.0);
+    });
+  });
 }
