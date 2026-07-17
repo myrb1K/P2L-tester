@@ -1,6 +1,6 @@
 # 02 — PRD: Kompletní konfigurace jednotek (GET-CONFIG, zálohy, obnova)
 
-> **Status:** Draft v0.1 · **Datum:** 2026-07-16 · **Autor:** Radek Brym · **Branch:** `web`
+> **Status:** v0.2 · **Datum:** 2026-07-17 · **Autor:** Radek Brym · **Branch:** `web` · **DB5 + DB8 hotové (v2.78)**
 >
 > Navazuje na [01-PRD.md](01-PRD.md) (DB1–DB4 hotové). Vzniklo ze dvou podnětů:
 > 1. Nový firmware **`P2L_26071501NT`** přidal UNIT-level `GET-CONFIG` / `SET-CONFIG` / `UPDATE`
@@ -304,10 +304,10 @@ v řetězu + ruční volba na kartě. Žádné šifrování lokální DB v prvn�
 
 | # | Milestone | Obsah | Závislosti |
 |---|-----------|-------|------------|
-| **DB5** | GET-CONFIG do observed | Appka: `firmwareSupportsGetConfig`, builder (`getUnitCommandTopic(unitId,'GET-CONFIG')`, payload `{}`), subscribe `O/+/UNIT/+/GET-CONFIG`, parser, rozšíření `pushObserved`. Server: `unit_config_json` + `unit_config_fetched_at` (via `ensureObservedColumns`), drift v2 (§6) na serveru i v appce. UI: karta se třemi pohledy observed. Fallback get_param beze změny. | DB3+DB4 (hotové) |
-| **DB6** | Snapshoty a revize | Tabulka `unit_config_revisions` + endpointy (§5.2), tlačítko „Zálohovat konfiguraci" na kartě, seznam revizí, diff view (§5.3). | DB5 |
-| **DB7** | Obnova a náhrada | Stavový automat (§7.1), náhrada s kontrolou kompatibility (§7.2), fallbacky pro starý FW (§3). Ověření na reálném HW. | DB6 |
-| **DB8** | Skutečná hesla z jednotky | Credentials GET-CONFIG — **až kolega dodá FW + tvar** (§10). Tri-state merge do desired/snapshotů, zákaz logování credentials. | DB5 + FW |
+| **DB5** ✅ | GET-CONFIG do observed | Appka: `firmwareSupportsGetConfig`, builder (`getUnitCommandTopic(unitId,'GET-CONFIG')`, payload `{}`), subscribe `O/+/UNIT/+/GET-CONFIG`, parser, rozšíření `pushObserved`. Server: `unit_config_json` + `unit_config_fetched_at` (via `ensureObservedColumns`), drift v2 (§6) na serveru i v appce. UI: karta se třemi pohledy observed. Fallback get_param beze změny. Navíc oproti PRD: request_id ACK, auto-refresh observed po config změně i na prvním ALIVE. | DB3+DB4 · **hotovo (v2.78)** |
+| **DB6** | Snapshoty a revize | Tabulka `unit_config_revisions` + endpointy (§5.2), tlačítko „Zálohovat konfiguraci" na kartě, seznam revizí, diff view (§5.3). | DB5 (hotové) |
+| **DB7** | Obnova a náhrada | Stavový automat (§7.1), náhrada s kontrolou kompatibility (§7.2), fallbacky pro starý FW (§3). Ověření na reálném HW. | DB6 + §10 ot. 1+2 (kolega) |
+| **DB8** ✅ | Skutečná hesla z jednotky | Credentials GET-CONFIG **hotovo** — FW `26071501NT` ověřen na jednotce 1209 (§4), tri-state merge implementován v rámci DB5. Zbývá jen **šifrování sloupců at-rest** (budoucí). | DB5 + FW · **hotovo (v2.78)** |
 | **DB9** *(volitelné)* | Offline cache + sync | Skica §8. | DB6 |
 | **DB10** *(volitelné)* | Sync broker profilů | = původní DB6 z jedničky. | DB1 |
 | **DB11** *(volitelné)* | Server-side MQTT collector | = původní DB7 z jedničky; nově by uměl i periodický GET-CONFIG → observed čerstvý 24/7. | DB2 + broker ze serveru |
@@ -316,17 +316,20 @@ v řetězu + ruční volba na kartě. Žádné šifrování lokální DB v prvn�
 
 ## 10. Otázky na kolegu (FW)
 
-1. **Credentials GET-CONFIG:** přesný tvar payloadu (`{"User":...,"Password":...}`?) a odpovědi —
-   vrací hesla jako string místo bool? Kde se definují účty/oprávnění? Od jaké verze FW?
-2. **Reset:** co přesně maže / zachovává / nastavuje na default? Existuje explicitní příznak
+> **Tvar credentials GET-CONFIG je zodpovězen** — ověřeno naživo na jednotce 1209
+> (FW `26071501NT`, 2026-07-17): request s `{"User":"admin","Password":"smartbox"}` vrací hesla
+> jako string, prázdný `{}` vrací bool. Detail v §4, proto už není v seznamu níže.
+> **Blokující pro DB7 jsou otázky 1 a 2** (reset + SET-CONFIG restart); zbytek nic negatuje.
+
+1. **Reset:** co přesně maže / zachovává / nastavuje na default? Existuje explicitní příznak
    „byla jsem resetována" (v ALIVE nebo GET-CONFIG)? Je `config.smartbox4you.com` garantovaný
    broker po resetu a jak se k němu appka autorizuje?
-3. **SET-CONFIG restart:** README říká „po změně sítě/Id/certifikátu" — restartuje se i po změně
+2. **SET-CONFIG restart:** README říká „po změně sítě/Id/certifikátu" — restartuje se i po změně
    jen MQTT credentials? Potvrzuje jednotka uložení každé části zvlášť?
-4. **GET-CONFIG rozsah:** plánuje se doplnit `HWModel`/typ jednotky do odpovědi? (Teď jen v ALIVE.)
-5. **Duplicitní ID:** může v praxi existovat stejné unit ID u dvou zákazníků (dva izolované
+3. **GET-CONFIG rozsah:** plánuje se doplnit `HWModel`/typ jednotky do odpovědi? (Teď jen v ALIVE.)
+4. **Duplicitní ID:** může v praxi existovat stejné unit ID u dvou zákazníků (dva izolované
    brokery)? (Dopad na klíč karty v DB.)
-6. **P2L GET-CONFIG:** je tvar `{"brightness":..,"leds portN":..,"colorN":"..."}` finální?
+5. **P2L GET-CONFIG:** je tvar `{"brightness":..,"leds portN":..,"colorN":"..."}` finální?
    (Klíče s mezerou — jen ověřit.)
 
 ---
@@ -344,4 +347,6 @@ v řetězu + ruční volba na kartě. Žádné šifrování lokální DB v prvn�
 
 ---
 
-**Příští krok:** poslat §10 kolegovi → review tohoto PRD → začít **DB5**.
+**Příští krok:** DB5 i DB8 hotové (v2.78). Poslat kolegovi §10 otázky 1+2 (reset + SET-CONFIG
+restart) — odblokují DB7. Mezitím rozjet **DB6** (snapshoty a revize, §5) jako samostatný předstupeň
+DB7 (bez záloh není co obnovovat).
