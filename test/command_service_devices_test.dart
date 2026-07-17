@@ -334,15 +334,19 @@ void main() {
   });
 
   group('request_id ACK (potvrzení příjmu)', () {
-    test('nextRequestId je monotónní, unikátní, ≤ 10 číslic a nikdy -1', () {
+    test('nextRequestId: rozsah 1–65535, krok +1/wrap, neopakuje se v 10', () {
       final ids = List.generate(50, (_) => CommandService.nextRequestId());
-      expect(ids.toSet().length, 50); // všechny různé (nesmí se opakovat v 10)
+      // FW limit: request_id max 65535 (16bit, 5 míst), nikdy -1 ani 0.
+      expect(ids.every((id) => id >= 1 && id <= 65535), isTrue);
+      // Každý krok je +1, nebo wraparound 65535 → 1.
       for (var i = 1; i < ids.length; i++) {
-        expect(ids[i], greaterThan(ids[i - 1])); // rostoucí
+        final ok = ids[i] == ids[i - 1] + 1 || (ids[i - 1] == 65535 && ids[i] == 1);
+        expect(ok, isTrue);
       }
-      expect(ids.every((id) => id != -1), isTrue);
-      // FW limit: request_id max 10 číslic (≤ 9 999 999 999).
-      expect(ids.every((id) => id > 0 && id <= 9999999999), isTrue);
+      // Nesmí se opakovat v žádném okně 10 po sobě.
+      for (var i = 0; i + 10 <= ids.length; i++) {
+        expect(ids.sublist(i, i + 10).toSet().length, 10);
+      }
     });
 
     test('buildSetWifiCommand: requestId se propíše, default -1', () {
@@ -361,6 +365,19 @@ void main() {
       final upd = jsonDecode(CommandService.buildUpdateCommand(
           fileName: 'f.bin', requestId: 7)) as Map;
       expect(upd['request_id'], 7);
+    });
+
+    test('config CMD topic: nová gen jde na P2L, ne na starou SERVER', () {
+      // Nová jednotka (ID >= 1000): I/<6dig>/P2L/01<4dig>/CMD.
+      // Ack se zrcadlí na O/001209/P2L/011209/CMD → subscribe O/+/P2L/+/CMD.
+      expect(CommandService.getCommandTopic('1209', isNewGen: true),
+          'I/001209/P2L/011209/CMD');
+      // I když FW hlásí ID s „u" prefixem (→ isNewGen vratký false), heuristika
+      // podle čísla to podchytí: 1209 >= 1000 → P2L.
+      expect(CommandService.getCommandTopic('u1209'), 'I/001209/P2L/011209/CMD');
+      // Skutečně stará gen (ID < 1000) zůstává na SERVER topicu.
+      expect(CommandService.getCommandTopic('472', isNewGen: false),
+          'I/u0472/SERVER/CMD');
     });
   });
 }

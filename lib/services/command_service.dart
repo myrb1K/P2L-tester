@@ -115,17 +115,21 @@ class CommandService {
     });
   }
 
-  /// Monotónně rostoucí `request_id` pro potvrzované příkazy. Jednotka
-  /// odpoví ackem na `O/.../P2L/.../CMD` (`status:"received"`) jen když
-  /// `request_id != -1`; a **nesmí se opakovat v posledních 10** — monotónní
-  /// čítač to garantuje (na rozdíl od náhody).
+  /// Rostoucí `request_id` pro potvrzované příkazy. Jednotka odpoví ackem na
+  /// `O/.../P2L/.../CMD` (`status:"received"`) jen když `request_id != -1`; a
+  /// **nesmí se opakovat v posledních 10**, které si pamatuje.
   ///
-  /// Seed = **sekundy od epochy** → drží se do **10 číslic** (FW limit; ~1,78
-  /// mld., 11. místo přijde až kolem r. 2286) a nový běh appky začne výš než
-  /// minulý (čas jde dopředu) → nekoliduje ani přes restart. Inkrement v rámci
-  /// běhu zůstává v 10 číslicích (přeteklo by až po miliardách příkazů).
-  static int _reqIdSeq = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-  static int nextRequestId() => ++_reqIdSeq;
+  /// FW limit: **max 65535** (16bit unsigned, 5 míst). Rozsah tedy 1–65535 s
+  /// wraparoundem. Seed = **sekundy od epochy mod 65535** → nový běh appky
+  /// začne jinde než minulý; protože appka mezi restarty běží déle než pár
+  /// sekund a čítač jde po 1, seed přeskočí posledních 10 z minulého běhu →
+  /// bez kolize přes restart. 65535 unikátních hodnot před opakováním
+  /// (>> 10) → v posledních 10 se nikdy nezopakuje.
+  static int _reqIdSeq = (DateTime.now().millisecondsSinceEpoch ~/ 1000) % 65535;
+  static int nextRequestId() {
+    _reqIdSeq = _reqIdSeq >= 65535 ? 1 : _reqIdSeq + 1;
+    return _reqIdSeq;
+  }
 
   /// Zjistí parametry jednotky
   static String buildGetParamCommand() {
