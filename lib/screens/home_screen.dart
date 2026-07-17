@@ -844,12 +844,19 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                     IconButton(
                       icon: const Icon(Icons.warning_amber,
                           size: 26, color: Colors.orange),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              UnitDbDetailScreen(unitId: widget.unit.id),
-                        ),
-                      ),
+                      onPressed: () async {
+                        final state = context.read<AppState>();
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                UnitDbDetailScreen(unitId: widget.unit.id),
+                          ),
+                        );
+                        // Po návratu z karty (mohlo dojít k „Převzít do
+                        // evidence" apod.) přepočítat drift set — jinak by ⚠
+                        // viselo dál, dokud nepřijde jiný push.
+                        await state.refreshDbDrift();
+                      },
                       tooltip: 'Nesouhlasí s evidencí v databázi — otevřít kartu',
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
