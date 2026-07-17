@@ -188,6 +188,17 @@ describe('updateDesired', () => {
     assert.deepEqual(Object.keys(hist[2].detail), ['broker']);
     assert.deepEqual(Object.keys(hist[0].detail), ['brightness']);
   });
+
+  test('historie drží jen posledních 5 záznamů (retence)', () => {
+    for (let i = 1; i <= 8; i++) {
+      updateDesired(db, '1209', { brightness: i }, 'radek');
+    }
+    const hist = getHistory(db, '1209');
+    assert.equal(hist.length, 5); // 8 zápisů → jen 5 nejnovějších
+    // Nejnovější první, nejstarší 3 (jas 1–3) odmazané.
+    assert.equal(hist[0].detail.brightness, 8);
+    assert.equal(hist[4].detail.brightness, 4);
+  });
 });
 
 describe('updateMeta', () => {
