@@ -47,10 +47,11 @@ class AppState extends ChangeNotifier {
   Set<String> _dbDriftIds = {};
   Timer? _dbDriftDebounce;
 
-  /// Odeslané potvrzované příkazy (P2L CMD ack): request_id → kontext. Ack
-  /// chodí na `O/.../P2L/.../CMD` (`status:"received"`); do timeoutu bez acku
-  /// = jednotka nepotvrdila (offline). `onConfirmed` se spustí až po potvrzení
-  /// (typicky zápis desired do DB — ať evidence nelže).
+  /// Odeslané potvrzované příkazy (config CMD ack): request_id → kontext. Ack
+  /// chodí na `O/.../P2L/.../CMD` (`status:"received"`), páruje se podle
+  /// request_id. Do timeoutu bez acku = jednotka nepotvrdila (offline).
+  /// `onConfirmed` se spustí až po potvrzení (typicky zápis desired do DB —
+  /// ať evidence nelže).
   final Map<int,
           ({String unitId, String label, Timer timer, VoidCallback onConfirmed})>
       _pendingCmdAcks = {};
@@ -514,8 +515,10 @@ class AppState extends ChangeNotifier {
       // Uložená konfigurace jednotky (GET-CONFIG, od FW P2L_26071501NT) —
       // observed vrstva pro centrální DB (DB5). Starší FW neodpoví.
       _mqttService.subscribe('O/+/UNIT/+/GET-CONFIG');
-      // Ack na P2L CMD příkazy s request_id != -1 (potvrzení příjmu, např.
+      // Ack na config CMD příkazy s request_id != -1 (potvrzení příjmu, např.
       // set_WiFi/set_Mqtt/update) → `{"request_id":N,"status":"received"}`.
+      // Config příkazy jdou vždy na nový P2L topic (viz _sendTrackedConfigCmd),
+      // takže ack chodí na jeho zrcadle O/<id>/P2L/01<id>/CMD.
       _mqttService.subscribe('O/+/P2L/+/CMD');
       _mqttService.subscribe('O/+/UNIT/+/ADD-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/RECREATE-DEVICES');
@@ -889,7 +892,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Ack na potvrzovaný P2L CMD příkaz (`O/.../P2L/.../CMD`,
+  /// Ack na potvrzovaný config příkaz (`O/.../P2L/.../CMD`,
   /// `{"request_id":N,"status":"received",…}`). Spáruje podle request_id;
   /// `received` → potvrzeno (spustí `onConfirmed`, typicky zápis desired).
   void _handleCmdAck(Map<String, dynamic> json) {
@@ -924,9 +927,15 @@ class AppState extends ChangeNotifier {
   }) {
     final id = _normUnitId(unitId);
     final unit = _units[id];
-    final topic = _topicFor(unitId);
-    final canAck =
-        unit != null && (unit.isNewGen || CommandService.isNewTopicFormat(id));
+    // Nová generace = isNewGen NEBO ID >= 1000. Samotný isNewGen je vratký:
+    // FW hlásí ID s „u" prefixem → false i u nové jednotky (třeba 1209).
+    // Config příkaz pak MUSÍ jít na nový P2L topic I/<id>/P2L/01<id>/CMD
+    // (ne starou SERVER topic) a jednotka ackne na jeho zrcadle
+    // O/<id>/P2L/01<id>/CMD. _topicFor sám bere jen isNewGen → nestačí.
+    final isNew =
+        (unit?.isNewGen ?? false) || CommandService.isNewTopicFormat(id);
+    final topic = CommandService.getCommandTopic(id, isNewGen: isNew);
+    final canAck = unit != null && isNew;
     if (!canAck) {
       _mqttService.publish(topic, build(-1));
       onConfirmed();
@@ -1054,19 +1063,19 @@ class AppState extends ChangeNotifier {
     unawaited(UnitDbService.instance
         .pushObserved(_units[unitId]!, throttled: true, seenOnBroker: broker));
 
-    // Po restartu: první ALIVE mimo grace window → dotáhni devices.
+    // Po restartu: první ALIVE mimo grace window → obnov stav.
     if (_awaitingAliveAfterRestart.contains(unitId)) {
       final sentAt = _restartSentAt[unitId];
       if (sentAt != null && DateTime.now().difference(sentAt) >= _restartGrace) {
         _awaitingAliveAfterRestart.remove(unitId);
         _restartSentAt.remove(unitId);
         _initialFetchDone.add(unitId);
-        _setStatus('P2L modul ${int.tryParse(unitId)?.toString() ?? unitId} zpět online — načítám devices.');
-        Future.microtask(() => fetchDevices(unitId));
+        _setStatus('P2L modul ${int.tryParse(unitId)?.toString() ?? unitId} zpět online — obnovuji stav.');
+        _autoRefreshObserved(unitId);
       }
     } else if (_initialFetchDone.add(unitId)) {
       // První ALIVE této jednotky v rámci aktuálního připojení → auto-fetch.
-      Future.microtask(() => fetchDevices(unitId));
+      _autoRefreshObserved(unitId);
     }
     notifyListeners();
   }
@@ -1312,6 +1321,9 @@ class AppState extends ChangeNotifier {
             },
           }));
           _scheduleDbDriftRefresh();
+          // Jednotka se po změně brokera restartuje → po návratu si observed
+          // znovu přečteme, ať nesvítí falešný drift ze starého snapshotu.
+          _expectRestartReread(id);
         },
       );
       sent++;
@@ -1422,6 +1434,8 @@ class AppState extends ChangeNotifier {
             'wifi': {'ssid': ssid, 'password': password},
           }));
           _scheduleDbDriftRefresh();
+          // Změna WiFi jednotku restartuje → po návratu re-read observed.
+          _expectRestartReread(id);
         },
       );
       sent++;
@@ -1552,6 +1566,29 @@ class AppState extends ChangeNotifier {
     _mqttService.publish(cmd.topic, cmd.payload);
     // Souběžně stáhni i uloženou konfiguraci (GET-CONFIG) — jen kde ji FW umí.
     fetchConfig(id);
+  }
+
+  /// Kompletní obnova observed vrstvy po (znovu)objevení nebo restartu
+  /// jednotky: get_param (mqtt_server/SSID/jas) + GET-DEVICES + GET-CONFIG.
+  /// get_param je klíčové — bez něj by po změně brokera/WiFi zůstal
+  /// `mqtt_server` zastaralý a `computeDrift` by hlásil falešný drift
+  /// (kategorie „evidence ↔ kde ji vidíme"). Volá se z `_handleAlive`.
+  void _autoRefreshObserved(String unitId) {
+    Future.microtask(() {
+      sendGetParam(unitId);
+      fetchDevices(unitId);
+    });
+  }
+
+  /// Změna brokera/WiFi jednotku restartuje. Zaregistruje ji, aby si po
+  /// návratu (další ALIVE mimo grace window) appka sama znovu přečetla
+  /// observed přes [_autoRefreshObserved] — jinak by ze zastaralého snapshotu
+  /// svítil falešný drift. Funguje, když appka jednotku po restartu vidí
+  /// (stejný broker); po přesunu na broker, kam appka nevidí, se re-read
+  /// spustí až po připojení tam (první ALIVE → taky `_autoRefreshObserved`).
+  void _expectRestartReread(String id) {
+    _awaitingAliveAfterRestart.add(id);
+    _restartSentAt[id] = DateTime.now();
   }
 
   /// Vyžádá uloženou konfiguraci jednotky (UNIT `GET-CONFIG`). No-op u staré
