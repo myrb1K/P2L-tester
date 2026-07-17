@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS units (
   mqtt_port          INTEGER,
   brightness         INTEGER,           -- jas P2L LED z get_param
   seen_on_broker     TEXT,              -- host brokeru, přes který appka jednotku naposledy viděla
+  unit_config_json   TEXT,              -- poslední UNIT GET-CONFIG 1:1 (DB5): nakonfigurováno + actualIp/actualSSID, hesla jako bool
+  unit_config_fetched_at TEXT,          -- kdy byl GET-CONFIG naposledy načten (ISO 8601)
   last_seen          TEXT,              -- ISO 8601
   devices_json       TEXT,              -- poslední GET-DEVICES, formát PumaModule.toJson
   -- desired

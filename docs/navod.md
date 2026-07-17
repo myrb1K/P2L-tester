@@ -43,8 +43,9 @@ V **Nastavení** (menu **☰** vpravo nahoře → *Nastavení*) v sekci *Uložen
 
 ### Karta jednotky
 
-Každý řádek ukazuje: zaškrtávátko pro výběr, ID, indikátor online (tečka), čas posledního ALIVE, firmware a napětí baterie. Vpravo jsou tři ikony:
+Každý řádek ukazuje: zaškrtávátko pro výběr, ID, indikátor online (tečka), čas posledního ALIVE, firmware a napětí baterie. Vpravo jsou ikony:
 
+- **⚠ Nesouhlasí s evidencí** (oranžová, `warning_amber`) — objeví se **jen když jsi přihlášený** (viz §10) a daná jednotka má v centrální databázi rozpor mezi evidencí a skutečností. Klepnutím se otevře karta jednotky v databázi, kde je rozdíl rozepsaný. (Bez přihlášení a u jednotek bez rozporu se ikona nezobrazuje.)
 - **Seznam devices** (`device_hub`, s počtem modulů v odznaku) — otevře detail jednotky. Po skenu sběrnice (viz §5) se ikona obarví podle výsledku: 🔴 červená = některý uložený device na sběrnici chybí, ⬜ šedá = na sběrnici je neuložený device, jinak zůstane původní.
 - **Info** (`i`) — dialog s podrobnostmi (IP, MAC, SSID, MQTT, baterie, jas, LED na portech). Lze **kopírovat** do schránky, **Změnit ID** jednotky a přepnout režim LED příkazů **BIN/OLD**.
 - **Obnovit** (`↻`) — vyžádá aktuální parametry a seznam devices.
@@ -228,9 +229,10 @@ Karty jednotek **vznikají a aktualizují se samy** běžnou prací s appkou: ja
 
 - **Údaje (meta)** — název, umístění, poznámka, stav. Jediná ručně editovatelná část — ikona **✏** v liště.
 - **Jednotka hlásí (observed)** — co jednotka sama naposledy ohlásila: firmware, IP, MAC, baterie, aktuální WiFi/broker/jas, seznam devices.
-- **Odesláno appkou (desired)** — co bylo na jednotku poslané přes appku: broker a WiFi **včetně hesel** (maskovaná, oko je odkryje), jasy, poslední OTA. Tohle jinde neexistuje — jednotka hesla zpětně nevrací.
+- **Uloženo v jednotce (GET-CONFIG)** — jen u jednotek s novým firmwarem (P2L_26071501NT a vyšší): kompletní konfigurace přímo z jednotky. Kde se **nastavená** hodnota liší od **reálně běžící**, ukáže obě (např. *IP nastaveno* vs. *IP běží*); když sedí, je jedna hodnota s ✓. Navíc pole, která `get_param` nemá: MQTT uživatel, jestli je nastavené heslo/certifikát, DNS/brána/maska, TLS validace. Starší jednotky tuhle sekci nemají — vystačí si s „Jednotka hlásí".
+- **Odesláno appkou (desired)** — co bylo na jednotku poslané přes appku: broker a WiFi **včetně hesel** (maskovaná, oko je odkryje), jasy, poslední OTA. Hodnoty hesel jinde neexistují — jednotka je zpětně nevrací (v GET-CONFIG jsou jen jako „nastaveno").
 
-Pod tím je **historie** změn (kdo, kdy, co — hesla se do historie nikdy nezapisují). Když se to, co jednotka hlásí, liší od evidence (např. ji někdo přenastavil mimo appku), karta nahoře ukáže oranžové **„Nesouhlasí s evidencí"** s konkrétními rozdíly. Pokud je změna záměrná, tlačítko **„Převzít skutečnost do evidence"** srovná evidenci podle reálného stavu (hesla v evidenci zůstávají původní — jednotka je nehlásí; pokud se změnila taky, pošli konfiguraci přes appku).
+Pod tím je **historie** změn (kdo, kdy, co — hesla se do historie nikdy nezapisují). Když se to, co jednotka hlásí, liší od evidence, karta nahoře ukáže oranžové **„Nesouhlasí s evidencí"** s konkrétními rozdíly. Nově rozlišuje tři druhy: **evidence × uloženo v jednotce** (nedorazila naše konfigurace?), **uloženo × reálně běží** (statická IP nastavená, ale jede DHCP / jiná WiFi) a **evidence × kde jednotku vidíme** (hlásí se přes jiný broker). Pokud je změna záměrná, tlačítko **„Převzít skutečnost do evidence"** srovná evidenci podle reálného stavu (hesla v evidenci zůstávají původní — jednotka je nehlásí; pokud se změnila taky, pošli konfiguraci přes appku).
 
 ---
 

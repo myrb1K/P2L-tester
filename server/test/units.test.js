@@ -104,6 +104,52 @@ describe('upsertObserved', () => {
     upsertObserved(db, '1209', { firmware: 'FW1' });
     assert.equal(getHistory(db, '1209').length, 0);
   });
+
+  test('GET-CONFIG snapshot se ukládá jako unit_config + fetched_at (DB5)', () => {
+    const cfg = {
+      Id: 1209, ver: '26071501NT', mac: 'AA:BB', SSID: 'HALA', PSWD: true,
+      mqttAddress: 'mqtt.firma.cz', mqttPort: 1883, mqttUser: 'u', mqttPassword: true,
+      mqttInsec: false, mqttCert: false,
+      ip: '10.0.0.72', dns: '10.0.0.10', gateway: '10.0.0.10', subnet: '255.255.255.0',
+      actualIp: '10.0.0.72', actualSSID: 'HALA',
+    };
+    upsertObserved(db, '1209', { unitConfig: cfg, lastSeen: '2026-07-16T10:00:00Z' });
+    const unit = getUnit(db, '1209');
+    assert.deepEqual(unit.unit_config, cfg);
+    assert.equal(unit.unit_config_fetched_at, '2026-07-16T10:00:00Z');
+    assert.equal(getHistory(db, '1209').length, 0); // observed → bez historie
+  });
+
+  test('GET-CONFIG se skutečnými hesly se uloží 1:1 (interní tool, DB5)', () => {
+    // FW se správnými creds vrací reálná hesla — evidence je drží pro
+    // kompletní config/obnovu. Server ukládá snapshot beze změny.
+    upsertObserved(db, '1209', {
+      unitConfig: {
+        SSID: 'Smartbox', PSWD: 'Smartbox2021', mqttPassword: 'smartbox2022',
+        mqttUser: 'smartbox_user', mqttAddress: 'mqtt.config.smartci4.com',
+      },
+    });
+    const cfg = getUnit(db, '1209').unit_config;
+    assert.equal(cfg.PSWD, 'Smartbox2021');
+    assert.equal(cfg.mqttPassword, 'smartbox2022');
+    assert.equal(cfg.mqttUser, 'smartbox_user');
+    assert.equal(cfg.mqttAddress, 'mqtt.config.smartci4.com');
+  });
+
+  test('pozdější bool heslo NEPŘEPÍŠE zachycenou skutečnou hodnotu (tri-state)', () => {
+    // 1) zachytíme reálná hesla (creds)
+    upsertObserved(db, '1209', {
+      unitConfig: { SSID: 'Smartbox', PSWD: 'Smartbox2021', mqttPassword: 'smartbox2022' },
+    });
+    // 2) přijde odpověď na {} (bool) — třeba od jiného klienta na sběrnici
+    upsertObserved(db, '1209', {
+      unitConfig: { SSID: 'Smartbox', PSWD: true, mqttPassword: true, mqttAddress: 'nový.broker' },
+    });
+    const cfg = getUnit(db, '1209').unit_config;
+    assert.equal(cfg.PSWD, 'Smartbox2021'); // skutečné heslo zachováno
+    assert.equal(cfg.mqttPassword, 'smartbox2022');
+    assert.equal(cfg.mqttAddress, 'nový.broker'); // ne-tajemství z nové odpovědi
+  });
 });
 
 describe('updateDesired', () => {
@@ -205,12 +251,35 @@ describe('listUnits', () => {
   test('nevrací desired_json ani devices_json, řadí číselně', () => {
     updateDesired(db, '1209', { wifi: { password: 'tajne' } }, 'r');
     upsertObserved(db, '128', { devices: [{ type: 'DIST' }] });
+    upsertObserved(db, '1209', { unitConfig: { mqttPassword: true, SSID: 'HALA' } });
     const list = listUnits(db);
     assert.deepEqual(list.map((u) => u.id), ['128', '1209']);
     for (const u of list) {
       assert.ok(!('desired_json' in u) && !('desired' in u));
       assert.ok(!('devices_json' in u) && !('devices' in u));
+      assert.ok(!('unit_config_json' in u) && !('unit_config' in u));
     }
+  });
+
+  test('drift v2 — kat.2 uloženo↔běží (i bez desired) a kat.1 evidence↔uloženo', () => {
+    // Statická IP nastavená, ale běží jiná (DHCP fallback) → drift i bez desired.
+    upsertObserved(db, '1209', {
+      unitConfig: { ip: '10.0.0.72', actualIp: '10.0.0.150', SSID: 'HALA', actualSSID: 'HALA' },
+    });
+    assert.equal(listUnits(db)[0].drift, true);
+
+    // "0.0.0.0" = statická IP vypnutá → ip↔actualIp se neporovnává.
+    upsertObserved(db, '128', {
+      unitConfig: { ip: '0.0.0.0', actualIp: '10.0.0.150', SSID: 'HALA', actualSSID: 'HALA' },
+    });
+    const byId = Object.fromEntries(listUnits(db).map((u) => [u.id, u]));
+    assert.equal(byId['128'].drift, false);
+
+    // Kat.1: evidence broker ≠ uloženo v NVS (mqttAddress z GET-CONFIG).
+    upsertObserved(db, '130', { unitConfig: { mqttAddress: 'mqtt.stary.cz', ip: '0.0.0.0' } });
+    updateDesired(db, '130', { broker: { address: 'mqtt.novy.cz' } }, 'r');
+    const drift130 = listUnits(db).find((u) => u.id === '130').drift;
+    assert.equal(drift130, true);
   });
 
   test('drift flag: broker/ssid/jas nesoulad → true, shoda/chybějící → false', () => {

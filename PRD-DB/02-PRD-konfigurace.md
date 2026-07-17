@@ -149,9 +149,23 @@ Heslo (WiFi `PSWD`, broker `mqttPassword`, cert `mqttCert`) je vždy v právě j
 [server/db/units.js](../server/db/units.js)). Šifrování sloupců a audit zobrazení hesel jsou
 budoucí milestones — API design (hesla nikdy v seznamech) to už dnes umožňuje doplnit bez změny klientů.
 
-Kolega chystá **credentials GET-CONFIG** (payload s přihlašovacími údaji → odpověď se skutečnými
-hesly místo bool). Tvar není v README — dokud nebude, počítá celé PRD s bool maskováním; DB8 (§9)
-se odemkne až s FW. Přihlašovací údaje z payloadu se nesmí logovat ani ukládat do historie.
+**Credentials GET-CONFIG — OVĚŘENO na jednotce 1209 (FW 26071501NT, 2026-07-17).** Kolega
+mechanismus už dodal, liší se od README:
+- Request s přihlašovacími údaji `{"User":"admin","Password":"smartbox"}` → odpověď obsahuje
+  **skutečná hesla jako string** (`PSWD`, `mqttPassword`). Prázdný `{}` → bool „je nastaveno"
+  (ověřeno oboje na 1209).
+- **DHCP = prázdný string** (`ip`/`dns`/`gateway`/`subnet` = `""`), ne `"0.0.0.0"`; reálná adresa
+  v `actualIp`/`actualSSID`.
+
+**Rozhodnutí (Radek, 2026-07-17): DB5 ukládá do evidence i skutečná hesla.** Je to interní tool
+a kompletní config (vč. WiFi/MQTT hesel) je potřeba pro pozdější obnovu/náhradu jednotky. Appka
+proto posílá GET-CONFIG **s přihlašovacími údaji** (default `admin`/`smartbox`, přepsatelné přes
+`SharedPreferences` klíče `get_config_user`/`get_config_password`) a snapshot se ukládá do
+`unit_config_json` **beze změny** — žádná redakce. Na kartě jsou hesla maskovaná s okem (jako
+u desired). **Ochrana je zatím jen HTTPS + auth + přístup k serveru** (žádné šifrování sloupce);
+akceptovaný kompromis pro interní nasazení — kdyby to byl problém, přejde se na šifrovaný trezor
+(DB8). Tri-state pravidlo (výše) platí dál pro případ, kdy jednotka vrátí jen bool (bez creds /
+špatné creds): `true` nikdy nepřepíše dřív uloženou skutečnou hodnotu.
 
 ---
 

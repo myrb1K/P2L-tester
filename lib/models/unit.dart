@@ -26,6 +26,12 @@ class P2LUnit {
   /// Resetuje se na false v `updateFromGetParam` nebo v `AppState._handleAlive`.
   bool isPlaceholder;
 
+  /// Poslední odpověď na UNIT `GET-CONFIG` (FW ≥ P2L_26071501NT) 1:1 —
+  /// uložená konfigurace (mqttAddress/SSID/ip/dns/…, hesla jako bool) i reálný
+  /// stav (actualIp/actualSSID). Zdroj observed vrstvy pro centrální DB (DB5),
+  /// bohatší než `get_param`. `null` u staré generace / staršího FW.
+  Map<String, dynamic>? unitConfig;
+
   P2LUnit({
     required this.id,
     this.firmware,
@@ -105,6 +111,29 @@ class P2LUnit {
     isOnline = true;
     isPlaceholder = false;
     useBin = CommandService.firmwareSupportsBin(firmware);
+  }
+
+  /// Uloží odpověď na UNIT `GET-CONFIG` (viz [unitConfig]). GET-CONFIG nese
+  /// i firmware (`ver`) a MAC — udrž je čerstvé (u nové gen, která nikdy
+  /// nedělala get_param, je MAC jinak null). Neplní ploché get_param fieldy
+  /// (`ssid`/`mqttServer`), aby zůstal jasný rozdíl „běží" vs „uloženo".
+  ///
+  /// Se správnými přihlašovacími údaji v requestu vrací FW i skutečná hesla
+  /// (`PSWD`/`mqttPassword` jako string) — ukládají se do evidence pro
+  /// kompletní config/obnovu (interní tool; ochrana = HTTPS + auth + přístup
+  /// k serveru, viz PRD-DB v2 §3).
+  void updateFromGetConfig(Map<String, dynamic> config) {
+    unitConfig = Map<String, dynamic>.from(config);
+    final ver = config['ver'];
+    if (ver is String && ver.isNotEmpty) {
+      firmware = ver;
+      useBin = CommandService.firmwareSupportsBin(ver);
+    }
+    final m = config['mac'];
+    if (m is String && m.isNotEmpty) mac = m;
+    lastSeen = DateTime.now();
+    isOnline = true;
+    isPlaceholder = false;
   }
 
   bool get supportsBin => CommandService.firmwareSupportsBin(firmware);

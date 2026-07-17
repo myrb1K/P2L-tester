@@ -19,6 +19,12 @@ void main() {
       expect(cmd.topic, 'I/001001/UNIT/001001/GET-DEVICES');
     });
 
+    test('GET-CONFIG topic + prázdný payload (DB5)', () {
+      final cmd = CommandService.buildGetConfigCommand('1209');
+      expect(cmd.topic, 'I/001209/UNIT/001209/GET-CONFIG');
+      expect(cmd.payload, '{}');
+    });
+
     test('DEVICE-REPLACE — UNIT topic, payload From/To', () {
       // From = factory default nového kusu, To = adresa vadného.
       final cmd = CommandService.buildDeviceReplaceCommand(
@@ -309,6 +315,21 @@ void main() {
       );
       final cmd = (jsonDecode(payload) as Map)['cmds'][0] as Map;
       expect((cmd['args'] as Map)['file_name'], 'data/P2L_23091201OT.bin');
+    });
+  });
+
+  group('firmwareSupportsGetConfig (DB5, práh 260715)', () {
+    test('nové FW >= P2L_26071501NT umí GET-CONFIG', () {
+      expect(CommandService.firmwareSupportsGetConfig('26071501NT'), isTrue);
+      expect(CommandService.firmwareSupportsGetConfig('P2L_26071501NT'), isTrue);
+      expect(CommandService.firmwareSupportsGetConfig('P2L_26080101NT'), isTrue);
+    });
+
+    test('starší FW GET-CONFIG neumí', () {
+      expect(CommandService.firmwareSupportsGetConfig('26071401NT'), isFalse);
+      expect(CommandService.firmwareSupportsGetConfig('25092501NT'), isFalse);
+      expect(CommandService.firmwareSupportsGetConfig(null), isFalse);
+      expect(CommandService.firmwareSupportsGetConfig(''), isFalse);
     });
   });
 }

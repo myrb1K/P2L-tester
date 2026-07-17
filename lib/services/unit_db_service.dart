@@ -63,6 +63,8 @@ class UnitDbService {
   /// Observed vrstva z aktuálního stavu [unit]. [includeParams] přidá pole
   /// dostupná jen z get_param (SSID, broker, jas) — při ALIVE by default
   /// jasu (100) přemazal reálnou hodnotu z dřívějšího get_param.
+  /// [includeConfig] přidá snapshot z UNIT GET-CONFIG (`unit.unitConfig`) —
+  /// bohatší observed (nakonfigurováno vs. reálně běží, TLS, cert, dns/gw).
   /// [modules] přidá devices (po GET-DEVICES). [throttled] zapne per-unit
   /// throttle (pro ALIVE). [seenOnBroker] = host brokeru, přes který appka
   /// jednotku právě vidí — na rozdíl od mqtt_server (get_param) se plní
@@ -71,6 +73,7 @@ class UnitDbService {
   Future<void> pushObserved(
     P2LUnit unit, {
     bool includeParams = false,
+    bool includeConfig = false,
     List<PumaModule>? modules,
     bool throttled = false,
     String? seenOnBroker,
@@ -98,6 +101,8 @@ class UnitDbService {
         if (unit.mqttPort != null) 'mqttPort': unit.mqttPort,
         'brightness': unit.brightness,
       },
+      if (includeConfig && unit.unitConfig != null)
+        'unitConfig': unit.unitConfig,
       if (modules != null)
         'devices': modules.map((m) => m.toJson()).toList(),
     };

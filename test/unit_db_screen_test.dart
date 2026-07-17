@@ -105,6 +105,58 @@ void main() {
       });
       expect(card2.driftWarnings, hasLength(1));
     });
+
+    test('unit_config parsing (GET-CONFIG snapshot, DB5)', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1209',
+        'generation': 'new',
+        'status': 'active',
+        'unit_config': {'mqttAddress': 'mqtt.firma.cz', 'actualIp': '10.0.0.9'},
+        'unit_config_fetched_at': '2026-07-16 10:00:00',
+      });
+      expect(card.unitConfig!['mqttAddress'], 'mqtt.firma.cz');
+      expect(card.unitConfigFetchedAt, '2026-07-16 10:00:00');
+    });
+
+    test('drift v2 kat.2: nastaveno vs. běží (statická IP × DHCP)', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1209',
+        'generation': 'new',
+        'status': 'active',
+        'unit_config': {
+          'ip': '10.0.0.72',
+          'actualIp': '10.0.0.150',
+          'SSID': 'HALA',
+          'actualSSID': 'HALA',
+        },
+      });
+      expect(card.driftWarnings, hasLength(1));
+      expect(card.driftWarnings.single, contains('10.0.0.72'));
+      expect(card.driftWarnings.single, contains('10.0.0.150'));
+
+      // "0.0.0.0" = statická IP vypnutá → neporovnává se.
+      final dhcp = UnitDbCard.fromJson({
+        'id': '1209',
+        'generation': 'new',
+        'status': 'active',
+        'unit_config': {'ip': '0.0.0.0', 'actualIp': '10.0.0.150'},
+      });
+      expect(dhcp.driftWarnings, isEmpty);
+    });
+
+    test('drift v2 kat.1: evidence vs. uloženo v jednotce (GET-CONFIG)', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1209',
+        'generation': 'new',
+        'status': 'active',
+        'unit_config': {'mqttAddress': 'mqtt.stary.cz'},
+        'desired': {
+          'broker': {'address': 'mqtt.novy.cz'},
+        },
+      });
+      expect(card.driftWarnings,
+          contains(predicate<String>((w) => w.contains('uloženo v jednotce'))));
+    });
   });
 
   group('acceptObservedFragment', () {
@@ -145,6 +197,24 @@ void main() {
         },
       });
       expect(noDrift.acceptObservedFragment(), isNull);
+    });
+
+    test('GET-CONFIG mqttAddress/port má přednost před get_param', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1209',
+        'generation': 'new',
+        'status': 'active',
+        'mqtt_server': 'mqtt.stary.cz',
+        'mqtt_port': 1883,
+        'unit_config': {'mqttAddress': 'mqtt.config.cz', 'mqttPort': 8883},
+        'desired': {
+          'broker': {'address': 'mqtt.evidence.cz', 'password': 'x'},
+        },
+      });
+      final f = card.acceptObservedFragment()!;
+      expect(f['broker']['address'], 'mqtt.config.cz'); // GET-CONFIG autoritativní
+      expect(f['broker']['port'], 8883);
+      expect(f['broker']['password'], 'x'); // credentials zachované
     });
   });
 
