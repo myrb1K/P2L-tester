@@ -76,6 +76,13 @@ class UnitDbCard {
   /// Host brokeru, přes který appka jednotku naposledy viděla (každý ALIVE) —
   /// na rozdíl od [mqttServer], který jednotka hlásí jen v get_param.
   final String? seenOnBroker;
+
+  /// Snapshot z UNIT GET-CONFIG (FW ≥ P2L_26071501NT) 1:1 — uložená konfigurace
+  /// (`mqttAddress`/`SSID`/`ip`/`dns`/…, hesla jako bool) i reálný stav
+  /// (`actualIp`/`actualSSID`). `null` u staré generace / staršího FW → drift
+  /// degraduje na porovnání proti get_param hodnotám. (PRD-DB v2 §2.1.)
+  final Map<String, dynamic>? unitConfig;
+  final String? unitConfigFetchedAt;
   final DateTime? lastSeen;
   final List<PumaModule> devices;
   // desired
@@ -101,6 +108,8 @@ class UnitDbCard {
     this.mqttPort,
     this.brightness,
     this.seenOnBroker,
+    this.unitConfig,
+    this.unitConfigFetchedAt,
     this.lastSeen,
     this.devices = const [],
     this.desired,
@@ -137,6 +146,8 @@ class UnitDbCard {
       mqttPort: json['mqtt_port'] as int?,
       brightness: json['brightness'] as int?,
       seenOnBroker: json['seen_on_broker'] as String?,
+      unitConfig: json['unit_config'] as Map<String, dynamic>?,
+      unitConfigFetchedAt: json['unit_config_fetched_at'] as String?,
       lastSeen: _parseTime(json['last_seen']),
       devices: devices,
       desired: json['desired'] as Map<String, dynamic>?,
@@ -149,35 +160,74 @@ class UnitDbCard {
     );
   }
 
-  /// Drift (PRD §4.1): desired vs. observed u polí, která jednotka umí
-  /// ohlásit zpět. Vrací lidské popisy nesouladů (prázdné = OK / nelze
-  /// porovnat, protože jedna strana chybí).
+  /// Nenulový a neprázdný String z GET-CONFIG snapshotu (jinak null).
+  String? _cfgStr(String key) {
+    final v = unitConfig?[key];
+    return (v is String && v.isNotEmpty) ? v : null;
+  }
+
+  /// Drift v2 (PRD-DB v2 §6) — tři kategorie nesouladu. Vrací lidské popisy;
+  /// prázdné = OK / nelze porovnat (jedna strana chybí). Bez GET-CONFIG
+  /// (starý FW) degraduje na dnešní porovnání proti get_param hodnotám.
+  ///   1) evidence ↔ uloženo v NVS (dorazila naše konfigurace?)
+  ///   2) uloženo ↔ reálně běží (statická IP, ale jede DHCP / jiné SSID)
+  ///   3) evidence ↔ kde ji vidíme (hlásí se přes jiný broker)
   List<String> get driftWarnings {
     final out = <String>[];
     final broker = desired?['broker'];
-    if (broker is Map) {
-      final wantHost = broker['address'];
-      if (wantHost is String && wantHost.isNotEmpty) {
-        if (mqttServer != null && wantHost != mqttServer) {
-          out.add('Broker: evidence „$wantHost", jednotka hlásí „$mqttServer"');
-        }
-        if (seenOnBroker != null &&
-            wantHost != seenOnBroker &&
-            seenOnBroker != mqttServer) {
-          // Druhá podmínka: když get_param i seen-on říkají totéž, stačí
-          // jedno varování výše.
-          out.add(
-              'Broker: evidence „$wantHost", jednotka se hlásí přes „$seenOnBroker"');
-        }
-      }
-    }
     final wifi = desired?['wifi'];
-    if (wifi is Map && ssid != null) {
-      final wantSsid = wifi['ssid'];
-      if (wantSsid is String && wantSsid.isNotEmpty && wantSsid != ssid) {
-        out.add('WiFi: evidence „$wantSsid", jednotka hlásí „$ssid"');
+    final cfgBroker = _cfgStr('mqttAddress');
+    final cfgSsid = _cfgStr('SSID');
+    final actualIp = _cfgStr('actualIp');
+    final cfgIp = _cfgStr('ip');
+    final actualSsid = _cfgStr('actualSSID');
+
+    // 1) evidence ↔ uloženo v jednotce (GET-CONFIG)
+    if (broker is Map) {
+      final want = broker['address'];
+      if (want is String && want.isNotEmpty && cfgBroker != null && want != cfgBroker) {
+        out.add('Broker: evidence „$want", uloženo v jednotce „$cfgBroker"');
       }
     }
+    if (wifi is Map) {
+      final want = wifi['ssid'];
+      if (want is String && want.isNotEmpty) {
+        if (cfgSsid != null) {
+          if (want != cfgSsid) {
+            out.add('WiFi: evidence „$want", uloženo v jednotce „$cfgSsid"');
+          }
+        } else if (ssid != null && want != ssid) {
+          // Bez GET-CONFIG degraduj na get_param SSID (starý FW).
+          out.add('WiFi: evidence „$want", jednotka hlásí „$ssid"');
+        }
+      }
+    }
+
+    // 2) uloženo ↔ reálně běží (jen z GET-CONFIG). Prázdná / "0.0.0.0"
+    // konfigurovaná IP = statická vypnutá (DHCP) → _cfgStr vrátí null, tady
+    // se nastavené vs. běžící neporovnává.
+    if (cfgIp != null && cfgIp != '0.0.0.0' && actualIp != null && cfgIp != actualIp) {
+      out.add('IP: nastaveno „$cfgIp", ale běží „$actualIp" (statická IP se neuplatnila?)');
+    }
+    if (cfgSsid != null && actualSsid != null && cfgSsid != actualSsid) {
+      out.add('WiFi: nastaveno „$cfgSsid", ale připojeno k „$actualSsid"');
+    }
+
+    // 3) evidence ↔ kde jednotku vidíme (broker connectivity). mqtt_server =
+    // co jednotka hlásí v get_param, seenOnBroker = přes co ji appka vidí.
+    if (broker is Map) {
+      final want = broker['address'];
+      if (want is String && want.isNotEmpty) {
+        if (mqttServer != null && want != mqttServer) {
+          out.add('Broker: evidence „$want", jednotka hlásí „$mqttServer"');
+        }
+        if (seenOnBroker != null && want != seenOnBroker && seenOnBroker != mqttServer) {
+          out.add('Broker: evidence „$want", jednotka se hlásí přes „$seenOnBroker"');
+        }
+      }
+    }
+
+    // Jas — UNIT GET-CONFIG jej nenese; drift dál z get_param brightness.
     final wantBrightness = desired?['brightness'];
     if (wantBrightness is int && brightness != null && wantBrightness != brightness) {
       out.add('Jas: evidence $wantBrightness, jednotka hlásí $brightness');
@@ -186,31 +236,32 @@ class UnitDbCard {
   }
 
   /// „Převzít skutečnost do evidence" — fragment desired, který srovná
-  /// evidenci podle observed hodnot (pro záměrné změny mimo appku).
-  /// Vrací jen driftující klíče; credentials (broker user/password, WiFi
-  /// heslo) z původní evidence ZŮSTÁVAJÍ — jednotka je nehlásí. `null` =
-  /// není co přebírat.
+  /// evidenci podle skutečné konfigurace jednotky (pro záměrné změny mimo
+  /// appku). Preferuje autoritativní GET-CONFIG (`mqttAddress`/`SSID`),
+  /// fallback get_param (`mqttServer`) / seen-on. Credentials (broker
+  /// user/password, WiFi heslo) z původní evidence ZŮSTÁVAJÍ — jednotka je
+  /// nehlásí. `null` = není co přebírat.
   Map<String, dynamic>? acceptObservedFragment() {
     final out = <String, dynamic>{};
     final broker = desired?['broker'];
-    // Preferuj mqtt_server (hlásí jednotka sama v get_param); fallback
-    // seen-on (přes který broker ji appka vidí).
-    final observedHost = mqttServer ?? seenOnBroker;
+    final observedHost = _cfgStr('mqttAddress') ?? mqttServer ?? seenOnBroker;
+    final observedPort = unitConfig?['mqttPort'] as int? ?? mqttPort;
     if (broker is Map && observedHost != null && observedHost.isNotEmpty) {
       final want = broker['address'];
       if (want is String && want.isNotEmpty && want != observedHost) {
         out['broker'] = {
           ...Map<String, dynamic>.from(broker),
           'address': observedHost,
-          if (mqttPort != null) 'port': mqttPort,
+          'port': ?observedPort,
         };
       }
     }
     final wifi = desired?['wifi'];
-    if (wifi is Map && ssid != null && ssid!.isNotEmpty) {
+    final observedSsid = _cfgStr('SSID') ?? ssid;
+    if (wifi is Map && observedSsid != null && observedSsid.isNotEmpty) {
       final want = wifi['ssid'];
-      if (want is String && want.isNotEmpty && want != ssid) {
-        out['wifi'] = {...Map<String, dynamic>.from(wifi), 'ssid': ssid};
+      if (want is String && want.isNotEmpty && want != observedSsid) {
+        out['wifi'] = {...Map<String, dynamic>.from(wifi), 'ssid': observedSsid};
       }
     }
     final wantB = desired?['brightness'];

@@ -455,6 +455,7 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
                                 .map((m) => m.displayLabel)
                                 .join('\n')),
                     ]),
+                    if (card.unitConfig != null) _configSection(card),
                     _Section(
                       title: 'Odesláno appkou (desired)',
                       trailing: card.desired != null
@@ -557,6 +558,75 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
         ],
       ),
     );
+  }
+
+  /// Sekce „Uloženo v jednotce (GET-CONFIG)" — nakonfigurovaný stav (NVS) +
+  /// reálný běžící stav (actualIp/actualSSID). Ukazuje i pole, která get_param
+  /// nemá: MQTT uživatel, TLS insecure, vlastní CA cert, DNS/brána/maska.
+  /// Hesla: se správnými přihlašovacími údaji FW vrací skutečné hodnoty
+  /// (maskované, oko je odkryje); jinak jen bool „nastaveno".
+  Widget _configSection(UnitDbCard card) {
+    final cfg = card.unitConfig!;
+    String? boolText(dynamic v, String yes, String no) =>
+        v == true ? yes : (v == false ? no : null);
+    // Heslo: string = skutečná hodnota (maskuj), true = jen „nastaveno".
+    String? secretText(dynamic v) {
+      if (v is String && v.isNotEmpty) return _showSecrets ? v : '••••••';
+      return boolText(v, 'nastaveno', 'nenastaveno');
+    }
+
+    final broker = cfg['mqttAddress'];
+    final hasSecrets = cfg['PSWD'] is String || cfg['mqttPassword'] is String;
+    return _Section(
+      title: 'Uloženo v jednotce (GET-CONFIG)',
+      trailing: hasSecrets
+          ? IconButton(
+              icon: Icon(
+                  _showSecrets ? Icons.visibility_off : Icons.visibility),
+              tooltip: _showSecrets ? 'Skrýt hesla' : 'Zobrazit hesla',
+              onPressed: () => setState(() => _showSecrets = !_showSecrets),
+            )
+          : null,
+      children: [
+        if (card.unitConfigFetchedAt != null)
+          _row('Načteno', '${card.unitConfigFetchedAt} UTC'),
+        _configRow('IP', cfg['ip'], cfg['actualIp'], dhcp: true),
+        _configRow('WiFi (SSID)', cfg['SSID'], cfg['actualSSID']),
+        _row('WiFi heslo', secretText(cfg['PSWD'])),
+        _row(
+            'Broker',
+            broker is String && broker.isNotEmpty
+                ? '$broker:${cfg['mqttPort'] ?? ''}'
+                : null),
+        _row('MQTT uživatel', cfg['mqttUser'] is String ? cfg['mqttUser'] as String : null),
+        _row('MQTT heslo', secretText(cfg['mqttPassword'])),
+        _row('TLS validace certifikátu',
+            boolText(cfg['mqttInsec'], 'vypnutá (insecure)', 'zapnutá')),
+        _row('Vlastní CA certifikát', boolText(cfg['mqttCert'], 'uložen', 'ne')),
+        _row('DNS', cfg['dns'] is String ? cfg['dns'] as String : null),
+        _row('Brána', cfg['gateway'] is String ? cfg['gateway'] as String : null),
+        _row('Maska', cfg['subnet'] is String ? cfg['subnet'] as String : null),
+      ],
+    );
+  }
+
+  /// Řádek s rozlišením „nastaveno vs. běží": shoda → jedna hodnota s ✓,
+  /// rozdíl → dva řádky. `dhcp` → prázdná hodnota (`""` nebo `"0.0.0.0"`, dle
+  /// FW) znamená statickou IP vypnutou (běží DHCP), ukáže reálnou adresu.
+  Widget _configRow(String label, dynamic configured, dynamic actual,
+      {bool dhcp = false}) {
+    final cfg = (configured is String && configured.isNotEmpty) ? configured : null;
+    final act = (actual is String && actual.isNotEmpty) ? actual : null;
+    if (dhcp && (cfg == null || cfg == '0.0.0.0')) {
+      return _row(label, act != null ? '$act (DHCP)' : 'DHCP');
+    }
+    if (cfg == null && act == null) return const SizedBox.shrink();
+    if (cfg == null) return _row(label, act);
+    if (act == null || cfg == act) return _row(label, '$cfg ✓');
+    return Column(children: [
+      _row('$label (nastaveno)', cfg),
+      _row('$label (běží)', act),
+    ]);
   }
 }
 

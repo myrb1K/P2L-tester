@@ -211,6 +211,19 @@ class CommandService {
     return dateNum >= 250925;
   }
 
+  /// Zjistí, zda firmware podporuje UNIT `GET-CONFIG` / `SET-CONFIG`
+  /// (od `P2L_26071501NT`, tj. datum ≥ 260715). Stará generace ho neumí
+  /// vůbec — volající navíc gejtuje přes `P2LUnit.isNewGen`. Starší nová
+  /// gen prostě neodpoví, observed dál plní `get_param`.
+  static bool firmwareSupportsGetConfig(String? firmware) {
+    if (firmware == null || firmware.isEmpty) return false;
+    final match = RegExp(r'(\d{6})').firstMatch(firmware);
+    if (match == null) return false;
+    final dateNum = int.tryParse(match.group(1)!);
+    if (dateNum == null) return false;
+    return dateNum >= 260715;
+  }
+
   // ============================================================
   // Device management commands (P2L32 protokol, viz README-P2L-32.md)
   // ============================================================
@@ -247,6 +260,26 @@ class CommandService {
     return (
       topic: getUnitCommandTopic(unitId, 'GET-DEVICES'),
       payload: '{}',
+    );
+  }
+
+  /// Request pro UNIT `GET-CONFIG` (FW ≥ P2L_26071501NT). Odpověď je přímý
+  /// JSON objekt s uloženou konfigurací (Id/ver/mac/SSID/mqtt*/ip/dns/…) i
+  /// reálným stavem (actualIp/actualSSID).
+  ///
+  /// Bez [user]/[password] (payload `{}`) FW vrací hesla jen jako bool
+  /// „je nastaveno". Se správnými přihlašovacími údaji vrátí i **skutečná
+  /// hesla** (`PSWD`/`mqttPassword` jako string) — používá se pro kompletní
+  /// evidenci/obnovu (interní tool).
+  static ({String topic, String payload}) buildGetConfigCommand(String unitId,
+      {String? user, String? password}) {
+    final hasCreds =
+        (user != null && user.isNotEmpty) || (password != null && password.isNotEmpty);
+    return (
+      topic: getUnitCommandTopic(unitId, 'GET-CONFIG'),
+      payload: hasCreds
+          ? jsonEncode({'User': user ?? '', 'Password': password ?? ''})
+          : '{}',
     );
   }
 

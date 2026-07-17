@@ -655,12 +655,15 @@ class _UnitListView extends StatelessWidget {
         } else if (diag.any((r) => r.status == BusScanStatus.unregistered)) {
           scanColor = Colors.grey;
         }
+        final hasDbDrift = (kIsWeb || AuthSession.instance.isLoggedIn) &&
+            state.unitHasDbDrift(unit.id);
         return _UnitCard(
           key: ValueKey(unit.id),
           unit: unit,
           isSelected: isSelected,
           moduleCount: state.modulesForUnit(unit.id)?.length,
           scanStatusColor: scanColor,
+          hasDbDrift: hasDbDrift,
           onToggle: () => state.toggleUnit(unit.id),
           onGetParam: () {
             state.sendGetParam(unit.id);
@@ -682,6 +685,9 @@ class _UnitCard extends StatefulWidget {
   final int? moduleCount;
   // Barva ikony „Seznam devices" podle výsledku skenu sběrnice (null = původní).
   final Color? scanStatusColor;
+  // True = jednotka má v centrální DB nesoulad evidence vs. realita (jen když
+  // je uživatel přihlášený) → ⚠ ikona před „Seznam devices".
+  final bool hasDbDrift;
   final VoidCallback onToggle;
   final VoidCallback onGetParam;
   final VoidCallback onOpenDetail;
@@ -692,6 +698,7 @@ class _UnitCard extends StatefulWidget {
     required this.isSelected,
     required this.moduleCount,
     this.scanStatusColor,
+    this.hasDbDrift = false,
     required this.onToggle,
     required this.onGetParam,
     required this.onOpenDetail,
@@ -833,6 +840,24 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                       ],
                     ),
                   ),
+                  if (widget.hasDbDrift) ...[
+                    IconButton(
+                      icon: const Icon(Icons.warning_amber,
+                          size: 26, color: Colors.orange),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              UnitDbDetailScreen(unitId: widget.unit.id),
+                        ),
+                      ),
+                      tooltip: 'Nesouhlasí s evidencí v databázi — otevřít kartu',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 30, minHeight: 32),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   Stack(
                     clipBehavior: Clip.none,
                     alignment: Alignment.center,

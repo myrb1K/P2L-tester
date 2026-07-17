@@ -12,6 +12,7 @@ import '../models/device.dart';
 import '../models/device_template.dart';
 import '../models/module.dart';
 import '../models/unit.dart';
+import '../services/auth_session.dart';
 import '../services/command_service.dart';
 import '../services/module_reconstruction.dart';
 import '../services/mqtt_service.dart';
@@ -31,6 +32,59 @@ class AppState extends ChangeNotifier {
   int port = 1883;
   String username = '';
   String password = '';
+
+  /// Přihlašovací údaje pro UNIT GET-CONFIG (config-read na FW). S nimi FW
+  /// vrátí i skutečná hesla (WiFi/MQTT) do evidence; bez nich jen bool.
+  /// Default z HW konvence; přepsatelné přes SharedPreferences
+  /// (`get_config_user` / `get_config_password`).
+  String _getConfigUser = 'admin';
+  String _getConfigPassword = 'smartbox';
+
+  /// Kanonická ID jednotek, které mají v centrální DB drift (nesoulad evidence
+  /// vs. realita) — pro ⚠ ikonu v seznamu na HomeScreen. Plní se z
+  /// `GET /units` (server-side `drift` flag), jen pro přihlášené. Debounce
+  /// přes [_scheduleDbDriftRefresh].
+  Set<String> _dbDriftIds = {};
+  Timer? _dbDriftDebounce;
+
+  /// True = jednotka má v DB nesoulad s evidencí. Jen orientační (osvěží se
+  /// z DB s malým zpožděním). Prázdné u nepřihlášeného.
+  bool unitHasDbDrift(String unitId) => _dbDriftIds.contains(_canonId(unitId));
+
+  /// Kanonické ID jako na serveru: bez 'u' a bez leading zeros ('001209' →
+  /// '1209', 'u0128' → '128'). Kvůli párování s DB `id`.
+  static String _canonId(String id) {
+    final c = id.startsWith('u') ? id.substring(1) : id;
+    return int.tryParse(c)?.toString() ?? c;
+  }
+
+  void _scheduleDbDriftRefresh() {
+    _dbDriftDebounce?.cancel();
+    _dbDriftDebounce = Timer(const Duration(seconds: 2), refreshDbDrift);
+  }
+
+  /// Načte z centrální DB seznam jednotek a zapamatuje si, které mají drift.
+  /// Jen pro přihlášené (web vždy / nativ opt-in); chyby se polykají —
+  /// indikátor je jen orientační, nesmí rušit práci.
+  Future<void> refreshDbDrift() async {
+    if (!(kIsWeb || AuthSession.instance.isLoggedIn)) {
+      if (_dbDriftIds.isNotEmpty) {
+        _dbDriftIds = {};
+        notifyListeners();
+      }
+      return;
+    }
+    try {
+      final units = await UnitDbService.instance.fetchUnits();
+      final next = {for (final u in units) if (u.drift) u.id};
+      if (!setEquals(_dbDriftIds, next)) {
+        _dbDriftIds = next;
+        notifyListeners();
+      }
+    } catch (_) {
+      // DB nedostupná — indikátor necháme být (žádné rušení práce).
+    }
+  }
   bool useSsl = false;
   bool useWebsocket = false;
   String wsPath = '/mqtt';
@@ -241,6 +295,8 @@ class AppState extends ChangeNotifier {
     _lastWifiPassword = prefs.getString('last_wifi_password') ?? '';
     _firmwareBaseUrl = prefs.getString('firmware_base_url') ??
         'http://185.149.129.164/download';
+    _getConfigUser = prefs.getString('get_config_user') ?? 'admin';
+    _getConfigPassword = prefs.getString('get_config_password') ?? 'smartbox';
 
     final templatesJson = prefs.getString('device_templates');
     if (templatesJson != null && templatesJson.isNotEmpty) {
@@ -447,6 +503,9 @@ class AppState extends ChangeNotifier {
       _mqttService.subscribe('A/SERVER/+/CMD');
       // Odpovědi na device management commandy (P2L32 protokol)
       _mqttService.subscribe('O/+/UNIT/+/GET-DEVICES');
+      // Uložená konfigurace jednotky (GET-CONFIG, od FW P2L_26071501NT) —
+      // observed vrstva pro centrální DB (DB5). Starší FW neodpoví.
+      _mqttService.subscribe('O/+/UNIT/+/GET-CONFIG');
       _mqttService.subscribe('O/+/UNIT/+/ADD-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/RECREATE-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
@@ -462,6 +521,8 @@ class AppState extends ChangeNotifier {
       // Vyžádané změření DIST (GET-VALUE, od FW P2L_26062301NT)
       _mqttService.subscribe('O/+/DIST/+/GET-VALUE');
       _statusMessage = 'Připojeno, čekám na ALIVE…';
+      // Načti drift stav z DB pro ⚠ ikony v seznamu (jen přihlášený).
+      _scheduleDbDriftRefresh();
       _tickTimer?.cancel();
       _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (_units.isNotEmpty) {
@@ -494,6 +555,8 @@ class AppState extends ChangeNotifier {
 
   void disconnect() {
     _tickTimer?.cancel();
+    _dbDriftDebounce?.cancel();
+    _dbDriftIds = {};
     _mqttService.disconnect();
     _units.clear();
     _selectedUnits.clear();
@@ -682,6 +745,8 @@ class AppState extends ChangeNotifier {
 
     if (cmd == 'GET-DEVICES') {
       _handleGetDevicesResponse(unitId, json, message);
+    } else if (cmd == 'GET-CONFIG') {
+      _handleGetConfigResponse(unitId, json);
     } else if (cmd == 'SCAN-DEVICES') {
       _handleScanDevicesResponse(unitId, json);
     } else if (cmd == 'DEVICE-REPLACE' ||
@@ -766,6 +831,7 @@ class AppState extends ChangeNotifier {
       if (dbUnit != null) {
         unawaited(UnitDbService.instance.pushObserved(dbUnit,
             modules: _unitModules[unitId], seenOnBroker: broker));
+        _scheduleDbDriftRefresh();
       }
       // Ověření právě přidaného device cíleným skenem jeho adresy (až teď, kdy
       // je config aktuální). Výsledek se v `_handleScanDevicesResponse`
@@ -778,6 +844,31 @@ class AppState extends ChangeNotifier {
     } else {
       _setStatus('GET-DEVICES $unitId: neočekávaný formát odpovědi', isError: true);
     }
+    notifyListeners();
+  }
+
+  /// GET-CONFIG (FW ≥ P2L_26071501NT): úspěch je přímý JSON objekt s uloženou
+  /// konfigurací (Id/ver/mac/SSID/mqtt*/ip/dns/actualIp/actualSSID; hesla jako
+  /// bool), chyba je Code/Message. Uloží se do `P2LUnit.unitConfig` a pošle do
+  /// centrální DB jako observed (bohatší než get_param — rozliší nakonfigurováno
+  /// vs. reálně běží).
+  void _handleGetConfigResponse(String unitId, Map<String, dynamic> json) {
+    final code = json['Code'];
+    if (code != null && code != 0 && code != '0') {
+      final msg = json['Message'] as String?;
+      _setStatus('GET-CONFIG $unitId: chyba${msg != null ? " — $msg" : ""}',
+          isError: true);
+      notifyListeners();
+      return;
+    }
+    final unit = _units[unitId];
+    if (unit == null) return;
+    unit.updateFromGetConfig(json);
+    final display = int.tryParse(unitId)?.toString() ?? unitId;
+    _setStatus('Konfigurace jednotky $display načtena (GET-CONFIG).');
+    unawaited(UnitDbService.instance
+        .pushObserved(unit, includeConfig: true, seenOnBroker: broker));
+    _scheduleDbDriftRefresh();
     notifyListeners();
   }
 
@@ -1008,6 +1099,7 @@ class AppState extends ChangeNotifier {
       // aktuální broker, jas) — push bez throttle.
       unawaited(UnitDbService.instance.pushObserved(_units[effectiveId]!,
           includeParams: true, seenOnBroker: broker));
+      _scheduleDbDriftRefresh();
 
       // Po manuálním ověření (get_param) dotáhni devices hned, ať uživatel
       // nemusí čekat na další ALIVE. Guard přes _initialFetchDone zajistí,
@@ -1360,6 +1452,30 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     final cmd = CommandService.buildGetDevicesCommand(id);
+    _mqttService.publish(cmd.topic, cmd.payload);
+    // Souběžně stáhni i uloženou konfiguraci (GET-CONFIG) — jen kde ji FW umí.
+    fetchConfig(id);
+  }
+
+  /// Vyžádá uloženou konfiguraci jednotky (UNIT `GET-CONFIG`). No-op u staré
+  /// generace a u nové gen se starším FW (< P2L_26071501NT) — ta příkaz nezná
+  /// a neodpoví, observed vrstvu dál plní `get_param`. Odpověď zpracuje
+  /// `_handleGetConfigResponse`.
+  void fetchConfig(String unitId) {
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    if (unit == null) return;
+    // Nová generace = detekovaná z ALIVE (isNewGen) NEBO ID ≥ 1000. Samotný
+    // isNewGen je vratký: jednotka známá jen z get_param má default false a
+    // nový FW navíc v get_param/ALIVE hlásí ID s prefixem „u" (→ isNewGen=false),
+    // i když na UNIT topicy normálně odpovídá. ID ≥ 1000 to spolehlivě doplní.
+    final isNewGen = unit.isNewGen || CommandService.isNewTopicFormat(id);
+    if (!isNewGen ||
+        !CommandService.firmwareSupportsGetConfig(unit.firmware)) {
+      return;
+    }
+    final cmd = CommandService.buildGetConfigCommand(id,
+        user: _getConfigUser, password: _getConfigPassword);
     _mqttService.publish(cmd.topic, cmd.payload);
   }
 

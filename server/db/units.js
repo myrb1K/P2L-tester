@@ -54,6 +54,10 @@ function ensureObservedColumns(db) {
     // Na rozdíl od mqtt_server (jen z get_param) se plní každým kontaktem —
     // drift „jednotka žije na jiném brokeru" je vidět hned po discovery.
     seen_on_broker: 'TEXT',
+    // DB5: poslední UNIT GET-CONFIG 1:1 (nakonfigurováno + actualIp/actualSSID,
+    // hesla jako bool) + čas načtení. Bohatší observed než get_param.
+    unit_config_json: 'TEXT',
+    unit_config_fetched_at: 'TEXT',
   };
   for (const [col, type] of Object.entries(wanted)) {
     if (!existing.has(col)) db.exec(`ALTER TABLE units ADD COLUMN ${col} ${type}`);
@@ -76,6 +80,28 @@ function normalizeUnitId(raw) {
 
 function deriveGeneration(id) {
   return Number(id) >= 1000 ? 'new' : 'old';
+}
+
+// Tri-state ochrana hesel ve snapshotu (PRD-DB v2 §3): pozdější bool `true`
+// (odpověď na `{}` / bez creds — třeba od jiného klienta na sběrnici) NESMÍ
+// přepsat dřív zachycenou skutečnou hodnotu hesla. Ostatní pole vždy z nové
+// odpovědi (běžný merge = replace celého snapshotu, jen tajemství chráníme).
+function mergeConfigSecrets(incoming, existingJson) {
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming;
+  let existing = null;
+  if (existingJson) {
+    try { existing = JSON.parse(existingJson); } catch { existing = null; }
+  }
+  if (!existing) return incoming;
+  const out = { ...incoming };
+  for (const k of Object.keys(out)) {
+    if (/pass|pswd|secret/i.test(k) &&
+        out[k] === true &&
+        typeof existing[k] === 'string' && existing[k].length > 0) {
+      out[k] = existing[k];
+    }
+  }
+  return out;
 }
 
 // Rekurzivně nahradí hodnoty klíčů vypadajících jako heslo za '•••'.
@@ -108,11 +134,31 @@ function getHistory(db, rawId, limit = 200) {
     }));
 }
 
-// Drift (PRD §4.1): desired vs. observed u polí, která jednotka umí ohlásit
-// zpět (broker address, WiFi SSID, jas). Zrcadlí klientskou logiku
-// UnitDbCard.driftWarnings — tady jen boolean pro označení řádku seznamu,
-// aby seznam nemusel nést desired_json (hesla).
+// Drift v2 (PRD-DB v2 §6): souhrnný boolean pro řádek seznamu. Tři kategorie
+// (zrcadlí klientskou UnitDbCard.driftWarnings), počítá se z desired +
+// observed sloupců + GET-CONFIG snapshotu (unit_config_json). Bez GET-CONFIG
+// (starý FW) degraduje na porovnání proti get_param hodnotám.
+//   1) evidence ↔ uloženo v NVS (mqttAddress/SSID z GET-CONFIG)
+//   2) uloženo ↔ reálně běží (ip↔actualIp, SSID↔actualSSID) — i bez desired
+//   3) evidence ↔ kde ji vidíme (mqtt_server / seen_on_broker)
 function computeDrift(desiredJson, row) {
+  let cfg = null;
+  if (row.unit_config_json) {
+    try { cfg = JSON.parse(row.unit_config_json); } catch { cfg = null; }
+  }
+  const s = (v) => (typeof v === 'string' && v ? v : null);
+
+  // 2) uloženo ↔ běží — čistě observed, ukáže se i u nekonfigurované jednotky.
+  if (cfg) {
+    const ip = s(cfg.ip);
+    const actualIp = s(cfg.actualIp);
+    // "0.0.0.0" = statická IP vypnutá (DHCP) → neporovnávat.
+    if (ip && ip !== '0.0.0.0' && actualIp && ip !== actualIp) return true;
+    const cfgSsid = s(cfg.SSID);
+    const actualSsid = s(cfg.actualSSID);
+    if (cfgSsid && actualSsid && cfgSsid !== actualSsid) return true;
+  }
+
   if (!desiredJson) return false;
   let d;
   try {
@@ -122,16 +168,20 @@ function computeDrift(desiredJson, row) {
   }
   const broker = d.broker;
   if (broker && typeof broker.address === 'string' && broker.address) {
-    // mqtt_server = co jednotka sama hlásí (get_param); seen_on_broker = přes
-    // který broker ji appka naposledy viděla (každé ALIVE). Rozpor v kterémkoli
-    // z nich = drift.
+    // 1) vs uloženo v NVS (autoritativní z GET-CONFIG).
+    if (cfg && s(cfg.mqttAddress) && broker.address !== cfg.mqttAddress) return true;
+    // 3) vs kde jednotku vidíme: mqtt_server (get_param) i seen_on_broker (ALIVE).
     if (row.mqtt_server && broker.address !== row.mqtt_server) return true;
     if (row.seen_on_broker && broker.address !== row.seen_on_broker) return true;
   }
   const wifi = d.wifi;
-  if (wifi && typeof wifi.ssid === 'string' && wifi.ssid &&
-      row.ssid && wifi.ssid !== row.ssid) {
-    return true;
+  if (wifi && typeof wifi.ssid === 'string' && wifi.ssid) {
+    if (cfg && s(cfg.SSID)) {
+      if (wifi.ssid !== cfg.SSID) return true;
+    } else if (row.ssid && wifi.ssid !== row.ssid) {
+      // Bez GET-CONFIG degraduj na get_param SSID (starý FW).
+      return true;
+    }
   }
   if (Number.isInteger(d.brightness) && row.brightness != null &&
       d.brightness !== row.brightness) {
@@ -149,13 +199,14 @@ function listUnits(db) {
       `SELECT id, generation, mac, name, location, status, last_seen, firmware,
               ip, battery, updated_at,
               ssid, mqtt_server, mqtt_port, brightness, seen_on_broker,
-              desired_json
+              unit_config_json, desired_json
        FROM units ORDER BY CAST(id AS INTEGER)`
     )
     .all()
     .map((row) => {
       const {
         desired_json: desiredJson,
+        unit_config_json: unitConfigJson,
         ssid, mqtt_server: mqttServer, mqtt_port: mqttPort, brightness,
         seen_on_broker: seenOnBroker,
         ...rest
@@ -168,11 +219,17 @@ function getUnit(db, rawId) {
   const id = normalizeUnitId(rawId);
   const row = db.prepare('SELECT * FROM units WHERE id = ?').get(id);
   if (!row) return null;
-  const { devices_json: devicesJson, desired_json: desiredJson, ...rest } = row;
+  const {
+    devices_json: devicesJson,
+    desired_json: desiredJson,
+    unit_config_json: unitConfigJson,
+    ...rest
+  } = row;
   return {
     ...rest,
     devices: devicesJson ? JSON.parse(devicesJson) : null,
     desired: desiredJson ? JSON.parse(desiredJson) : null,
+    unit_config: unitConfigJson ? JSON.parse(unitConfigJson) : null,
   };
 }
 
@@ -196,6 +253,12 @@ function upsertObserved(db, rawId, obs = {}) {
   const id = ensureUnit(db, rawId, obs.generation);
   const sets = [];
   const params = { id };
+  // GET-CONFIG snapshot: chraň dřív zachycená skutečná hesla před pozdějším bool.
+  let configToStore = obs.unitConfig;
+  if (obs.unitConfig !== undefined) {
+    const prev = db.prepare('SELECT unit_config_json FROM units WHERE id = ?').get(id);
+    configToStore = mergeConfigSecrets(obs.unitConfig, prev && prev.unit_config_json);
+  }
   const map = {
     mac: obs.mac,
     hw_model: obs.hwModel,
@@ -207,6 +270,7 @@ function upsertObserved(db, rawId, obs = {}) {
     mqtt_port: obs.mqttPort,
     brightness: obs.brightness,
     seen_on_broker: obs.seenOnBroker,
+    unit_config_json: obs.unitConfig === undefined ? undefined : JSON.stringify(configToStore),
     devices_json: obs.devices === undefined ? undefined : JSON.stringify(obs.devices),
   };
   for (const [col, val] of Object.entries(map)) {
@@ -214,6 +278,10 @@ function upsertObserved(db, rawId, obs = {}) {
       sets.push(`${col} = @${col}`);
       params[col] = val;
     }
+  }
+  if (obs.unitConfig !== undefined) {
+    sets.push(`unit_config_fetched_at = @unit_config_fetched_at`);
+    params.unit_config_fetched_at = obs.lastSeen || new Date().toISOString();
   }
   if (obs.generation === 'old' || obs.generation === 'new') {
     sets.push('generation = @generation');

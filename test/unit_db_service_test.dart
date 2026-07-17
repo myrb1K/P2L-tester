@@ -93,6 +93,35 @@ void main() {
     expect(body['brightness'], 80);
   });
 
+  test('pushObserved (GET-CONFIG): includeConfig přidá unitConfig snapshot',
+      () async {
+    final (service, captured) = _service();
+    final u = _unit();
+    u.unitConfig = {
+      'mqttAddress': 'mqtt.firma.cz',
+      'SSID': 'HALA',
+      'ip': '10.0.0.72',
+      'actualIp': '10.0.0.72',
+      'mqttPassword': true,
+    };
+    await service.pushObserved(u, includeConfig: true);
+    final body =
+        jsonDecode(captured.requests.single.body) as Map<String, dynamic>;
+    final cfg = body['unitConfig'] as Map<String, dynamic>;
+    expect(cfg['mqttAddress'], 'mqtt.firma.cz');
+    expect(cfg['actualIp'], '10.0.0.72');
+    expect(cfg['mqttPassword'], true);
+  });
+
+  test('pushObserved bez includeConfig unitConfig neposílá', () async {
+    final (service, captured) = _service();
+    final u = _unit()..unitConfig = {'mqttAddress': 'x'};
+    await service.pushObserved(u);
+    final body =
+        jsonDecode(captured.requests.single.body) as Map<String, dynamic>;
+    expect(body.containsKey('unitConfig'), isFalse);
+  });
+
   test('pushObserved s modules serializuje devices přes toJson', () async {
     final (service, captured) = _service();
     final modules = [
