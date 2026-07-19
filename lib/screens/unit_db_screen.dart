@@ -29,6 +29,8 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
 
   List<UnitDbSummary>? _units;
   String? _error;
+  String? _customerFilter; // null = vše
+  String? _brokerFilter; // null = vše
   String? _statusFilter; // null = vše
 
   @override
@@ -51,19 +53,91 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
     try {
       final units = await _service.fetchUnits();
       if (!mounted) return;
-      setState(() => _units = units);
+      setState(() {
+        _units = units;
+        // Po obnově zahoď filtry, které už v datech neexistují (zákazník
+        // přejmenován/smazán), ať dropdown neukazuje mrtvou volbu.
+        if (_customerFilter != null && !_customers.contains(_customerFilter)) {
+          _customerFilter = null;
+        }
+        if (_brokerFilter != null && !_brokers.contains(_brokerFilter)) {
+          _brokerFilter = null;
+        }
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
     }
   }
 
+  /// Unikátní neprázdní zákazníci napříč načtenými jednotkami (pro dropdown).
+  List<String> get _customers {
+    final set = <String>{};
+    for (final u in _units ?? const <UnitDbSummary>[]) {
+      if (u.name != null && u.name!.isNotEmpty) set.add(u.name!);
+    }
+    return set.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  /// Unikátní neprázdné brokery napříč načtenými jednotkami (pro dropdown).
+  List<String> get _brokers {
+    final set = <String>{};
+    for (final u in _units ?? const <UnitDbSummary>[]) {
+      if (u.broker != null && u.broker!.isNotEmpty) set.add(u.broker!);
+    }
+    return set.toList()..sort();
+  }
+
   List<UnitDbSummary> get _filtered {
     final q = _searchController.text;
     return (_units ?? const [])
         .where((u) => u.matches(q))
+        .where((u) => _customerFilter == null || u.name == _customerFilter)
+        .where((u) => _brokerFilter == null || u.broker == _brokerFilter)
         .where((u) => _statusFilter == null || u.status == _statusFilter)
         .toList();
+  }
+
+  bool get _hasActiveFilter =>
+      _customerFilter != null || _brokerFilter != null || _statusFilter != null;
+
+  void _resetFilters() => setState(() {
+        _customerFilter = null;
+        _brokerFilter = null;
+        _statusFilter = null;
+      });
+
+  /// Sjednocené rozevírací pole filtru (Zákazník / Broker / Stav).
+  /// `value == null` → vybráno „Vše".
+  Widget _filterDropdown({
+    required String label,
+    required String? value,
+    required List<DropdownMenuItem<String?>> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String?>(
+      // Klíč závislý na hodnotě → po externím resetu (_resetFilters) se pole
+      // překreslí na „Vše"; FormField jinak drží vnitřní stav a initialValue
+      // po prvním sestavení ignoruje.
+      key: ValueKey('$label:$value'),
+      initialValue: value,
+      isExpanded: true,
+      style: Theme.of(context)
+          .textTheme
+          .bodyMedium
+          ?.copyWith(fontSize: 12),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(fontSize: 12),
+        isDense: true,
+        border: const OutlineInputBorder(),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      ),
+      items: items,
+      onChanged: onChanged,
+    );
   }
 
   @override
@@ -109,35 +183,92 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                         ),
                       ),
                     ),
-                    SizedBox(
-                      height: 44,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: FilterChip(
-                              label: const Text('Vše'),
-                              selected: _statusFilter == null,
-                              onSelected: (_) =>
-                                  setState(() => _statusFilter = null),
+                          Expanded(
+                            child: _filterDropdown(
+                              label: 'Zákazník',
+                              value: _customerFilter,
+                              items: [
+                                const DropdownMenuItem<String?>(
+                                    value: null, child: Text('Vše')),
+                                for (final c in _customers)
+                                  DropdownMenuItem<String?>(
+                                    value: c,
+                                    child: Text(c,
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _customerFilter = v),
                             ),
                           ),
-                          for (final s in unitDbStatuses)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: FilterChip(
-                                label: Text(unitDbStatusLabel(s)),
-                                selected: _statusFilter == s,
-                                onSelected: (_) => setState(() =>
-                                    _statusFilter = _statusFilter == s ? null : s),
-                              ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _filterDropdown(
+                              label: 'Broker',
+                              value: _brokerFilter,
+                              items: [
+                                const DropdownMenuItem<String?>(
+                                    value: null, child: Text('Vše')),
+                                for (final b in _brokers)
+                                  DropdownMenuItem<String?>(
+                                    value: b,
+                                    child: Text(b,
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _brokerFilter = v),
                             ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _filterDropdown(
+                              label: 'Stav',
+                              value: _statusFilter,
+                              items: [
+                                const DropdownMenuItem<String?>(
+                                    value: null, child: Text('Vše')),
+                                for (final s in unitDbStatuses)
+                                  DropdownMenuItem<String?>(
+                                    value: s,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: _statusColor(s),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(unitDbStatusLabel(s)),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _statusFilter = v),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.filter_alt_off_outlined),
+                            iconSize: 20,
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Zrušit filtry',
+                            onPressed: _hasActiveFilter ? _resetFilters : null,
+                          ),
                         ],
                       ),
                     ),
-                    const _StatusLegend(),
+                    // Vizuální oddělení filtrů od seznamu jednotek.
+                    const Divider(height: 1, thickness: 1),
                     Expanded(
                       child: _filtered.isEmpty
                           ? Center(
@@ -191,9 +322,9 @@ class _UnitRow extends StatelessWidget {
     final statusColor = _statusColor(unit.status);
     final hasName = unit.name != null && unit.name!.isNotEmpty;
     final hasBroker = unit.broker != null && unit.broker!.isNotEmpty;
-    // Stav (aktivní/vadná/…) nese barevná tečka vlevo, ne text — legenda barev
-    // je nad seznamem (_StatusLegend).
-    final subtitle = [
+    // Stav (aktivní/vadná/…) nese barevná tečka na začátku druhého řádku;
+    // význam barev vysvětluje filtr „Stav" nahoře (barevné tečky u položek).
+    final subtitleRest = [
       relativeTime(unit.lastSeen),
       if (unit.location != null && unit.location!.isNotEmpty) unit.location!,
       if (unit.firmware != null) unit.firmware!,
@@ -215,15 +346,6 @@ class _UnitRow extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
           child: Row(
             children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: statusColor,
-                ),
-              ),
-              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -263,11 +385,27 @@ class _UnitRow extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: statusColor,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            subtitleRest,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[600]),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -285,44 +423,6 @@ class _UnitRow extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// Legenda barev teček stavu nad seznamem (stav se v řádku nevypisuje textem,
-/// jen barevnou tečkou — vysvětlivka je tady).
-class _StatusLegend extends StatelessWidget {
-  const _StatusLegend();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
-      child: Wrap(
-        spacing: 14,
-        runSpacing: 4,
-        children: [
-          for (final s in unitDbStatuses)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _statusColor(s),
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Text(
-                  unitDbStatusLabel(s),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                ),
-              ],
-            ),
-        ],
       ),
     );
   }
