@@ -225,7 +225,7 @@ Centrální evidence P2L modulů na firemním serveru. Otevři přes menu **☰*
 
 Karty jednotek **vznikají a aktualizují se samy** běžnou prací s appkou: jakmile je uživatel přihlášený, každé ALIVE, načtení detailu (`get_param`), seznam devices i každá konfigurační akce (broker, WiFi, jas, firmware) se zapíší na kartu jednotky. Nic se nezadává ručně — kromě údajů níže.
 
-**Seznam:** vyhledávací pole (filtruje najednou přes ID, název i umístění) + chipy stavu (*Vše / Aktivní / Vadná / Sklad / Vyřazená*). Řádek ukazuje ID, název, stav, jak dávno se jednotka ozvala a firmware; jednotka s rozporem mezi evidencí a skutečným stavem má **oranžový trojúhelník ⚠** (detail rozdílů na kartě). Tažením dolů se seznam obnoví.
+**Seznam:** vyhledávací pole (filtruje najednou přes ID, název i umístění) a pod ním tři rozevírací pole filtru — **Zákazník**, **Broker** a **Stav** (každé s volbou *Vše*); nabídky zákazníků a brokerů se plní z jednotek v evidenci, u položek filtru **Stav** je barevná tečka daného stavu. Filtry se kombinují s vyhledáváním; ikona ⌦ vpravo od filtrů je zruší najednou. Řádek ukazuje ID, název a broker na prvním řádku, na druhém barevnou tečku stavu (barvy odpovídají filtru Stav), jak dávno se jednotka ozvala, umístění a firmware; jednotka s rozporem mezi evidencí a skutečným stavem má **oranžový trojúhelník ⚠** (detail rozdílů na kartě). Tažením dolů se seznam obnoví.
 
 **Karta jednotky** (klepnutím na řádek) má tři části:
 

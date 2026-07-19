@@ -292,11 +292,58 @@ void main() {
           MaterialApp(home: UnitDbListScreen(service: service)));
       await tester.pumpAndSettle();
 
-      // „Vadná" je i v legendě barev nad seznamem → cílit přímo filtr chip.
-      await tester.tap(find.widgetWithText(FilterChip, 'Vadná'));
+      // Otevři dropdown „Stav" a vyber „Vadná" (v otevřeném menu je
+      // poslední výskyt — overlay je v stromu nejníž).
+      await tester.tap(find.ancestor(
+        of: find.text('Stav'),
+        matching: find.byType(DropdownButtonFormField<String?>),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Vadná').last);
       await tester.pumpAndSettle();
       expect(find.text('128'), findsOneWidget);
       expect(find.text('1209'), findsNothing);
+    });
+
+    testWidgets('filtr zákazníka ukáže jen jeho jednotky', (tester) async {
+      final service = _service((r) async => http.Response(_listBody, 200));
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      // Otevři dropdown „Zákazník" a vyber „Regál 12" (má ho jen 1209).
+      await tester.tap(find.ancestor(
+        of: find.text('Zákazník'),
+        matching: find.byType(DropdownButtonFormField<String?>),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Regál 12').last);
+      await tester.pumpAndSettle();
+      expect(find.text('1209'), findsOneWidget);
+      expect(find.text('128'), findsNothing);
+    });
+
+    testWidgets('reset filtrů vrátí seznam na vše', (tester) async {
+      final service = _service((r) async => http.Response(_listBody, 200));
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      // Nastav filtr stavu na Vadná → jen 128.
+      await tester.tap(find.ancestor(
+        of: find.text('Stav'),
+        matching: find.byType(DropdownButtonFormField<String?>),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Vadná').last);
+      await tester.pumpAndSettle();
+      expect(find.text('1209'), findsNothing);
+
+      // Tlačítko „Zrušit filtry" → obě jednotky zpět.
+      await tester.tap(find.byTooltip('Zrušit filtry'));
+      await tester.pumpAndSettle();
+      expect(find.text('128'), findsOneWidget);
+      expect(find.text('1209'), findsOneWidget);
     });
   });
 
