@@ -320,6 +320,16 @@ DateTime? _parseTime(dynamic v) {
   return DateTime.tryParse(s)?.toUtc();
 }
 
+/// Absolutní čas čitelně v lokální zóně („21. 7. 2026 16:10") — pro historii
+/// a časové značky na kartě. Přijme SQLite `YYYY-MM-DD HH:MM:SS` i ISO string
+/// (obojí UTC, viz [_parseTime]); prázdné → ''.
+String formatTimestamp(dynamic v) {
+  final t = _parseTime(v)?.toLocal();
+  if (t == null) return '';
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${t.day}. ${t.month}. ${t.year} ${two(t.hour)}:${two(t.minute)}';
+}
+
 /// Relativní čas pro seznam („3 min", „2 h", „14 dny") — bez slova „před".
 String relativeTime(DateTime? t) {
   if (t == null) return 'nikdy';

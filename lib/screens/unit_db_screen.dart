@@ -3,8 +3,10 @@
 // Vstup: položka v hamburger menu HomeScreen (jen pro přihlášené).
 // Seznam: jedno vyhledávací pole (filtruje přes ID + název + umístění),
 // chipy stavu, řádky s ID / názvem / stavem / relativním last_seen /
-// firmware. Detail: tři vrstvy karty (observed / desired / meta) + historie,
-// editace meta polí, drift indikace („Nesouhlasí s evidencí").
+// firmware. Detail: Údaje (meta) + Konfigurace (jeden řádek na parametr se
+// třemi sloučenými pohledy evidence/uloženo/běží, PRD-DB v2 §2.4) + Jednotka
+// (observed metadata) + historie; editace meta polí, drift indikace
+// („Nesouhlasí s evidencí").
 // Server nedostupný → hláška + „Zkusit znovu" (UnitDbException).
 
 import 'package:flutter/material.dart';
@@ -619,61 +621,8 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
                       _row('Stav', unitDbStatusLabel(card.status)),
                       _row('Poznámka', card.note),
                     ]),
-                    _Section(title: 'Jednotka hlásí (observed)', children: [
-                      _row('Naposledy viděna', relativeTime(card.lastSeen)),
-                      _row('HW model', card.hwModel),
-                      _row('Firmware', card.firmware),
-                      _row('Generace',
-                          card.generation == 'new' ? 'nová (P2L32)' : 'stará'),
-                      _row('MAC', card.mac),
-                      _row('IP', card.ip),
-                      _row('Baterie',
-                          card.battery != null ? '${card.battery} %' : null),
-                      _row('WiFi (SSID)', card.ssid),
-                      _row(
-                          'Broker',
-                          card.mqttServer != null
-                              ? '${card.mqttServer}:${card.mqttPort ?? ''}'
-                              : null),
-                      _row('Hlásí se přes', card.seenOnBroker),
-                      _row('Jas', card.brightness?.toString()),
-                      // displayLabel nese i detail modulu — počet a čísla
-                      // tlačítek PUM-A, volitelné LEDS („PUM-A @128 · 1 tl.
-                      // (0) · LEDS"). Jeden modul na řádek.
-                      if (card.devices.isNotEmpty)
-                        _row(
-                            'Devices',
-                            card.devices
-                                .map((m) => m.displayLabel)
-                                .join('\n')),
-                    ]),
-                    if (card.unitConfig != null) _configSection(card),
-                    _Section(
-                      title: 'Odesláno appkou (desired)',
-                      trailing: card.desired != null
-                          ? IconButton(
-                              icon: Icon(_showSecrets
-                                  ? Icons.visibility_off
-                                  : Icons.visibility),
-                              tooltip:
-                                  _showSecrets ? 'Skrýt hesla' : 'Zobrazit hesla',
-                              onPressed: () =>
-                                  setState(() => _showSecrets = !_showSecrets),
-                            )
-                          : null,
-                      children: card.desired == null
-                          ? [
-                              Padding(
-                                padding: const EdgeInsets.all(8),
-                                child: Text(
-                                  'Zatím žádná konfigurace přes appku — '
-                                  'vyplní se první změnou brokeru/WiFi/jasu.',
-                                  style: TextStyle(color: Colors.grey[600]),
-                                ),
-                              ),
-                            ]
-                          : _desiredRows(card),
-                    ),
+                    _configCard(card),
+                    _unitCard(card),
                     _Section(
                       title: 'Historie',
                       children: _history.isEmpty
@@ -692,8 +641,10 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
                                   title: Text(
                                       '${_actionLabel(e.action)} — ${e.username}'),
                                   subtitle: Text(
-                                    '${e.at} UTC'
-                                    '${e.detail != null ? '\n${_detailSummary(e.detail!)}' : ''}',
+                                    formatTimestamp(e.at) +
+                                        (e.detail != null
+                                            ? '\n${_detailSummary(e.detail!)}'
+                                            : ''),
                                     style: const TextStyle(fontSize: 12),
                                   ),
                                 ),
@@ -704,35 +655,206 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
     );
   }
 
-  List<Widget> _desiredRows(UnitDbCard card) {
-    final d = card.desired!;
-    String secret(dynamic v) =>
-        v == null ? '—' : (_showSecrets ? v.toString() : '••••••');
-    final rows = <Widget>[];
-    final broker = d['broker'];
-    if (broker is Map) {
-      rows.add(_row('Broker',
-          '${broker['address']}:${broker['port'] ?? ''} (user: ${broker['user'] ?? '—'})'));
-      rows.add(_row('Broker heslo', secret(broker['password'])));
+  /// Sekce „Konfigurace" — jeden řádek na parametr se třemi pohledy
+  /// (evidence = desired / uloženo = GET-CONFIG NVS / běží = actualIp/actualSSID
+  /// + get_param). Shoda více zdrojů → jedna hodnota + ✓, rozdíl → rozepsané
+  /// pohledy pod sebou (PRD-DB v2 §2.4). Starý FW bez GET-CONFIG → míň pohledů,
+  /// degraduje na dnešní jednu hodnotu. Hesla maskovaná, oko je odkryje.
+  Widget _configCard(UnitDbCard card) {
+    final cfg = card.unitConfig; // uloženo v NVS (může být null)
+    final d = card.desired; // evidence
+
+    // ── evidence (desired) ──
+    Map? dBroker = d?['broker'] is Map ? d!['broker'] as Map : null;
+    Map? dWifi = d?['wifi'] is Map ? d!['wifi'] as Map : null;
+    String? str(dynamic v) => (v is String && v.isNotEmpty) ? v : null;
+    String? cfgStr(String k) => str(cfg?[k]);
+    String? hostPort(String? host, dynamic port) =>
+        host == null ? null : '$host:${port ?? ''}';
+    String? boolText(dynamic v, String yes, String no) =>
+        v == true ? yes : (v == false ? no : null);
+
+    final evBrokerUser = dBroker != null ? str(dBroker['address']) : null;
+    final evBroker = evBrokerUser != null
+        ? hostPort(evBrokerUser, dBroker!['port'])
+        : null;
+    final evWifi = dWifi != null ? str(dWifi['ssid']) : null;
+
+    // ── uloženo (GET-CONFIG NVS) ──
+    final stBroker = hostPort(cfgStr('mqttAddress'), cfg?['mqttPort']);
+    final stWifi = cfgStr('SSID');
+
+    // ── běží (actual / get_param) ──
+    final rnBroker = hostPort(card.mqttServer, card.mqttPort);
+    final rnWifi = cfgStr('actualSSID') ?? card.ssid;
+
+    // „Hlásí se přes" (kde appka jednotku vidí) ukázat jen když přináší novou
+    // informaci — tj. liší se od hostů už zobrazených v řádku Broker. Při
+    // shodě je to jen šum (§2.4: rozepisuje se jen rozdíl).
+    final brokerHosts = {evBrokerUser, cfgStr('mqttAddress'), card.mqttServer}
+      ..removeWhere((h) => h == null || h.isEmpty);
+    final seenOn = (card.seenOnBroker != null &&
+            card.seenOnBroker!.isNotEmpty &&
+            !brokerHosts.contains(card.seenOnBroker))
+        ? card.seenOnBroker
+        : null;
+
+    // Oko jen když je co odkrýt (skutečná hesla jako string kdekoli).
+    final hasSecrets = (dBroker?['password'] is String) ||
+        (dWifi?['password'] is String) ||
+        cfg?['PSWD'] is String ||
+        cfg?['mqttPassword'] is String;
+
+    final children = <Widget>[
+      _triRow('Broker', evidence: evBroker, stored: stBroker, running: rnBroker),
+      _row('Hlásí se přes', seenOn),
+      _triRow('MQTT uživatel',
+          evidence: dBroker != null ? str(dBroker['user']) : null,
+          stored: cfgStr('mqttUser')),
+      _secretRow('Broker heslo',
+          evidence: dBroker?['password'], stored: cfg?['mqttPassword']),
+      _row('TLS validace certifikátu',
+          boolText(cfg?['mqttInsec'], 'vypnutá (insecure)', 'zapnutá')),
+      _row('Vlastní CA certifikát', boolText(cfg?['mqttCert'], 'uložen', 'ne')),
+      _triRow('WiFi (SSID)', evidence: evWifi, stored: stWifi, running: rnWifi),
+      _secretRow('WiFi heslo',
+          evidence: dWifi?['password'], stored: cfg?['PSWD']),
+      // IP: evidence nemá; uloženo=ip (statická), běží=actualIp/get_param.
+      // DHCP anotace jen když známe NVS (jinak nevíme statická vs. DHCP).
+      _triRow('IP',
+          stored: cfgStr('ip'),
+          running: cfgStr('actualIp') ?? card.ip,
+          dhcp: cfg != null),
+      _row('DNS', cfgStr('dns')),
+      _row('Brána', cfgStr('gateway')),
+      _row('Maska', cfgStr('subnet')),
+      _triRow('Jas P2L LED',
+          evidence: (d?['brightness'])?.toString(),
+          running: card.brightness?.toString()),
+      _row('Jas PUM-A displejů', (d?['dispBrightness'])?.toString()),
+      _row('Poslední OTA', str(d?['fwUrl'])),
+      // Původ dat (zdroj/čas) — malým písmem dole.
+      _row(
+          'Evidence zapsána',
+          card.desiredUpdatedBy != null
+              ? '${card.desiredUpdatedBy} (${formatTimestamp(card.desiredUpdatedAt)})'
+              : null),
+      _row('Konfigurace načtena',
+          cfg != null ? formatTimestamp(card.unitConfigFetchedAt) : null),
+    ];
+
+    // Všechny řádky prázdné (žádná evidence ani GET-CONFIG) → přátelská hláška.
+    final anyContent = children.any((w) => w is! SizedBox);
+    return _Section(
+      title: 'Konfigurace',
+      trailing: hasSecrets
+          ? IconButton(
+              icon: Icon(
+                  _showSecrets ? Icons.visibility_off : Icons.visibility),
+              tooltip: _showSecrets ? 'Skrýt hesla' : 'Zobrazit hesla',
+              onPressed: () => setState(() => _showSecrets = !_showSecrets),
+            )
+          : null,
+      children: anyContent
+          ? children
+          : [
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  'Zatím žádná konfigurace — evidence se vyplní první změnou '
+                  'brokeru/WiFi/jasu, uložený stav načtením GET-CONFIG.',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ),
+            ],
+    );
+  }
+
+  /// Sekce „Jednotka" — observed metadata bez rozlišení pohledů (HW model,
+  /// firmware, generace, MAC, baterie, last_seen, devices).
+  Widget _unitCard(UnitDbCard card) {
+    return _Section(title: 'Jednotka', children: [
+      _row('Naposledy viděna', relativeTime(card.lastSeen)),
+      _row('HW model', card.hwModel),
+      _row('Firmware', card.firmware),
+      _row('Generace', card.generation == 'new' ? 'nová (P2L32)' : 'stará'),
+      _row('MAC', card.mac),
+      _row('Baterie', card.battery != null ? '${card.battery} %' : null),
+      // displayLabel nese i detail modulu — počet a čísla tlačítek PUM-A,
+      // volitelné LEDS („PUM-A @128 · 1 tl. (0) · LEDS"). Jeden modul na řádek.
+      if (card.devices.isNotEmpty)
+        _row('Devices', card.devices.map((m) => m.displayLabel).join('\n')),
+    ]);
+  }
+
+  /// Řádek se třemi pohledy. Shoda ≥2 zdrojů → „hodnota ✓"; jediný zdroj →
+  /// holá hodnota; rozdíl → label + odsazené popsané pohledy. `dhcp` → prázdná
+  /// / „0.0.0.0" uložená IP znamená statickou vypnutou (běží DHCP).
+  Widget _triRow(String label,
+      {String? evidence, String? stored, String? running, bool dhcp = false}) {
+    String? norm(String? v) => (v != null && v.isNotEmpty) ? v : null;
+    final ev = norm(evidence), st = norm(stored), rn = norm(running);
+
+    if (dhcp && (st == null || st == '0.0.0.0')) {
+      if (rn == null && ev == null) return const SizedBox.shrink();
+      return _row(label, rn != null ? '$rn (DHCP)' : ev!);
     }
-    final wifi = d['wifi'];
-    if (wifi is Map) {
-      rows.add(_row('WiFi (SSID)', wifi['ssid']?.toString()));
-      rows.add(_row('WiFi heslo', secret(wifi['password'])));
+
+    final views = <MapEntry<String, String>>[
+      if (ev != null) MapEntry('evidence', ev),
+      if (st != null) MapEntry('uloženo', st),
+      if (rn != null) MapEntry('běží', rn),
+    ];
+    if (views.isEmpty) return const SizedBox.shrink();
+
+    if (views.map((e) => e.value).toSet().length == 1) {
+      final v = views.first.value;
+      return _row(label, views.length >= 2 ? '$v  ✓' : v);
     }
-    if (d['brightness'] != null) {
-      rows.add(_row('Jas P2L LED', d['brightness'].toString()));
+    // Pohledy se liší → rozepsat pod sebou.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(color: Colors.grey[600])),
+          const SizedBox(height: 2),
+          for (final e in views)
+            Padding(
+              padding: const EdgeInsets.only(left: 12, top: 1),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 66,
+                    child: Text(e.key,
+                        style:
+                            TextStyle(color: Colors.grey[500], fontSize: 12)),
+                  ),
+                  Expanded(child: SelectableText(e.value)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Řádek s heslem (tri-state §4). Skutečnou hodnotu preferuj z jednotky
+  /// (GET-CONFIG string), pak z evidence (desired); maskovaná, oko odkryje.
+  /// Jen `true` = „nastaveno" (hodnota neznámá). Nikdy nehlásí „změněno".
+  Widget _secretRow(String label, {dynamic evidence, dynamic stored}) {
+    String? real;
+    if (stored is String && stored.isNotEmpty) {
+      real = stored;
+    } else if (evidence is String && evidence.isNotEmpty) {
+      real = evidence;
     }
-    if (d['dispBrightness'] != null) {
-      rows.add(_row('Jas PUM-A displejů', d['dispBrightness'].toString()));
+    if (real != null) {
+      return _row(label, _showSecrets ? real : '••••••');
     }
-    if (d['fwUrl'] != null) rows.add(_row('Poslední OTA', d['fwUrl'].toString()));
-    rows.add(_row(
-        'Zapsáno',
-        card.desiredUpdatedBy != null
-            ? '${card.desiredUpdatedBy} (${card.desiredUpdatedAt ?? ''} UTC)'
-            : null));
-    return rows;
+    if (stored == true || evidence == true) return _row(label, 'nastaveno');
+    return const SizedBox.shrink();
   }
 
   Widget _row(String label, String? value) {
@@ -752,74 +874,6 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
     );
   }
 
-  /// Sekce „Uloženo v jednotce (GET-CONFIG)" — nakonfigurovaný stav (NVS) +
-  /// reálný běžící stav (actualIp/actualSSID). Ukazuje i pole, která get_param
-  /// nemá: MQTT uživatel, TLS insecure, vlastní CA cert, DNS/brána/maska.
-  /// Hesla: se správnými přihlašovacími údaji FW vrací skutečné hodnoty
-  /// (maskované, oko je odkryje); jinak jen bool „nastaveno".
-  Widget _configSection(UnitDbCard card) {
-    final cfg = card.unitConfig!;
-    String? boolText(dynamic v, String yes, String no) =>
-        v == true ? yes : (v == false ? no : null);
-    // Heslo: string = skutečná hodnota (maskuj), true = jen „nastaveno".
-    String? secretText(dynamic v) {
-      if (v is String && v.isNotEmpty) return _showSecrets ? v : '••••••';
-      return boolText(v, 'nastaveno', 'nenastaveno');
-    }
-
-    final broker = cfg['mqttAddress'];
-    final hasSecrets = cfg['PSWD'] is String || cfg['mqttPassword'] is String;
-    return _Section(
-      title: 'Uloženo v jednotce (GET-CONFIG)',
-      trailing: hasSecrets
-          ? IconButton(
-              icon: Icon(
-                  _showSecrets ? Icons.visibility_off : Icons.visibility),
-              tooltip: _showSecrets ? 'Skrýt hesla' : 'Zobrazit hesla',
-              onPressed: () => setState(() => _showSecrets = !_showSecrets),
-            )
-          : null,
-      children: [
-        if (card.unitConfigFetchedAt != null)
-          _row('Načteno', '${card.unitConfigFetchedAt} UTC'),
-        _configRow('IP', cfg['ip'], cfg['actualIp'], dhcp: true),
-        _configRow('WiFi (SSID)', cfg['SSID'], cfg['actualSSID']),
-        _row('WiFi heslo', secretText(cfg['PSWD'])),
-        _row(
-            'Broker',
-            broker is String && broker.isNotEmpty
-                ? '$broker:${cfg['mqttPort'] ?? ''}'
-                : null),
-        _row('MQTT uživatel', cfg['mqttUser'] is String ? cfg['mqttUser'] as String : null),
-        _row('MQTT heslo', secretText(cfg['mqttPassword'])),
-        _row('TLS validace certifikátu',
-            boolText(cfg['mqttInsec'], 'vypnutá (insecure)', 'zapnutá')),
-        _row('Vlastní CA certifikát', boolText(cfg['mqttCert'], 'uložen', 'ne')),
-        _row('DNS', cfg['dns'] is String ? cfg['dns'] as String : null),
-        _row('Brána', cfg['gateway'] is String ? cfg['gateway'] as String : null),
-        _row('Maska', cfg['subnet'] is String ? cfg['subnet'] as String : null),
-      ],
-    );
-  }
-
-  /// Řádek s rozlišením „nastaveno vs. běží": shoda → jedna hodnota s ✓,
-  /// rozdíl → dva řádky. `dhcp` → prázdná hodnota (`""` nebo `"0.0.0.0"`, dle
-  /// FW) znamená statickou IP vypnutou (běží DHCP), ukáže reálnou adresu.
-  Widget _configRow(String label, dynamic configured, dynamic actual,
-      {bool dhcp = false}) {
-    final cfg = (configured is String && configured.isNotEmpty) ? configured : null;
-    final act = (actual is String && actual.isNotEmpty) ? actual : null;
-    if (dhcp && (cfg == null || cfg == '0.0.0.0')) {
-      return _row(label, act != null ? '$act (DHCP)' : 'DHCP');
-    }
-    if (cfg == null && act == null) return const SizedBox.shrink();
-    if (cfg == null) return _row(label, act);
-    if (act == null || cfg == act) return _row(label, '$cfg ✓');
-    return Column(children: [
-      _row('$label (nastaveno)', cfg),
-      _row('$label (běží)', act),
-    ]);
-  }
 }
 
 String _actionLabel(String action) => switch (action) {
