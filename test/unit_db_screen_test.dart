@@ -382,6 +382,42 @@ void main() {
       expect(find.textContaining('Konfigurace — radek'), findsOneWidget);
     });
 
+    testWidgets('sloučené pohledy: shoda → ✓, rozdíl → evidence/uloženo/běží',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      // Broker souhlasí ve všech třech pohledech; WiFi se liší
+      // (evidence StaraSit vs. uloženo/běží NovaSit).
+      const body = '''
+{"unit":{"id":"1209","generation":"new","status":"active",
+ "mqtt_server":"mqtt.demo.cz","mqtt_port":1883,"ssid":"NovaSit",
+ "unit_config":{"mqttAddress":"mqtt.demo.cz","mqttPort":1883,
+                "SSID":"NovaSit","actualSSID":"NovaSit"},
+ "desired":{"broker":{"address":"mqtt.demo.cz","port":1883},
+            "wifi":{"ssid":"StaraSit"}}}}''';
+      final service = _service((r) async {
+        if (r.url.path.endsWith('/history')) {
+          return http.Response('{"history":[]}', 200);
+        }
+        return http.Response(body, 200);
+      });
+      await tester.pumpWidget(MaterialApp(
+          home: UnitDbDetailScreen(unitId: '1209', service: service)));
+      await tester.pumpAndSettle();
+
+      // Broker: jedna hodnota se ✓ (shoda tří zdrojů).
+      expect(find.textContaining('mqtt.demo.cz:1883  ✓'), findsOneWidget);
+      // WiFi: rozepsané pohledy s popisky a oběma hodnotami.
+      expect(find.text('evidence'), findsOneWidget);
+      expect(find.text('uloženo'), findsOneWidget);
+      expect(find.text('běží'), findsOneWidget);
+      expect(find.text('StaraSit'), findsOneWidget);
+      // NovaSit je uloženo i běží → dvě hodnoty.
+      expect(find.text('NovaSit'), findsNWidgets(2));
+    });
+
     testWidgets('Převzít skutečnost do evidence → PUT desired + reload',
         (tester) async {
       tester.view.physicalSize = const Size(800, 2400);

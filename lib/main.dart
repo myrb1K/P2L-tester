@@ -11,7 +11,7 @@ import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/auth_session.dart';
 
-const String appVersion = '2.78';
+const String appVersion = '2.79';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
