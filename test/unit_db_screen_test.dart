@@ -10,13 +10,15 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:p2l_tester/models/unit_db.dart';
 import 'package:p2l_tester/screens/unit_db_screen.dart';
+import 'package:p2l_tester/services/auth_api.dart';
 import 'package:p2l_tester/services/auth_session.dart';
 import 'package:p2l_tester/services/unit_db_service.dart';
 
-UnitDbService _service(MockClientHandler handler) {
+UnitDbService _service(MockClientHandler handler, {bool admin = false}) {
   final session = AuthSession()
     ..status = AuthSessionStatus.loggedIn
-    ..apiBase = 'http://server:3001/api';
+    ..apiBase = 'http://server:3001/api'
+    ..user = AuthUser(username: 'radek', isAdmin: admin);
   return UnitDbService(session: session, client: MockClient(handler));
 }
 
@@ -156,6 +158,70 @@ void main() {
       });
       expect(card.driftWarnings,
           contains(predicate<String>((w) => w.contains('uloženo v jednotce'))));
+    });
+
+    test('driftWarnings nedupluje broker, když uloženo == hlásí', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1888',
+        'generation': 'new',
+        'status': 'active',
+        'mqtt_server': 'mqtt.config.smartci4.com',
+        'unit_config': {'mqttAddress': 'mqtt.config.smartci4.com'},
+        'desired': {
+          'broker': {'address': 'mqtt.dev.smartci4.com'},
+        },
+      });
+      // Jen jedno hlášení (kat.1 „uloženo"), ne duplicitní „jednotka hlásí".
+      expect(card.driftWarnings, hasLength(1));
+      expect(card.driftWarnings.single, contains('uloženo v jednotce'));
+    });
+
+    test('driftWarnings ukáže „uloženo" i „hlásí", když se běží liší', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1888',
+        'generation': 'new',
+        'status': 'active',
+        'mqtt_server': 'mqtt.bezi.cz',
+        'unit_config': {'mqttAddress': 'mqtt.ulozeno.cz'},
+        'desired': {
+          'broker': {'address': 'mqtt.dev.cz'},
+        },
+      });
+      // Tři různé hodnoty (evidence/uloženo/běží) → dvě různá hlášení.
+      expect(card.driftWarnings, hasLength(2));
+    });
+
+    test('driftWarnings: čekající změna (neviděno od změny) → nic', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1888',
+        'generation': 'new',
+        'status': 'active',
+        // Poslední pozorování PŘED změnou evidence → čekající, nehlásit.
+        'last_seen': '2026-07-22 16:00:00',
+        'desired_updated_at': '2026-07-22 16:59:00',
+        'mqtt_server': 'mqtt.config.smartci4.com',
+        'unit_config': {'mqttAddress': 'mqtt.config.smartci4.com'},
+        'desired': {
+          'broker': {'address': 'mqtt.dev.smartci4.com'},
+        },
+      });
+      expect(card.driftWarnings, isEmpty);
+    });
+
+    test('driftWarnings: viděno až po změně → nesoulad se hlásí', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1888',
+        'generation': 'new',
+        'status': 'active',
+        'last_seen': '2026-07-22 17:05:00',
+        'desired_updated_at': '2026-07-22 16:59:00',
+        'mqtt_server': 'mqtt.config.smartci4.com',
+        'unit_config': {'mqttAddress': 'mqtt.config.smartci4.com'},
+        'desired': {
+          'broker': {'address': 'mqtt.dev.smartci4.com'},
+        },
+      });
+      expect(card.driftWarnings, isNotEmpty);
     });
   });
 
@@ -323,6 +389,106 @@ void main() {
       expect(find.text('128'), findsNothing);
     });
 
+    testWidgets('výběr vše + hromadná editace evidence → POST /bulk/desired',
+        (tester) async {
+      http.Request? bulkPost;
+      final service = _service((r) async {
+        if (r.method == 'POST' &&
+            r.url.path.endsWith('/bulk/common-desired')) {
+          return http.Response('{"common":{}}', 200);
+        }
+        if (r.method == 'POST' && r.url.path.endsWith('/bulk/desired')) {
+          bulkPost = r;
+          return http.Response('{"ok":true,"count":2}', 200);
+        }
+        return http.Response(_listBody, 200);
+      });
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat vše'));
+      await tester.pumpAndSettle();
+      expect(find.text('Vybráno: 2'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Hromadné úpravy'));
+      await tester.pumpAndSettle();
+      // Non-admin → „Smazat" v menu není.
+      expect(find.text('Smazat'), findsNothing);
+      await tester.tap(find.text('Změnit parametry'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'SSID'), 'NovaSit');
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+
+      expect(bulkPost, isNotNull);
+      final body = jsonDecode(bulkPost!.body) as Map<String, dynamic>;
+      expect((body['ids'] as List).length, 2);
+      expect(body['fragment']['wifi']['ssid'], 'NovaSit');
+    });
+
+    testWidgets('hromadná editace předvyplní společné hodnoty vybraných',
+        (tester) async {
+      final service = _service((r) async {
+        if (r.method == 'POST' &&
+            r.url.path.endsWith('/bulk/common-desired')) {
+          return http.Response(
+              '{"common":{"wifi":{"ssid":"SpolecnaSit"},"brightness":50}}',
+              200);
+        }
+        return http.Response(_listBody, 200);
+      });
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat vše'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Hromadné úpravy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Změnit parametry'));
+      await tester.pumpAndSettle();
+
+      // Společná pole se předvyplnila (SSID + jas P2L LED).
+      expect(find.text('SpolecnaSit'), findsOneWidget);
+      expect(find.text('50'), findsOneWidget);
+    });
+
+    testWidgets('hromadné smazání (admin) → potvrzení počtu → POST /bulk/delete',
+        (tester) async {
+      http.Request? bulkDel;
+      final service = _service((r) async {
+        if (r.method == 'POST' && r.url.path.endsWith('/bulk/delete')) {
+          bulkDel = r;
+          return http.Response('{"ok":true,"count":2}', 200);
+        }
+        return http.Response(_listBody, 200);
+      }, admin: true);
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Vybrat vše'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Hromadné úpravy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Smazat'));
+      await tester.pumpAndSettle();
+
+      // Bez opsání počtu je tlačítko Smazat v dialogu neaktivní.
+      final delBtn = find.widgetWithText(FilledButton, 'Smazat');
+      expect(tester.widget<FilledButton>(delBtn).onPressed, isNull);
+      await tester.enterText(find.byType(TextField).last, '2');
+      await tester.pumpAndSettle();
+      await tester.tap(delBtn);
+      await tester.pumpAndSettle();
+
+      expect(bulkDel, isNotNull);
+      expect((jsonDecode(bulkDel!.body)['ids'] as List).length, 2);
+    });
+
     testWidgets('reset filtrů vrátí seznam na vše', (tester) async {
       final service = _service((r) async => http.Response(_listBody, 200));
       await tester.pumpWidget(
@@ -457,6 +623,46 @@ void main() {
       expect(body['broker']['password'], 'tajne'); // credentials zachované
       // Karta se obnovila a drift banner zmizel.
       expect(find.text('Nesouhlasí s evidencí'), findsNothing);
+    });
+
+    testWidgets('ruční editace evidence → PUT desired, hesla zachovaná',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      http.Request? desiredPut;
+      final service = _service((r) async {
+        if (r.method == 'PUT' && r.url.path.endsWith('/desired')) {
+          desiredPut = r;
+          return http.Response('{"ok":true,"id":"1209"}', 200);
+        }
+        if (r.url.path.endsWith('/history')) {
+          return http.Response('{"history":[]}', 200);
+        }
+        return http.Response(_cardBody, 200);
+      });
+      await tester.pumpWidget(MaterialApp(
+          home: UnitDbDetailScreen(unitId: '1209', service: service)));
+      await tester.pumpAndSettle();
+
+      // Tlačítko editace evidence v sekci Konfigurace (ne meta v AppBaru).
+      await tester.tap(find.byTooltip('Upravit evidenci ručně'));
+      await tester.pumpAndSettle();
+
+      // Přepiš adresu brokeru (předvyplněná z evidence mqtt.firma.cz).
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Adresa'), 'mqtt.zakaznik.cz');
+      await tester.tap(find.text('Uložit'));
+      await tester.pumpAndSettle();
+
+      expect(desiredPut, isNotNull);
+      final body = jsonDecode(desiredPut!.body) as Map<String, dynamic>;
+      expect(body['broker']['address'], 'mqtt.zakaznik.cz');
+      // Port a heslo předvyplněná z evidence → zachovaná (merge celý objekt).
+      expect(body['broker']['port'], 1883);
+      expect(body['broker']['password'], 'tajne');
+      expect(body['wifi']['ssid'], 'HALA');
     });
   });
 }

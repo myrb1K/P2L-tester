@@ -324,6 +324,32 @@ describe('listUnits', () => {
 
 // ─── Integrace: routes/units.js přes reálný HTTP server ────────────────
 
+describe('computeDrift — čekající změna (gate na pozorování)', () => {
+  test('neviděno od změny → drift false; viděno po změně → true', () => {
+    // observed se starým last_seen, pak evidence změněná „teď" (>> last_seen)
+    upsertObserved(db, '1400', {
+      mqttServer: 'mqtt.config.cz',
+      lastSeen: '2020-01-01T00:00:00Z',
+      generation: 'new',
+    });
+    updateDesired(db, '1400', { broker: { address: 'mqtt.dev.cz' } }, 'radek');
+    const row1 = listUnits(db).find((x) => x.id === '1400');
+    assert.equal(row1.drift, false);
+    // Řádek ukazuje ZAMÝŠLENÝ (nový) broker, ne starou observed adresu.
+    assert.equal(row1.broker, 'mqtt.dev.cz');
+
+    // Nové pozorování PO změně (broker pořád starý) → teď už skutečný drift
+    // a řádek ukazuje realitu (observed).
+    upsertObserved(db, '1400', {
+      mqttServer: 'mqtt.config.cz',
+      lastSeen: new Date().toISOString(),
+    });
+    const row2 = listUnits(db).find((x) => x.id === '1400');
+    assert.equal(row2.drift, true);
+    assert.equal(row2.broker, 'mqtt.config.cz');
+  });
+});
+
 function makeApp() {
   const app = express();
   app.use(express.json());
@@ -404,6 +430,91 @@ describe('routes/units', () => {
       await fetch(`${base}/1350/observed`, { method: 'PUT', headers: h, body: '{}' });
       r = await fetch(`${base}/128/change-id`, { method: 'POST', headers: h, body: JSON.stringify({ newId: '1350' }) });
       assert.equal(r.status, 409);
+    });
+  });
+
+  test('bulk desired/meta/delete přes /bulk/* endpointy', async () => {
+    await withServer(async (base) => {
+      const h = { Authorization: `Bearer ${tokenFor('radek', false)}`, 'Content-Type': 'application/json' };
+      for (const id of ['1201', '1202', '1203']) {
+        await fetch(`${base}/${id}/observed`, { method: 'PUT', headers: h, body: '{}' });
+      }
+
+      // bulk desired na 2 z 3
+      let r = await fetch(`${base}/bulk/desired`, {
+        method: 'POST', headers: h,
+        body: JSON.stringify({ ids: ['1201', '1202'], fragment: { wifi: { ssid: 'NovaSit', password: 'x' } } }),
+      });
+      assert.equal(r.status, 200);
+      assert.equal((await r.json()).count, 2);
+      let d = (await (await fetch(`${base}/1201`, { headers: h })).json()).unit;
+      assert.equal(d.desired.wifi.ssid, 'NovaSit');
+      d = (await (await fetch(`${base}/1203`, { headers: h })).json()).unit;
+      assert.equal(d.desired, null); // netknuto
+
+      // bulk meta na všechny 3
+      r = await fetch(`${base}/bulk/meta`, {
+        method: 'POST', headers: h,
+        body: JSON.stringify({ ids: ['1201', '1202', '1203'], meta: { status: 'retired', name: 'Zak' } }),
+      });
+      assert.equal(r.status, 200);
+      assert.equal((await r.json()).count, 3);
+      d = (await (await fetch(`${base}/1203`, { headers: h })).json()).unit;
+      assert.equal(d.status, 'retired');
+      assert.equal(d.name, 'Zak');
+
+      // neplatný status → 400 (transakce rollbacknutá)
+      r = await fetch(`${base}/bulk/meta`, {
+        method: 'POST', headers: h, body: JSON.stringify({ ids: ['1201'], meta: { status: 'xxx' } }),
+      });
+      assert.equal(r.status, 400);
+
+      // prázdné ids → 400
+      r = await fetch(`${base}/bulk/desired`, {
+        method: 'POST', headers: h, body: JSON.stringify({ ids: [], fragment: {} }),
+      });
+      assert.equal(r.status, 400);
+
+      // bulk delete: non-admin 403
+      r = await fetch(`${base}/bulk/delete`, {
+        method: 'POST', headers: h, body: JSON.stringify({ ids: ['1201', '1202'] }),
+      });
+      assert.equal(r.status, 403);
+
+      // admin smaže; tolerantní k neexistujícímu ID (9999 přeskočeno)
+      const ha = { Authorization: `Bearer ${tokenFor('admin', true)}`, 'Content-Type': 'application/json' };
+      r = await fetch(`${base}/bulk/delete`, {
+        method: 'POST', headers: ha, body: JSON.stringify({ ids: ['1201', '1202', '9999'] }),
+      });
+      assert.equal(r.status, 200);
+      assert.equal((await r.json()).count, 2);
+      assert.equal((await fetch(`${base}/1201`, { headers: ha })).status, 404);
+      assert.equal((await fetch(`${base}/1203`, { headers: ha })).status, 200);
+    });
+  });
+
+  test('desired hloubkový merge + /bulk/common-desired', async () => {
+    await withServer(async (base) => {
+      const h = { Authorization: `Bearer ${tokenFor('radek', false)}`, 'Content-Type': 'application/json' };
+      await fetch(`${base}/1301/desired`, { method: 'PUT', headers: h, body: JSON.stringify({ broker: { address: 'A', port: 1883, password: 'p' }, brightness: 50 }) });
+      await fetch(`${base}/1302/desired`, { method: 'PUT', headers: h, body: JSON.stringify({ broker: { address: 'A', port: 8883, password: 'p' }, brightness: 50 }) });
+
+      // Hloubkový merge: pošli jen adresu → port i heslo zůstanou.
+      let r = await fetch(`${base}/bulk/desired`, { method: 'POST', headers: h, body: JSON.stringify({ ids: ['1301'], fragment: { broker: { address: 'B' } } }) });
+      assert.equal(r.status, 200);
+      const d = (await (await fetch(`${base}/1301`, { headers: h })).json()).unit;
+      assert.equal(d.desired.broker.address, 'B');
+      assert.equal(d.desired.broker.port, 1883);
+      assert.equal(d.desired.broker.password, 'p');
+
+      // common-desired: adresa (B/A) i port (1883/8883) se liší → nejsou;
+      // heslo a jas shodné → jsou.
+      r = await fetch(`${base}/bulk/common-desired`, { method: 'POST', headers: h, body: JSON.stringify({ ids: ['1301', '1302'] }) });
+      const common = (await r.json()).common;
+      assert.equal(common.brightness, 50);
+      assert.equal(common.broker.password, 'p');
+      assert.ok(!('address' in (common.broker || {})));
+      assert.ok(!('port' in (common.broker || {})));
     });
   });
 });

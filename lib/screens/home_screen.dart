@@ -655,7 +655,11 @@ class _UnitListView extends StatelessWidget {
         } else if (diag.any((r) => r.status == BusScanStatus.unregistered)) {
           scanColor = Colors.grey;
         }
+        // ⚠ jen u aktivně připojených jednotek — „Nesoulad" znamená, že jednotku
+        // vidím a hlásí něco jiného než evidence. Offline / přenastavená na jiný
+        // broker (mimo dohled) → drift nehlásíme (viz UnitDbCard.driftWarnings).
         final hasDbDrift = (kIsWeb || AuthSession.instance.isLoggedIn) &&
+            unit.isOnline &&
             state.unitHasDbDrift(unit.id);
         return _UnitCard(
           key: ValueKey(unit.id),

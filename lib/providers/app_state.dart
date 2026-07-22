@@ -1299,6 +1299,14 @@ class AppState extends ChangeNotifier {
     if (_selectedUnits.isEmpty) return;
     final targets = _selectedUnits.toList();
     var sent = 0;
+    var confirmed = 0; // jednotky, které potvrdily příjem (ack)
+    // Jediná vybraná jednotka → hláška ji pojmenuje ID místo počtu.
+    final single = targets.length == 1
+        ? (int.tryParse(_normUnitId(targets.first))?.toString() ??
+            _normUnitId(targets.first))
+        : null;
+    // Genitiv po „u": 1 → „jednotky", jinak „jednotek".
+    String jed(int n) => n == 1 ? 'jednotky' : 'jednotek';
     for (final unitId in targets) {
       final id = _normUnitId(unitId);
       _sendTrackedConfigCmd(
@@ -1324,20 +1332,31 @@ class AppState extends ChangeNotifier {
             },
           }));
           _scheduleDbDriftRefresh();
-          // Jednotka se po změně brokera restartuje → po návratu si observed
-          // znovu přečteme, ať nesvítí falešný drift ze starého snapshotu.
-          _expectRestartReread(id);
+          // Jednotka opustila tenhle broker → ať zmizí ze seznamu (ne jen
+          // zšedne). Když se někde znovu ozve (i po přepnutí appky na nový
+          // broker), přijde jako nová a auto-fetch (get_param + GET-DEVICES +
+          // GET-CONFIG) se spustí znovu přes cestu prvního ALIVE.
+          _forgetUnit(id);
+          confirmed++;
+          // Hlavní status bar čte _statusMessage (ne _setStatus, které míří na
+          // status detailu devices) — jinak by zůstala viset „čekám na potvrzení".
+          _statusMessage = single != null
+              ? 'U jednotky $single potvrzen příjem požadavku na změnu brokera "${profile.name}"'
+              : 'U $confirmed ${jed(confirmed)} potvrzen příjem požadavku na změnu brokera "${profile.name}"';
         },
       );
       sent++;
-      _statusMessage = 'Broker odesláno: $sent / ${targets.length} (${profile.name})';
-      notifyListeners();
       if (sent < targets.length) {
         await Future.delayed(const Duration(milliseconds: 100));
       }
     }
-    _statusMessage =
-        'Broker "${profile.name}" odeslán na $sent jednotek (čekám na potvrzení)';
+    // Nová generace potvrzuje ackem asynchronně (po smyčce) — než dorazí,
+    // informuj, že se čeká; potvrzené počítá průběžně onConfirmed výše.
+    if (confirmed < sent) {
+      _statusMessage = single != null
+          ? 'Broker "${profile.name}" odeslán na jednotku $single, čekám na potvrzení…'
+          : 'Broker "${profile.name}" odeslán na $sent ${jed(sent)}, čekám na potvrzení…';
+    }
     notifyListeners();
   }
 
@@ -1437,7 +1456,9 @@ class AppState extends ChangeNotifier {
             'wifi': {'ssid': ssid, 'password': password},
           }));
           _scheduleDbDriftRefresh();
-          // Změna WiFi jednotku restartuje → po návratu re-read observed.
+          // Změna WiFi jednotku restartuje → hned offline (zmizí z „připojených")
+          // + po návratu re-read observed.
+          _markUnitOfflineUntilAlive(id);
           _expectRestartReread(id);
         },
       );
@@ -1525,26 +1546,7 @@ class AppState extends ChangeNotifier {
 
     // Po set_id se firmware restartuje, na starý topic už neodpoví.
     // Pročistit lokální stav — nová entry přijde s prvním ALIVE z new ID.
-    _units.remove(id);
-    _selectedUnits.remove(id);
-    _initialFetchDone.remove(id);
-    _awaitingAliveAfterRestart.remove(id);
-    _restartSentAt.remove(id);
-    _pendingRestart.remove(id);
-    _unitModules.remove(id);
-    _unitModulesFetchedAt.remove(id);
-    _unitModulesPending.remove(id);
-    _unitBusScan.remove(id);
-    _unitBusScanPending.remove(id);
-    _unitBusScanScope.remove(id);
-    _unitBusScanId.remove(id);
-    _pendingAddVerify.remove(id);
-    _pendingDispAddrAfterSetId.remove(id);
-    for (final key in _busProbes.keys.where((k) => k.startsWith('$id:')).toList()) {
-      final c = _busProbes.remove(key);
-      if (c != null && !c.isCompleted) c.complete(null);
-    }
-    _unitDeviceFaults.remove(id);
+    _forgetUnit(id);
 
     final newIdStr = newId.toString().padLeft(4, '0');
     _statusMessage =
@@ -1751,6 +1753,34 @@ class AppState extends ChangeNotifier {
     _markUnitOfflineUntilAlive(id);
     _setStatus('Restart jednotky ${int.tryParse(id)?.toString() ?? id} odeslán');
     notifyListeners();
+  }
+
+  /// Zapomene jednotku z živého seznamu i pomocných map. Použití: po změně ID
+  /// (nová entry přijde s novým ID) a po potvrzené změně brokera (jednotka
+  /// opustila tenhle broker → zmizí ze seznamu; když se někde znovu ozve,
+  /// přijde jako nová a auto-fetch se spustí znovu přes cestu prvního ALIVE).
+  void _forgetUnit(String id) {
+    _units.remove(id);
+    _selectedUnits.remove(id);
+    _initialFetchDone.remove(id);
+    _awaitingAliveAfterRestart.remove(id);
+    _restartSentAt.remove(id);
+    _pendingRestart.remove(id);
+    _unitModules.remove(id);
+    _unitModulesFetchedAt.remove(id);
+    _unitModulesPending.remove(id);
+    _unitBusScan.remove(id);
+    _unitBusScanPending.remove(id);
+    _unitBusScanScope.remove(id);
+    _unitBusScanId.remove(id);
+    _pendingAddVerify.remove(id);
+    _pendingDispAddrAfterSetId.remove(id);
+    for (final key in _busProbes.keys.where((k) => k.startsWith('$id:')).toList()) {
+      final c = _busProbes.remove(key);
+      if (c != null && !c.isCompleted) c.complete(null);
+    }
+    _unitDeviceFaults.remove(id);
+    _wavedUnitIds.remove(id);
   }
 
   /// Po odeslání RESTART nastaví jednotku do offline stavu (čítač zamrzne na
