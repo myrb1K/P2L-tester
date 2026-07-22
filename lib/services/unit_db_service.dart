@@ -48,8 +48,8 @@ class UnitDbService {
   final Map<String, DateTime> _lastThrottledPush = {};
 
   UnitDbService({AuthSession? session, http.Client? client})
-      : _session = session ?? AuthSession.instance,
-        _client = client ?? createAuthClient();
+    : _session = session ?? AuthSession.instance,
+      _client = client ?? createAuthClient();
 
   /// Globální instance pro AppState.
   static final UnitDbService instance = UnitDbService();
@@ -57,6 +57,11 @@ class UnitDbService {
   /// Web je za AuthGate vždy přihlášený (session cookie), nativ podle
   /// opt-in loginu.
   bool get _enabled => kIsWeb || _session.isLoggedIn;
+
+  /// Je přihlášený uživatel admin? Rozhoduje o zobrazení akce „Smazat"
+  /// (server ji stejně vynucuje — tohle je jen UX gating). Na webu neznáme
+  /// claim bez `/me`, proto povolíme a spolehneme se na server (403).
+  bool get isAdmin => kIsWeb || (_session.user?.isAdmin ?? false);
 
   String get _base => kIsWeb ? authApiBase : _session.apiBase;
 
@@ -103,8 +108,7 @@ class UnitDbService {
       },
       if (includeConfig && unit.unitConfig != null)
         'unitConfig': unit.unitConfig,
-      if (modules != null)
-        'devices': modules.map((m) => m.toJson()).toList(),
+      if (modules != null) 'devices': modules.map((m) => m.toJson()).toList(),
     };
     await _put('/units/${unit.id}/observed', body);
   }
@@ -226,6 +230,64 @@ class UnitDbService {
     _throwForStatus(res);
   }
 
+  /// Hromadná editace evidence (desired) vybraných jednotek — jeden POST,
+  /// server řeší v transakci. Vrací počet zpracovaných jednotek.
+  Future<int> bulkSaveDesired(List<String> ids, Map<String, dynamic> fragment) {
+    return _bulkPost('/units/bulk/desired', {'ids': ids, 'fragment': fragment});
+  }
+
+  /// Hromadná editace meta polí (stav / zákazník / umístění).
+  Future<int> bulkSaveMeta(List<String> ids, Map<String, dynamic> meta) {
+    return _bulkPost('/units/bulk/meta', {'ids': ids, 'meta': meta});
+  }
+
+  /// Hromadné smazání jednotek (jen admin — server vynucuje, 403 → výjimka).
+  Future<int> bulkDelete(List<String> ids) {
+    return _bulkPost('/units/bulk/delete', {'ids': ids});
+  }
+
+  /// Společné hodnoty evidence vybraných jednotek (pro předvyplnění dialogu
+  /// hromadné editace). Vrací fragment jen s poli, která mají všechny shodná.
+  Future<Map<String, dynamic>> bulkCommonDesired(List<String> ids) async {
+    final http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_base/units/bulk/common-desired'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'ids': ids}),
+          )
+          .timeout(_timeout);
+    } on TimeoutException {
+      throw const UnitDbException('Server neodpověděl (timeout).');
+    } catch (e) {
+      throw UnitDbException('Server nedostupný: $e');
+    }
+    _throwForStatus(res);
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    return (json['common'] as Map?)?.cast<String, dynamic>() ?? {};
+  }
+
+  Future<int> _bulkPost(String path, Map<String, dynamic> body) async {
+    final http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_base$path'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(_timeout);
+    } on TimeoutException {
+      throw const UnitDbException('Server neodpověděl (timeout).');
+    } catch (e) {
+      throw UnitDbException('Server nedostupný: $e');
+    }
+    _throwForStatus(res);
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    return json['count'] as int? ?? (body['ids'] as List).length;
+  }
+
   Future<Map<String, dynamic>> _getJson(String path) async {
     final http.Response res;
     try {
@@ -243,7 +305,8 @@ class UnitDbService {
     if (res.statusCode == 200) return;
     if (res.statusCode == 401) {
       throw const UnitDbException(
-          'Nepřihlášený — obnov přihlášení v Nastavení → Účet.');
+        'Nepřihlášený — obnov přihlášení v Nastavení → Účet.',
+      );
     }
     if (res.statusCode == 404) {
       throw const UnitDbException('Jednotka v databázi není.');

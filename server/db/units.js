@@ -167,7 +167,27 @@ function getHistory(db, rawId, limit = 200) {
 //   1) evidence ↔ uloženo v NVS (mqttAddress/SSID z GET-CONFIG)
 //   2) uloženo ↔ reálně běží (ip↔actualIp, SSID↔actualSSID) — i bez desired
 //   3) evidence ↔ kde ji vidíme (mqtt_server / seen_on_broker)
+// SQLite `datetime('now')` ('YYYY-MM-DD HH:MM:SS', UTC bez tz) i ISO string
+// z appky ('…T…Z') → Date v UTC. Zrcadlí klientský _parseTime.
+function parseTs(v) {
+  if (typeof v !== 'string' || !v) return null;
+  let s = v.includes('T') ? v : `${v.replace(' ', 'T')}Z`;
+  if (!s.endsWith('Z') && !s.includes('+')) s = `${s}Z`;
+  const t = new Date(s);
+  return Number.isNaN(t.getTime()) ? null : t;
+}
+
 function computeDrift(desiredJson, row) {
+  // „Nesoulad" má smysl jen když jsme jednotku viděli AŽ PO poslední změně
+  // evidence. Čerstvá, ještě nepozorovaná změna (jednotka přešla na jiný broker
+  // / je offline) = čekající → žádný drift (potvrzeno ackem, ale realita ještě
+  // nepřečtena). Platí jen když evidence existuje.
+  if (desiredJson && row.desired_updated_at) {
+    const changed = parseTs(row.desired_updated_at);
+    const seen = parseTs(row.last_seen);
+    if (changed && (!seen || seen < changed)) return false;
+  }
+
   let cfg = null;
   if (row.unit_config_json) {
     try { cfg = JSON.parse(row.unit_config_json); } catch { cfg = null; }
@@ -225,7 +245,7 @@ function listUnits(db) {
       `SELECT id, generation, mac, name, location, status, last_seen, firmware,
               ip, battery, updated_at,
               ssid, mqtt_server, mqtt_port, brightness, seen_on_broker,
-              unit_config_json, desired_json
+              unit_config_json, desired_json, desired_updated_at
        FROM units ORDER BY CAST(id AS INTEGER)`
     )
     .all()
@@ -233,14 +253,18 @@ function listUnits(db) {
       const {
         desired_json: desiredJson,
         unit_config_json: unitConfigJson,
+        desired_updated_at: desiredUpdatedAt, // jen pro výpočet, nevrací se
         ssid, mqtt_server: mqttServer, mqtt_port: mqttPort, brightness,
         seen_on_broker: seenOnBroker,
         ...rest
       } = row;
       // Adresa brokeru pro řádek seznamu (není tajná — desired_json s hesly
-      // dál nevracíme). Priorita: uloženo v NVS (GET-CONFIG) → hlášeno
-      // jednotkou (get_param) → kde ji appka viděla (ALIVE).
+      // dál nevracíme). Když je evidence čerstvě změněná a jednotku jsme od té
+      // doby neviděli (odešla na nový broker), ukaž ZAMÝŠLENÝ broker z evidence
+      // — jinak by řádek dál svítil starou adresou. Jinak realita: uloženo
+      // v NVS (GET-CONFIG) → hlášeno jednotkou (get_param) → kde ji appka viděla.
       let cfgBroker = null;
+      let desiredBroker = null;
       if (unitConfigJson) {
         try {
           cfgBroker = JSON.parse(unitConfigJson).mqttAddress || null;
@@ -248,7 +272,20 @@ function listUnits(db) {
           /* poškozený JSON → ignoruj */
         }
       }
-      const broker = cfgBroker || mqttServer || seenOnBroker || null;
+      if (desiredJson) {
+        try {
+          const d = JSON.parse(desiredJson);
+          desiredBroker = (d && d.broker && d.broker.address) || null;
+        } catch {
+          /* poškozený JSON → ignoruj */
+        }
+      }
+      const observedBroker = cfgBroker || mqttServer || seenOnBroker || null;
+      const changed = parseTs(desiredUpdatedAt);
+      const seen = parseTs(row.last_seen);
+      const pending = desiredBroker && changed && (!seen || seen < changed);
+      const broker =
+        (pending ? desiredBroker : null) || observedBroker || desiredBroker || null;
       return { ...rest, broker, drift: computeDrift(desiredJson, row) };
     });
 }
@@ -343,7 +380,14 @@ function updateDesired(db, rawId, fragment, username) {
   const id = ensureUnit(db, rawId);
   const row = db.prepare('SELECT desired_json FROM units WHERE id = ?').get(id);
   const current = row?.desired_json ? JSON.parse(row.desired_json) : {};
-  const merged = { ...current, ...fragment };
+  // Hloubkový merge o jednu úroveň: vnořené objekty (broker, wifi) se slévají
+  // po podklíčích, ne nahrazují vcelku — jinak by částečný fragment (např. jen
+  // {broker:{address}}) u hromadné editace smazal ostatní podpole (port/heslo).
+  const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  const merged = { ...current };
+  for (const [k, v] of Object.entries(fragment)) {
+    merged[k] = isObj(v) && isObj(merged[k]) ? { ...merged[k], ...v } : v;
+  }
   db.prepare(
     `UPDATE units SET desired_json = ?, desired_updated_at = datetime('now'),
      desired_updated_by = ?, updated_at = datetime('now') WHERE id = ?`
@@ -407,6 +451,86 @@ function deleteUnit(db, rawId) {
   tx();
 }
 
+// ── Hromadné operace (bulk endpointy) ──────────────────────────────────────
+// Vše v jedné transakci (atomické — buď projde vše, nebo nic). desired/meta
+// reuse per-unit logiky (ensureUnit + historie per jednotka). Vrací počet
+// zpracovaných jednotek.
+function requireIds(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new UnitOpError('invalid_body', 'ids musí být neprázdné pole');
+  }
+}
+
+function bulkUpdateDesired(db, ids, fragment, username) {
+  requireIds(ids);
+  const tx = db.transaction((list) => {
+    for (const rawId of list) updateDesired(db, rawId, fragment, username);
+  });
+  tx(ids);
+  return ids.length;
+}
+
+function bulkUpdateMeta(db, ids, meta, username) {
+  requireIds(ids);
+  const tx = db.transaction((list) => {
+    for (const rawId of list) updateMeta(db, rawId, meta, username);
+  });
+  tx(ids);
+  return ids.length;
+}
+
+// Společné hodnoty evidence napříč vybranými jednotkami — pro předvyplnění
+// dialogu hromadné editace. Každé pole (i vnořené broker/wifi po podklíčích)
+// se zařadí jen když ho mají VŠECHNY vybrané a je shodné; jinak se vynechá
+// (v dialogu prázdné). Heslo se vrátí jen když ho mají všichni stejné.
+function commonDesired(db, ids) {
+  requireIds(ids);
+  const desireds = ids.map((rawId) => {
+    const id = normalizeUnitId(rawId);
+    const row = db.prepare('SELECT desired_json FROM units WHERE id = ?').get(id);
+    return row && row.desired_json ? JSON.parse(row.desired_json) : {};
+  });
+  const allEqual = (vals) =>
+    vals.every((v) => v !== undefined) && vals.every((v) => v === vals[0]);
+  const common = {};
+  for (const k of ['brightness', 'dispBrightness']) {
+    const vals = desireds.map((d) => d[k]);
+    if (allEqual(vals)) common[k] = vals[0];
+  }
+  for (const [grp, subs] of Object.entries({
+    broker: ['address', 'port', 'user', 'password'],
+    wifi: ['ssid', 'password'],
+  })) {
+    const obj = {};
+    for (const s of subs) {
+      const vals = desireds.map((d) =>
+        d[grp] && typeof d[grp] === 'object' ? d[grp][s] : undefined
+      );
+      if (allEqual(vals)) obj[s] = vals[0];
+    }
+    if (Object.keys(obj).length > 0) common[grp] = obj;
+  }
+  return common;
+}
+
+// Tolerantní k chybějícím ID — seznam pochází z klienta a mezitím mohlo ID
+// zmizet; přeskočíme ho místo abychom shodili celou dávku.
+function bulkDeleteUnits(db, ids) {
+  requireIds(ids);
+  let n = 0;
+  const tx = db.transaction((list) => {
+    for (const rawId of list) {
+      const id = normalizeUnitId(rawId);
+      if (!unitExists(db, id)) continue;
+      db.prepare('DELETE FROM unit_history WHERE unit_id = ?').run(id);
+      db.prepare('DELETE FROM units WHERE id = ?').run(id);
+      n++;
+    }
+  });
+  tx(ids);
+  return n;
+}
+
 module.exports = {
   openUnitsDb,
   UNITS_DB_PATH,
@@ -422,6 +546,10 @@ module.exports = {
   updateMeta,
   changeUnitId,
   deleteUnit,
+  bulkUpdateDesired,
+  bulkUpdateMeta,
+  bulkDeleteUnits,
+  commonDesired,
   getHistory,
   addHistory,
 };

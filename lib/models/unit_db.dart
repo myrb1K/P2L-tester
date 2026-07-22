@@ -178,7 +178,19 @@ class UnitDbCard {
   ///   1) evidence ↔ uloženo v NVS (dorazila naše konfigurace?)
   ///   2) uloženo ↔ reálně běží (statická IP, ale jede DHCP / jiné SSID)
   ///   3) evidence ↔ kde ji vidíme (hlásí se přes jiný broker)
+  /// „Nesoulad" má smysl jen když jsme jednotku viděli AŽ PO poslední změně
+  /// evidence. Čerstvá, ještě nepozorovaná změna (jednotka přešla na jiný
+  /// broker / je offline) je „čekající" — potvrzená ackem, ale realita ještě
+  /// nepřečtena → nic nehlásíme. Neznámý čas změny → neblokuj.
+  bool get _observedSinceChange {
+    final changed = _parseTime(desiredUpdatedAt);
+    if (changed == null) return true;
+    if (lastSeen == null) return false;
+    return !lastSeen!.isBefore(changed);
+  }
+
   List<String> get driftWarnings {
+    if (!_observedSinceChange) return const [];
     final out = <String>[];
     final broker = desired?['broker'];
     final wifi = desired?['wifi'];
@@ -224,7 +236,10 @@ class UnitDbCard {
     if (broker is Map) {
       final want = broker['address'];
       if (want is String && want.isNotEmpty) {
-        if (mqttServer != null && want != mqttServer) {
+        // „jednotka hlásí" (running) ukaž jen když přidává novou informaci —
+        // tj. liší se od toho, co je uložené v NVS (kat. 1). Když se běžící
+        // broker shoduje s uloženým, kat. 1 už to řekla → nedupluj.
+        if (mqttServer != null && want != mqttServer && mqttServer != cfgBroker) {
           out.add('Broker: evidence „$want", jednotka hlásí „$mqttServer"');
         }
         if (seenOnBroker != null && want != seenOnBroker && seenOnBroker != mqttServer) {

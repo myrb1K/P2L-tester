@@ -22,6 +22,10 @@ const {
   updateMeta,
   changeUnitId,
   deleteUnit,
+  bulkUpdateDesired,
+  bulkUpdateMeta,
+  bulkDeleteUnits,
+  commonDesired,
   getHistory,
 } = require('../db/units');
 
@@ -105,6 +109,35 @@ function makeRouter(db) {
     }
     deleteUnit(db, req.params.id);
     res.status(204).end();
+  }));
+
+  // ── Hromadné operace ──────────────────────────────────────────────────
+  // POST (ne PUT/DELETE) + pevné cesty /bulk/* → nekolidují s /:id routami.
+  router.post('/bulk/desired', wrap((req, res) => {
+    const { ids, fragment } = req.body || {};
+    const count = bulkUpdateDesired(db, ids, fragment, req.user.username);
+    res.json({ ok: true, count });
+  }));
+
+  router.post('/bulk/meta', wrap((req, res) => {
+    const { ids, meta } = req.body || {};
+    const count = bulkUpdateMeta(db, ids, meta || {}, req.user.username);
+    res.json({ ok: true, count });
+  }));
+
+  // Společné hodnoty evidence vybraných (předvyplnění dialogu hromadné editace).
+  router.post('/bulk/common-desired', wrap((req, res) => {
+    const { ids } = req.body || {};
+    res.json({ common: commonDesired(db, ids) });
+  }));
+
+  router.post('/bulk/delete', wrap((req, res) => {
+    if (!req.user.isAdmin) {
+      return res.status(403).json({ error: 'admin_required' });
+    }
+    const { ids } = req.body || {};
+    const count = bulkDeleteUnits(db, ids);
+    res.json({ ok: true, count });
   }));
 
   return router;
