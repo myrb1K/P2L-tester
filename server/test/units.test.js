@@ -24,6 +24,9 @@ const {
   changeUnitId,
   deleteUnit,
   getHistory,
+  exportAll,
+  exportUnits,
+  importUnits,
 } = require('../db/units');
 const unitsRoutes = require('../routes/units');
 
@@ -350,6 +353,72 @@ describe('computeDrift — čekající změna (gate na pozorování)', () => {
   });
 });
 
+describe('exportAll / importUnits (záloha / obnova)', () => {
+  test('export → import (upsert): existující přepíše, nové přidá, cizí nechá', () => {
+    // Zdrojová DB: dvě jednotky s desired (heslo), meta a historií.
+    upsertObserved(db, '1209', { firmware: 'FW1', generation: 'new' });
+    updateDesired(db, '1209', { broker: { address: 'mqtt.a.cz', password: 'tajne' } }, 'radek');
+    updateMeta(db, '1209', { name: 'Sklad A', status: 'active' }, 'radek');
+    upsertObserved(db, '128', { firmware: 'OLD', generation: 'old' });
+
+    const dump = exportAll(db);
+    assert.equal(dump.length, 2);
+    const u1209 = dump.find((u) => u.id === '1209');
+    // Kompletní záloha nese reálné heslo i historii.
+    assert.equal(u1209.desired.broker.password, 'tajne');
+    assert.ok(Array.isArray(u1209.history) && u1209.history.length >= 2);
+
+    // Cílová DB: 1209 s jiným jménem (přepíše se) + cizí 999 (zůstane).
+    const db2 = openUnitsDb(':memory:');
+    updateMeta(db2, '1209', { name: 'STARÉ' }, 'x');
+    updateMeta(db2, '999', { name: 'Cizí' }, 'x');
+
+    const result = importUnits(db2, dump, 'importer');
+    assert.deepEqual(result, { created: 1, updated: 1, total: 2 });
+
+    // 1209 přepsáno ze zálohy (jméno, heslo v desired).
+    const got = getUnit(db2, '1209');
+    assert.equal(got.name, 'Sklad A');
+    assert.equal(got.desired.broker.password, 'tajne');
+    // 128 nově přidáno.
+    assert.equal(getUnit(db2, '128').firmware, 'OLD');
+    // Cizí 999 (mimo zálohu) zůstalo nedotčené.
+    assert.equal(getUnit(db2, '999').name, 'Cizí');
+    db2.close();
+  });
+
+  test('opakovaný import je idempotentní (historie se neduplikuje)', () => {
+    upsertObserved(db, '1300', { firmware: 'FW', generation: 'new' });
+    updateDesired(db, '1300', { brightness: 40 }, 'radek');
+    const dump = exportAll(db);
+    const histLen = dump[0].history.length;
+
+    const db2 = openUnitsDb(':memory:');
+    importUnits(db2, dump, 'imp');
+    importUnits(db2, dump, 'imp');
+    assert.equal(getHistory(db2, '1300').length, histLen);
+    db2.close();
+  });
+
+  test('importUnits odmítne ne-pole', () => {
+    assert.throws(() => importUnits(db, { nope: true }, 'x'), (e) => e.code === 'invalid_body');
+  });
+
+  test('exportUnits(ids): jen vybrané, tolerantní k chybějícímu ID', () => {
+    upsertObserved(db, '1209', { firmware: 'A', generation: 'new' });
+    upsertObserved(db, '1210', { firmware: 'B', generation: 'new' });
+    upsertObserved(db, '1211', { firmware: 'C', generation: 'new' });
+
+    // Podmnožina + normalizace ID + chybějící 9999 se přeskočí.
+    const sub = exportUnits(db, ['001209', '1211', '9999']);
+    assert.deepEqual(sub.map((u) => u.id).sort(), ['1209', '1211']);
+    // null → celá DB.
+    assert.equal(exportUnits(db, null).length, 3);
+    // prázdný seznam → chyba.
+    assert.throws(() => exportUnits(db, []), (e) => e.code === 'invalid_body');
+  });
+});
+
 function makeApp() {
   const app = express();
   app.use(express.json());
@@ -515,6 +584,44 @@ describe('routes/units', () => {
       assert.equal(common.broker.password, 'p');
       assert.ok(!('address' in (common.broker || {})));
       assert.ok(!('port' in (common.broker || {})));
+    });
+  });
+
+  test('GET /export + POST /import (round-trip, format check)', async () => {
+    await withServer(async (base) => {
+      const h = { Authorization: `Bearer ${tokenFor('radek', false)}`, 'Content-Type': 'application/json' };
+      await fetch(`${base}/1500/observed`, { method: 'PUT', headers: h, body: JSON.stringify({ firmware: 'FW' }) });
+      await fetch(`${base}/1500/desired`, { method: 'PUT', headers: h, body: JSON.stringify({ broker: { address: 'mqtt.x.cz', password: 'p' } }) });
+
+      await fetch(`${base}/1550/observed`, { method: 'PUT', headers: h, body: JSON.stringify({ firmware: 'FW2' }) });
+
+      // GET /export = celá DB (2 jednotky), nese formát + reálné heslo.
+      const dump = await (await fetch(`${base}/export`, { headers: h })).json();
+      assert.equal(dump.format, 'p2l-tester.unit-db');
+      assert.equal(dump.units.length, 2);
+      assert.equal(dump.units.find((u) => u.id === '1500').desired.broker.password, 'p');
+
+      // POST /export {ids} = jen vybraná jednotka.
+      const sub = await (await fetch(`${base}/export`, {
+        method: 'POST', headers: h, body: JSON.stringify({ ids: ['1500'] }),
+      })).json();
+      assert.equal(sub.units.length, 1);
+      assert.equal(sub.units[0].id, '1500');
+      // Odeber přidanou jednotku, ať následující round-trip sedí na 1.
+      dump.units = dump.units.filter((u) => u.id === '1500');
+
+      // Neznámý formát → 400.
+      let r = await fetch(`${base}/import`, { method: 'POST', headers: h, body: JSON.stringify({ units: [] }) });
+      assert.equal(r.status, 400);
+
+      // Import upsert: 1500 aktualizuje, 1600 přidá.
+      dump.units.push({ id: '1600', generation: 'new', name: 'Nová' });
+      r = await fetch(`${base}/import`, { method: 'POST', headers: h, body: JSON.stringify(dump) });
+      assert.equal(r.status, 200);
+      const body = await r.json();
+      assert.equal(body.created, 1);
+      assert.equal(body.updated, 1);
+      assert.equal((await (await fetch(`${base}/1600`, { headers: h })).json()).unit.name, 'Nová');
     });
   });
 });

@@ -329,7 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             Icon(Icons.inventory_2_outlined, size: 18),
                             SizedBox(width: 8),
-                            Text('Databáze jednotek'),
+                            Text('Databáze P2L modulů'),
                           ],
                         ),
                       ),

@@ -47,6 +47,9 @@ CRUD vrstva [db/units.js](db/units.js)). Vše za přihlášením; ID se normaliz
 | PUT | `/api/units/:id/meta` | Partial update meta (name / location / note / status ∈ active·faulty·stock·retired) + historie |
 | POST | `/api/units/:id/change-id` | Body `{newId}` — přenese kartu vč. historie na nové ID (409 při kolizi) |
 | DELETE | `/api/units/:id` | Smaže kartu + historii — **jen isAdmin** (403 jinak) |
+| GET | `/api/units/export` | Kompletní záloha celé DB — všechny karty (observed + desired vč. hesel + meta) + historie; `{format:'p2l-tester.unit-db', version, exportedAt, units:[…]}`. Registrováno **před** `/:id` (jinak by spadlo do `/:id`) |
+| POST | `/api/units/export` | Záloha **jen vybraných** jednotek — body `{ids:[…]}` (1 nebo víc); stejný formát jako GET. Tolerantní k chybějícím ID (přeskočí) |
+| POST | `/api/units/import` | Obnova ze zálohy — **upsert po ID** (existující přepíše snímkem, nové přidá, cizí nechá; historie jednotky se nahradí → idempotentní). Ověřuje `format`; vrací `{created, updated, total}` |
 
 ## Testy
 

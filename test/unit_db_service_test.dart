@@ -170,6 +170,67 @@ void main() {
     expect(jsonDecode(r.body), {'newId': '1350'});
   });
 
+  test('exportDatabase: GET /units/export vrací dekódovaný JSON', () async {
+    final session = AuthSession()
+      ..status = AuthSessionStatus.loggedIn
+      ..apiBase = 'http://server:3001/api';
+    http.Request? seen;
+    final service = UnitDbService(
+      session: session,
+      client: MockClient((req) async {
+        seen = req;
+        return http.Response(
+          '{"format":"p2l-tester.unit-db","units":[{"id":"1209"}]}',
+          200,
+        );
+      }),
+    );
+    final backup = await service.exportDatabase();
+    expect(seen!.method, 'GET');
+    expect(seen!.url.toString(), 'http://server:3001/api/units/export');
+    expect(backup['format'], 'p2l-tester.unit-db');
+    expect((backup['units'] as List), hasLength(1));
+  });
+
+  test('importDatabase: POST /units/import s tělem, vrací počty', () async {
+    final session = AuthSession()
+      ..status = AuthSessionStatus.loggedIn
+      ..apiBase = 'http://server:3001/api';
+    http.Request? seen;
+    final service = UnitDbService(
+      session: session,
+      client: MockClient((req) async {
+        seen = req;
+        return http.Response('{"ok":true,"created":1,"updated":2,"total":3}', 200);
+      }),
+    );
+    final res = await service.importDatabase({
+      'format': 'p2l-tester.unit-db',
+      'units': [
+        {'id': '1209'},
+      ],
+    });
+    expect(seen!.method, 'POST');
+    expect(seen!.url.path, '/api/units/import');
+    expect(jsonDecode(seen!.body)['format'], 'p2l-tester.unit-db');
+    expect(res['created'], 1);
+    expect(res['updated'], 2);
+  });
+
+  test('exportDatabase: 403 → UnitDbException', () async {
+    final session = AuthSession()
+      ..status = AuthSessionStatus.loggedIn
+      ..apiBase = 'http://server:3001/api';
+    final service = UnitDbService(
+      session: session,
+      client: MockClient((_) async => http.Response('{"error":"forbidden"}', 403)),
+    );
+    expect(
+      () => service.exportDatabase(),
+      throwsA(isA<UnitDbException>()),
+    );
+  });
+
   test('výjimka klienta se polyká (fire-and-forget)', () async {
     final session = AuthSession()
       ..status = AuthSessionStatus.loggedIn
