@@ -9,9 +9,13 @@
 // („Nesouhlasí s evidencí").
 // Server nedostupný → hláška + „Zkusit znovu" (UnitDbException).
 
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/unit_db.dart';
+import '../services/file_export.dart';
 import '../services/unit_db_service.dart';
 
 // ─── Seznam ────────────────────────────────────────────────────────────
@@ -243,6 +247,182 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
     }
   }
 
+  /// Hamburger v AppBaru — import / export databáze (celá i jen vybrané).
+  Widget _dbMenuButton() {
+    final n = _selected.length;
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.menu),
+      tooltip: 'Import / export databáze',
+      onSelected: (v) {
+        switch (v) {
+          case 'export':
+            _exportDatabase();
+          case 'export_selected':
+            _exportDatabase(ids: _selected.toList());
+          case 'import':
+            _importDatabase();
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'export',
+          child: ListTile(
+            leading: Icon(Icons.file_download_outlined),
+            title: Text('Exportovat databázi'),
+            subtitle: Text('Kompletní záloha do JSON'),
+          ),
+        ),
+        if (n > 0)
+          PopupMenuItem(
+            value: 'export_selected',
+            child: ListTile(
+              leading: const Icon(Icons.checklist),
+              title: const Text('Exportovat vybrané'),
+              subtitle: Text('$n vybraných · záloha do JSON'),
+            ),
+          ),
+        const PopupMenuItem(
+          value: 'import',
+          child: ListTile(
+            leading: Icon(Icons.file_upload_outlined),
+            title: Text('Importovat databázi'),
+            subtitle: Text('Sloučit ze zálohy (upsert)'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Stáhne zálohu ze serveru a uloží do JSON souboru. [ids] == null → celá
+  /// DB (hamburger); neprázdný seznam → jen vybrané jednotky (bulk menu).
+  Future<void> _exportDatabase({List<String>? ids}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final Map<String, dynamic> backup;
+    try {
+      backup = await _service.exportDatabase(ids: ids);
+    } on UnitDbException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    final count = (backup['units'] as List?)?.length ?? 0;
+    final json = const JsonEncoder.withIndent('  ').convert(backup);
+    final stamp = DateTime.now()
+        .toIso8601String()
+        .substring(0, 16)
+        .replaceAll(':', '-');
+    final defaultName = ids == null
+        ? 'p2l_databaze_$stamp.json'
+        : 'p2l_databaze_vyber_${count}ks_$stamp.json';
+    try {
+      final res = await saveTextFile(
+        fileName: defaultName,
+        content: json,
+        dialogTitle: 'Uložit zálohu databáze',
+      );
+      if (res.cancelled) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            res.path != null
+                ? 'Záloha $count jednotek → ${res.path}'
+                : 'Staženo: $defaultName ($count jednotek)',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Export selhal: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  /// Načte zálohu ze souboru a po potvrzení ji naimportuje (upsert po ID).
+  Future<void> _importDatabase() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Načíst zálohu databáze',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true, // bytes na všech platformách → bez dart:io (web-safe)
+    );
+    if (result == null || result.files.isEmpty) return;
+    final bytes = result.files.single.bytes;
+    if (bytes == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Nelze načíst obsah souboru'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    final Map<String, dynamic> backup;
+    try {
+      backup = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Neplatný soubor: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    if (backup['format'] != 'p2l-tester.unit-db') {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Neznámý formát souboru (očekávám zálohu databáze).'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    final count = (backup['units'] as List?)?.length ?? 0;
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Naimportovat zálohu?'),
+        content: Text(
+          'Soubor obsahuje $count jednotek.\n\n'
+          'Existující jednotky (podle ID) se přepíšou hodnotami ze zálohy, '
+          'nové se přidají. Jednotky, které v záloze nejsou, zůstanou beze změny.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Zrušit'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Importovat'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final res = await _service.importDatabase(backup);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Naimportováno: ${res['created'] ?? 0} nových, '
+            '${res['updated'] ?? 0} aktualizovaných',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+      _load();
+    } on UnitDbException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   /// Sjednocené rozevírací pole filtru (Zákazník / Broker / Stav).
   /// `value == null` → vybráno „Vše".
   Widget _filterDropdown({
@@ -275,7 +455,7 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Databáze jednotek'),
+        title: const Text('Databáze P2L modulů'),
         actions: [
           if (_units != null) _bulkMenuButton(),
           IconButton(
@@ -283,6 +463,7 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
             tooltip: 'Obnovit',
             onPressed: _load,
           ),
+          _dbMenuButton(),
         ],
       ),
       body: _error != null
@@ -751,6 +932,46 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
     }
   }
 
+  /// Export jedné jednotky do JSON (kompletní záloha této karty + historie).
+  Future<void> _exportUnit() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final Map<String, dynamic> backup;
+    try {
+      backup = await _service.exportDatabase(ids: [widget.unitId]);
+    } on UnitDbException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    final json = const JsonEncoder.withIndent('  ').convert(backup);
+    final stamp = DateTime.now()
+        .toIso8601String()
+        .substring(0, 16)
+        .replaceAll(':', '-');
+    final defaultName = 'p2l_modul_${widget.unitId}_$stamp.json';
+    try {
+      final res = await saveTextFile(
+        fileName: defaultName,
+        content: json,
+        dialogTitle: 'Exportovat jednotku',
+      );
+      if (res.cancelled) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            res.path != null ? 'Uloženo → ${res.path}' : 'Staženo: $defaultName',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Export selhal: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   /// Ruční zápis do vrstvy evidence (desired) — pro jednotky, na které appka
   /// přes MQTT nedosáhne (nasazené u zákazníka). Nic neposílá do jednotky,
   /// jen uloží přes `saveDesired` (PUT /desired, merge po top-level klíčích).
@@ -760,7 +981,7 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
       context: context,
       builder: (_) => _ConfigEvidenceDialog(
         initial: card.desired,
-        title: 'Jednotka ${card.id} — evidence',
+        title: 'P2L modul ${card.id} — evidence',
       ),
     );
     if (fragment == null || !mounted) return;
@@ -779,13 +1000,19 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
     final card = _card;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Jednotka ${widget.unitId}'),
+        title: Text('P2L modul ${widget.unitId}'),
         actions: [
           if (card != null)
             IconButton(
               icon: const Icon(Icons.edit_outlined),
               tooltip: 'Upravit údaje',
               onPressed: _editMeta,
+            ),
+          if (card != null)
+            IconButton(
+              icon: const Icon(Icons.file_download_outlined),
+              tooltip: 'Exportovat jednotku',
+              onPressed: _exportUnit,
             ),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -1258,7 +1485,7 @@ class _MetaDialogState extends State<_MetaDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Jednotka ${widget.card.id} — údaje'),
+      title: Text('P2L modul ${widget.card.id} — údaje'),
       content: SizedBox(
         width: 360,
         child: Column(

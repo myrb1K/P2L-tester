@@ -531,6 +531,151 @@ function bulkDeleteUnits(db, ids) {
   return n;
 }
 
+// ── Export / Import DB (kompletní záloha / obnova) ──────────────────────────
+// Export: úplný snímek jednotky (getUnit = všechna pole vč. desired s reálnými
+// hesly) + historie. Určeno pro plný backup i přenos mezi servery.
+// [ids] === null → celá DB; jinak jen vybrané (tolerantní k chybějícím ID —
+// přeskočí je). Formát řádku je stejný, ať jde o jednu jednotku nebo všechny.
+function exportUnits(db, ids = null) {
+  let idList;
+  if (ids == null) {
+    idList = db
+      .prepare('SELECT id FROM units ORDER BY CAST(id AS INTEGER)')
+      .all()
+      .map((r) => r.id);
+  } else {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new UnitOpError('invalid_body', 'ids musí být neprázdné pole');
+    }
+    idList = ids.map(normalizeUnitId);
+  }
+  const out = [];
+  for (const id of idList) {
+    const unit = getUnit(db, id);
+    if (!unit) continue; // tolerantní k chybějícímu ID
+    unit.history = getHistory(db, id, 10000);
+    out.push(unit);
+  }
+  return out;
+}
+
+// Celá DB (zpětně kompatibilní alias).
+function exportAll(db) {
+  return exportUnits(db, null);
+}
+
+// Import: SLOUČENÍ po ID (upsert) — existující jednotky se přepíšou snímkem ze
+// zálohy, nové se přidají, jednotky mimo zálohu zůstanou nedotčené (nic se
+// nemaže). Historie importované jednotky se nahradí historií ze zálohy, takže
+// opakovaný import téhož souboru je idempotentní (neduplikuje). Vše v jedné
+// transakci. Vrací { created, updated, total }.
+function importUnits(db, units, username) {
+  if (!Array.isArray(units)) {
+    throw new UnitOpError('invalid_body', 'units musí být pole');
+  }
+  const toJson = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
+  const upsert = db.prepare(
+    `INSERT INTO units (
+       id, generation, mac, hw_model, firmware, ip, battery,
+       ssid, mqtt_server, mqtt_port, brightness, seen_on_broker,
+       unit_config_json, unit_config_fetched_at, last_seen, devices_json,
+       desired_json, desired_updated_at, desired_updated_by,
+       name, location, note, status, created_at, updated_at
+     ) VALUES (
+       @id, @generation, @mac, @hw_model, @firmware, @ip, @battery,
+       @ssid, @mqtt_server, @mqtt_port, @brightness, @seen_on_broker,
+       @unit_config_json, @unit_config_fetched_at, @last_seen, @devices_json,
+       @desired_json, @desired_updated_at, @desired_updated_by,
+       @name, @location, @note, @status,
+       COALESCE(@created_at, datetime('now')), datetime('now')
+     )
+     ON CONFLICT(id) DO UPDATE SET
+       generation = excluded.generation, mac = excluded.mac,
+       hw_model = excluded.hw_model, firmware = excluded.firmware,
+       ip = excluded.ip, battery = excluded.battery, ssid = excluded.ssid,
+       mqtt_server = excluded.mqtt_server, mqtt_port = excluded.mqtt_port,
+       brightness = excluded.brightness, seen_on_broker = excluded.seen_on_broker,
+       unit_config_json = excluded.unit_config_json,
+       unit_config_fetched_at = excluded.unit_config_fetched_at,
+       last_seen = excluded.last_seen, devices_json = excluded.devices_json,
+       desired_json = excluded.desired_json,
+       desired_updated_at = excluded.desired_updated_at,
+       desired_updated_by = excluded.desired_updated_by,
+       name = excluded.name, location = excluded.location, note = excluded.note,
+       status = excluded.status, updated_at = datetime('now')`
+  );
+  const delHist = db.prepare('DELETE FROM unit_history WHERE unit_id = ?');
+  const insHist = db.prepare(
+    'INSERT INTO unit_history (unit_id, at, username, action, detail_json) VALUES (?, ?, ?, ?, ?)'
+  );
+  const pruneHist = db.prepare(
+    `DELETE FROM unit_history WHERE unit_id = ? AND id NOT IN (
+       SELECT id FROM unit_history WHERE unit_id = ? ORDER BY id DESC LIMIT ?
+     )`
+  );
+  let created = 0;
+  let updated = 0;
+  const tx = db.transaction((list) => {
+    for (const u of list) {
+      if (!u || typeof u !== 'object' || Array.isArray(u)) {
+        throw new UnitOpError('invalid_body', 'Každá jednotka musí být objekt');
+      }
+      const id = normalizeUnitId(u.id);
+      const existed = unitExists(db, id);
+      const generation =
+        u.generation === 'old' || u.generation === 'new'
+          ? u.generation
+          : deriveGeneration(id);
+      const status = VALID_STATUS.includes(u.status) ? u.status : 'active';
+      upsert.run({
+        id,
+        generation,
+        mac: u.mac ?? null,
+        hw_model: u.hw_model ?? null,
+        firmware: u.firmware ?? null,
+        ip: u.ip ?? null,
+        battery: u.battery ?? null,
+        ssid: u.ssid ?? null,
+        mqtt_server: u.mqtt_server ?? null,
+        mqtt_port: u.mqtt_port ?? null,
+        brightness: u.brightness ?? null,
+        seen_on_broker: u.seen_on_broker ?? null,
+        unit_config_json: toJson(u.unit_config),
+        unit_config_fetched_at: u.unit_config_fetched_at ?? null,
+        last_seen: u.last_seen ?? null,
+        devices_json: toJson(u.devices),
+        desired_json: toJson(u.desired),
+        desired_updated_at: u.desired_updated_at ?? null,
+        desired_updated_by: u.desired_updated_by ?? null,
+        name: u.name ?? null,
+        location: u.location ?? null,
+        note: u.note ?? null,
+        status,
+        created_at: u.created_at ?? null,
+      });
+      // Historie: nahraď snímkem ze zálohy. getHistory vrací DESC → vkládáme
+      // vzestupně (reverse), ať auto-increment id kopíruje původní pořadí.
+      delHist.run(id);
+      const hist = Array.isArray(u.history) ? [...u.history].reverse() : [];
+      for (const h of hist) {
+        if (!h || typeof h !== 'object') continue;
+        insHist.run(
+          id,
+          h.at || new Date().toISOString(),
+          h.username || username,
+          h.action || 'import',
+          h.detail == null ? null : JSON.stringify(h.detail)
+        );
+      }
+      pruneHist.run(id, id, HISTORY_RETENTION);
+      if (existed) updated += 1;
+      else created += 1;
+    }
+  });
+  tx(units);
+  return { created, updated, total: created + updated };
+}
+
 module.exports = {
   openUnitsDb,
   UNITS_DB_PATH,
@@ -552,4 +697,7 @@ module.exports = {
   commonDesired,
   getHistory,
   addHistory,
+  exportAll,
+  exportUnits,
+  importUnits,
 };

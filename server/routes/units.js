@@ -27,6 +27,8 @@ const {
   bulkDeleteUnits,
   commonDesired,
   getHistory,
+  exportUnits,
+  importUnits,
 } = require('../db/units');
 
 function mapErrorToStatus(err) {
@@ -65,6 +67,41 @@ function makeRouter(db) {
 
   router.get('/', wrap((req, res) => {
     res.json({ units: listUnits(db) });
+  }));
+
+  // Export / import celé DB (kompletní záloha / obnova). MUSÍ být před /:id,
+  // jinak by GET /export spadl do /:id (id='export' → 400). Za přihlášením
+  // (requireAuth výš), bez admin gatingu — hesla už jsou na kartě viditelná
+  // přihlášenému a upsert (sloučení) nic nemaže, jen jako ostatní zápisy.
+  // Společný obal zálohy (stejný formát pro celou DB i podmnožinu).
+  function exportEnvelope(ids) {
+    return {
+      format: 'p2l-tester.unit-db',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      units: exportUnits(db, ids),
+    };
+  }
+
+  // GET = celá DB; POST {ids} = jen vybrané jednotky (1 nebo víc).
+  router.get('/export', wrap((req, res) => {
+    res.json(exportEnvelope(null));
+  }));
+
+  router.post('/export', wrap((req, res) => {
+    const { ids } = req.body || {};
+    res.json(exportEnvelope(ids));
+  }));
+
+  router.post('/import', wrap((req, res) => {
+    const body = req.body || {};
+    if (body.format !== 'p2l-tester.unit-db') {
+      return res
+        .status(400)
+        .json({ error: 'invalid_body', message: 'Neznámý formát souboru (očekávám zálohu databáze).' });
+    }
+    const result = importUnits(db, body.units, req.user.username);
+    res.json({ ok: true, ...result });
   }));
 
   router.get('/:id', wrap((req, res) => {

@@ -219,9 +219,9 @@ Otevři přes menu **☰** vpravo nahoře → *Nastavení*.
 
 ---
 
-## 10. Databáze jednotek
+## 10. Databáze P2L modulů
 
-Centrální evidence P2L modulů na firemním serveru. Otevři přes menu **☰** → *Databáze jednotek* — položka je vidět **jen po přihlášení** (na Windows/Android přes *Nastavení → Účet*, na webu vždy).
+Centrální evidence P2L modulů na firemním serveru. Otevři přes menu **☰** → *Databáze P2L modulů* — položka je vidět **jen po přihlášení** (na Windows/Android přes *Nastavení → Účet*, na webu vždy).
 
 Karty jednotek **vznikají a aktualizují se samy** běžnou prací s appkou: jakmile je uživatel přihlášený, každé ALIVE, načtení detailu (`get_param`), seznam devices i každá konfigurační akce (broker, WiFi, jas, firmware) se zapíší na kartu jednotky. Nic se nezadává ručně — kromě údajů níže.
 
@@ -239,6 +239,15 @@ Karty jednotek **vznikají a aktualizují se samy** běžnou prací s appkou: ja
 - **Jednotka** — observed metadata: firmware, HW model, generace, MAC, baterie, kdy se naposledy ozvala, seznam devices.
 
 Pod tím je **historie** změn (kdo, kdy, co — hesla se do historie nikdy nezapisují). Když se to, co jednotka hlásí, liší od evidence, karta nahoře ukáže oranžové **„Nesouhlasí s evidencí"** s konkrétními rozdíly. Nově rozlišuje tři druhy: **evidence × uloženo v jednotce** (nedorazila naše konfigurace?), **uloženo × reálně běží** (statická IP nastavená, ale jede DHCP / jiná WiFi) a **evidence × kde jednotku vidíme** (hlásí se přes jiný broker). Pokud je změna záměrná, tlačítko **„Převzít skutečnost do evidence"** srovná evidenci podle reálného stavu (hesla v evidenci zůstávají původní — jednotka je nehlásí; pokud se změnila taky, pošli konfiguraci přes appku).
+
+**Import / export databáze.** Hamburger **☰** vpravo nahoře v hlavičce obrazovky nabízí:
+- **Exportovat databázi** — stáhne **kompletní zálohu** celé databáze do JSON souboru: všechny jednotky se všemi vrstvami (evidence včetně hesel, observed / GET-CONFIG, meta) i historií. Vhodné pro zálohu nebo přenos na jiný server.
+- **Importovat databázi** — načte dřív exportovaný soubor a **sloučí** ho do databáze: jednotky, které v souboru jsou, se podle ID **aktualizují** (nové se přidají), jednotky mimo soubor zůstanou beze změny — **nic se nemaže**. Před zápisem appka ukáže potvrzení s počtem jednotek. Opakovaný import stejného souboru nic nepokazí.
+
+**Export jen vybraných jednotek.** Nemusíš exportovat celou databázi:
+- **Několik jednotek** — zaškrtni je v seznamu (stejný výběr jako u hromadných úprav) a v hamburgeru **☰** zvol **Exportovat vybrané** (položka se objeví, jen když je něco vybráno). Soubor pak obsahuje jen tyhle jednotky (stejný formát jako plná záloha).
+- **Jednu jednotku** — na kartě jednotky je v hlavičce ikona **⭳** („Exportovat jednotku").
+- **Import podmnožiny** nepotřebuje nic navíc: import vždy jen sloučí, co je v souboru — tj. soubor s jednou nebo pár jednotkami naimportuje právě je.
 
 ---
 

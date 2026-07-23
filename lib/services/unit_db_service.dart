@@ -288,6 +288,65 @@ class UnitDbService {
     return json['count'] as int? ?? (body['ids'] as List).length;
   }
 
+  // ─── Export / import celé DB (kompletní záloha / obnova, hamburger na
+  // obrazovce Databáze) ────────────────────────────────────────────────
+  //
+  // Delší timeout než běžné čtení — záloha může nést historii všech jednotek.
+
+  static const _bulkTimeout = Duration(seconds: 30);
+
+  /// Kompletní záloha (všechna pole vč. hesel + historie). Vrací dekódovaný
+  /// JSON připravený k zápisu do souboru. [ids] == null → celá DB (GET);
+  /// neprázdný seznam → jen vybrané jednotky (POST). Hází [UnitDbException].
+  Future<Map<String, dynamic>> exportDatabase({List<String>? ids}) async {
+    final http.Response res;
+    try {
+      if (ids == null) {
+        res = await _client
+            .get(Uri.parse('$_base/units/export'))
+            .timeout(_bulkTimeout);
+      } else {
+        res = await _client
+            .post(
+              Uri.parse('$_base/units/export'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'ids': ids}),
+            )
+            .timeout(_bulkTimeout);
+      }
+    } on TimeoutException {
+      throw const UnitDbException('Server neodpověděl (timeout).');
+    } catch (e) {
+      throw UnitDbException('Server nedostupný: $e');
+    }
+    _throwForStatus(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Naimportuje zálohu ([backup] = obsah exportovaného souboru) — sloučení po
+  /// ID (existující aktualizovat, nové přidat, nic se nemaže). Vrací počty
+  /// `{created, updated, total}`. Hází [UnitDbException].
+  Future<Map<String, dynamic>> importDatabase(
+    Map<String, dynamic> backup,
+  ) async {
+    final http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_base/units/import'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(backup),
+          )
+          .timeout(_bulkTimeout);
+    } on TimeoutException {
+      throw const UnitDbException('Server neodpověděl (timeout).');
+    } catch (e) {
+      throw UnitDbException('Server nedostupný: $e');
+    }
+    _throwForStatus(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> _getJson(String path) async {
     final http.Response res;
     try {
@@ -307,6 +366,9 @@ class UnitDbService {
       throw const UnitDbException(
         'Nepřihlášený — obnov přihlášení v Nastavení → Účet.',
       );
+    }
+    if (res.statusCode == 403) {
+      throw const UnitDbException('Nemáš oprávnění pro tuto akci.');
     }
     if (res.statusCode == 404) {
       throw const UnitDbException('Jednotka v databázi není.');
