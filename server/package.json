@@ -8,6 +8,9 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test",
+    "test:mariadb": "node scripts/test-mariadb.js",
+    "db-check": "node scripts/db-check.js",
+    "migrate-users": "node scripts/migrate-users.js",
     "add-user": "node scripts/add-user.js",
     "del-user": "node scripts/del-user.js",
     "reset-pwd": "node scripts/reset-pwd.js",
@@ -21,7 +24,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "express-rate-limit": "^7.4.1",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.23.2"
   },
   "engines": {
     "node": ">=20"

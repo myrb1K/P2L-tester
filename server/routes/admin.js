@@ -50,56 +50,50 @@ function mapErrorToStatus(err) {
   }
 }
 
+// Obalí async handler: UserOpError → JSON chyba se správným statusem,
+// cokoli jiného na error middleware (Express 4 rejected promise nezachytí).
+function wrap(handler) {
+  return async (req, res, next) => {
+    try {
+      await handler(req, res);
+    } catch (e) {
+      if (e instanceof UserOpError) {
+        return res.status(mapErrorToStatus(e)).json({ error: e.code, message: e.message });
+      }
+      next(e);
+    }
+  };
+}
+
 function makeRouter(db) {
   const router = express.Router();
   router.use(requireAdmin);
 
-  router.get('/users', (req, res) => {
-    res.json({ users: listUsers(db) });
-  });
+  router.get('/users', wrap(async (req, res) => {
+    res.json({ users: await listUsers(db) });
+  }));
 
-  router.post('/users', (req, res) => {
+  router.post('/users', wrap(async (req, res) => {
     const { username, password, isAdmin } = req.body || {};
-    try {
-      const user = createUser(db, { username, password, isAdmin: !!isAdmin });
-      res.status(201).json({
-        user: {
-          username: user.username,
-          isAdmin: !!user.isAdmin,
-        },
-      });
-    } catch (e) {
-      if (e instanceof UserOpError) {
-        return res.status(mapErrorToStatus(e)).json({ error: e.code, message: e.message });
-      }
-      throw e;
-    }
-  });
+    const user = await createUser(db, { username, password, isAdmin: !!isAdmin });
+    res.status(201).json({
+      user: {
+        username: user.username,
+        isAdmin: !!user.isAdmin,
+      },
+    });
+  }));
 
-  router.delete('/users/:username', (req, res) => {
-    try {
-      deleteUser(db, req.params.username, { actingUser: req.user.username });
-      res.status(204).end();
-    } catch (e) {
-      if (e instanceof UserOpError) {
-        return res.status(mapErrorToStatus(e)).json({ error: e.code, message: e.message });
-      }
-      throw e;
-    }
-  });
+  router.delete('/users/:username', wrap(async (req, res) => {
+    await deleteUser(db, req.params.username, { actingUser: req.user.username });
+    res.status(204).end();
+  }));
 
-  router.post('/users/:username/reset', (req, res) => {
+  router.post('/users/:username/reset', wrap(async (req, res) => {
     const { newPassword } = req.body || {};
-    try {
-      resetPassword(db, req.params.username, newPassword);
-      res.json({ ok: true });
-    } catch (e) {
-      if (e instanceof UserOpError) {
-        return res.status(mapErrorToStatus(e)).json({ error: e.code, message: e.message });
-      }
-      throw e;
-    }
-  });
+    await resetPassword(db, req.params.username, newPassword);
+    res.json({ ok: true });
+  }));
 
   return router;
 }

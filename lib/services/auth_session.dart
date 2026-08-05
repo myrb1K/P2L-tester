@@ -63,6 +63,40 @@ class AuthSession extends ChangeNotifier {
 
   bool get isLoggedIn => status == AuthSessionStatus.loggedIn;
 
+  /// Nasměruje session na lokální server spuštěný appkou (portable EXE, viz
+  /// [LocalServer]). Volá se ze startu PŘED [restore].
+  ///
+  /// Pravidla, aby to nerozbilo přihlášení na vzdálený server:
+  /// - Uložený base na vzdálený host (firemní server) má přednost a zůstává.
+  /// - Uložený base na localhost s jiným portem se přepíše — uživatel si port
+  ///   lokálního serveru změnil v Nastavení, session má jít tam.
+  /// - Nic uloženého → lokální base se stane výchozím (i pro login dialog).
+  Future<void> preferLocalBase(String localBase) async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_baseKey);
+    if (saved == null || saved.isEmpty) {
+      apiBase = localBase;
+      // Uložit hned, jinak by [restore] apiBase přepsal defaultem z
+      // --dart-define (který nemusí mít port lokálního serveru).
+      await prefs.setString(_baseKey, localBase);
+      notifyListeners();
+      return;
+    }
+    if (_isLoopback(saved) && saved != localBase) {
+      apiBase = localBase;
+      await prefs.setString(_baseKey, localBase);
+    } else {
+      // Vzdálený (nebo shodný lokální) server — respektujeme uložený.
+      apiBase = saved;
+    }
+    notifyListeners();
+  }
+
+  static bool _isLoopback(String base) {
+    final host = Uri.tryParse(base)?.host.toLowerCase();
+    return host == 'localhost' || host == '127.0.0.1' || host == '::1';
+  }
+
   /// Tichá obnova session při startu appky (a při „Zkusit znovu").
   /// Nikdy nehází: neplatný/vypršelý token → [AuthSessionStatus.loggedOut],
   /// server nedostupný → [AuthSessionStatus.offline] (token zůstává).

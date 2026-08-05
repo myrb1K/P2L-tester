@@ -187,6 +187,29 @@ Default `flutter build apk --release` (bez `--split-per-abi`) vytvoří fat APK 
 
 **Pozn.:** Od commitu `e8fdc84` je `dist/` v `.gitignore` (build outputy nepatří do gitu). Adresář se používá lokálně pro packaging release artefaktů; pokud je potřeba je sdílet, jdou přes GitHub Releases, ne přes commit.
 
+#### Portable distribuce s vlastním serverem (v2.81+)
+
+`tools\pack-portable.ps1` sestaví Windows distribuci, která **nosí Node server s sebou** — appka si ho spustí při startu a ukončí při zavření, takže databáze jednotek funguje bez instalace Node a bez ručního `npm start`.
+
+```bash
+flutter build windows --release
+flutter build apk --release --split-per-abi         # volitelné (APK do zipu)
+powershell -ExecutionPolicy Bypass -File tools\pack-portable.ps1
+```
+
+Skript čte verzi z `appVersion` v `main.dart`, do `dist\P2L-Tester-v<VER>\` nakopíruje celý Release, přejmenuje exe a přiloží `server\` + `node.exe` z PATH. Parametry: `-OutRoot <cesta>` (jiná cílová složka, pro testy), `-SkipZip`.
+
+**Co se do `server\` NEKOPÍRUJE a proč:**
+- `.env` — obsahuje JWT secret a admin heslo; portable režim si secret generuje sám (`SharedPreferences` klíč `local_server_jwt_secret`) a předává procesu jako env proměnnou. Skript navíc dělá pojistný sweep na `.env` / `*.db*`.
+- `data\` — DB se drží v `%APPDATA%\P2L-Tester\server-data`, aby rozbalení novější verze nepřepsalo `units.db`.
+- `test\`, `scripts\` — k běhu nejsou potřeba.
+
+**Přiložený `node.exe` musí být té major verze, pro kterou jsou zkompilované native moduly** v `node_modules` (`better-sqlite3`, `bcrypt`). Skript proto přikládá ten samý runtime, kterým se dělal `npm install` (bere `(Get-Command node).Source`). Po `npm install` s jinou major verzí Node je potřeba distribuci sestavit znovu.
+
+Velikost: `server\` ≈ 100 MB rozbaleno (node.exe ~80 MB + node_modules ~19 MB), celá složka ≈ 128 MB.
+
+**PowerShell skripty ukládat jako UTF-8 s BOM** — Windows PowerShell 5.1 čte UTF-8 bez BOM jako ANSI a české texty rozhodí parser (em-dash uvnitř stringu → syntaktická chyba).
+
 #### Distribuční zip (APK + EXE pohromadě)
 
 Po buildu APK + EXE vždy sestavit **jeden** archiv `P2L-Tester-v<VER>.zip` (`<VER>` = `appVersion` z `main.dart`, např. `2.67`) s touto strukturou:
@@ -308,6 +331,97 @@ Volitelně `Segments` (segmentový režim) — zatím první iterace posílá pr
 
 ---
 
+## Databázová vrstva serveru — SQLite nebo MariaDB (v2.82+)
+
+Server umí dva drivery, přepínač je env `DB_DRIVER` (`sqlite` default | `mariadb`).
+**Datová vrstva je jedna** — rozdíly izoluje [server/db/adapter.js](server/db/adapter.js).
+
+- **sqlite** — `data/users.db` + `data/units.db`, nic se neinstaluje (portable dist).
+- **mariadb** — jedna databáze (`P2Lunits`) se všemi tabulkami → sdílená evidence.
+  `openDatabases()` proto u MariaDB vrací **jeden pool** pro users i units.
+
+**Vše je asynchronní.** better-sqlite3 byl synchronní, MySQL klient být nemůže — takže
+`db/units.js`, `db/users.js`, `db/init.js`, všechny routes i CLI skripty jsou async.
+Express 4 rejected promise nezachytí, proto má každý router `wrap()` helper.
+
+**Adapter API:** `get/all/run/exec/columns/transaction/close` + `sql` (dialektové fragmenty).
+Parametry pojmenovaně `:name` (rozumí jim better-sqlite3 i mysql2 s `namedPlaceholders`).
+
+**Pravidla, na která se naráží:**
+- **Uvnitř `db.transaction(fn)` se dotazuj přes předaný `tx`**, ne přes vnější handle.
+  U MariaDB drží transakce jedno spojení z poolu; u SQLite je vnější handle serializovaný
+  mutexem (async `await` mezi `BEGIN`/`COMMIT` by jinak pustil cizí zápis do transakce)
+  a rekurzivní vstup by se zablokoval sám.
+- **Časové značky generuje JS** (`adapter.nowIso()`, ISO 8601), ne SQL. `datetime('now')`
+  vs `UTC_TIMESTAMP()` se liší formátem a `computeDrift` na tom staví.
+- **`LIMIT`/`OFFSET` se vkládají do SQL jako konstanty**, ne jako parametry — MariaDB je
+  v prepared statements přijímá nespolehlivě (hodnoty jsou z kódu, nikdy z requestu).
+- **`DELETE ... WHERE id IN (SELECT ... FROM stejná_tabulka)` MariaDB nedovolí** → prune
+  historie je dvoufázový (SELECT id → DELETE ... IN).
+- Dialektové rozdíly ve fragmentech: `ON CONFLICT DO NOTHING/UPDATE ... excluded.x` vs
+  `ON DUPLICATE KEY UPDATE ... VALUES(x)`, `CAST(x AS INTEGER)` vs `AS UNSIGNED`,
+  `COLLATE NOCASE` vs ci collation ve schématu.
+- Schémata jsou po dialektech: `schema.sql`/`schema.mariadb.sql`,
+  `units-schema.sql`/`units-schema.mariadb.sql`. MariaDB nezná `CREATE INDEX IF NOT EXISTS`
+  → indexy inline v `CREATE TABLE`.
+- `GET /api/health` vrací `{ok, ts, db}` — `db` je typ driveru (bez údajů o spojení).
+  Appka podle něj pozná, že adoptovala server nad jinou databází (`LocalServer.dbMismatch`).
+- **Past při přechodu na MariaDB:** nad prázdnou DB si první start serveru (i `db-check`)
+  naseeduje admina z `INITIAL_ADMIN_*`. `migrate-users` pak to jméno **přeskočí** a účet má
+  heslo z `.env`, ne původní → login starým heslem selže. Poznat to jde po `created_at`
+  (dnešní datum místo původního). Řešení: `--overwrite`. Narazili jsme na to 2026-08-05.
+- **Přenos dat mezi drivery:** uživatelé skriptem `npm run migrate-users`
+  ([scripts/migrate-users.js](server/scripts/migrate-users.js)) — bcrypt hashe 1:1, takže
+  hesla dál platí; zdroj read-only, existující jména se přeskočí (`--overwrite` je přepíše),
+  účty jen v cíli se nemažou. **Jednotky** přes `GET /api/units/export` → `POST /api/units/import`
+  (kompletní snímek vč. hesel a historie, import je idempotentní upsert).
+- Testy: `npm test` = SQLite `:memory:`, `npm run test:mariadb` = tatáž sada proti reálné
+  MariaDB (`TEST_DB_NAME`, default `P2Lunits_test` — **testy DB před každým testem mažou**,
+  skript odmítne `P2Lunits`). `npm run db-check` ověří spojení mimo server.
+- `mysql2` je čistě JS (žádný native build), na rozdíl od `better-sqlite3`/`bcrypt`.
+
+**Kdo se na kterou DB dostane:** vlastní server si spustí jen desktop (Windows). Android
+ani web Node runtime nemají (a prohlížeč se na MySQL port nepřipojí) → ty se hlásí
+k serveru na síti (`Nastavení → Účet`). Pro web servírovaný jinde než API je potřeba
+`CORS_ORIGIN` (platí i v produkci, na rozdíl od dev-only `DEV_CORS_ORIGIN`).
+
+## Lokální server pro databázi (portable Windows, v2.81+)
+
+Databáze jednotek žije v SQLite (nebo MariaDB, viz výše) obsluhované Node backendem v `server/`. Aby Windows EXE nepotřebovalo ruční `npm start`, appka si server spouští sama.
+
+**Kód:** [lib/services/local_server.dart](lib/services/local_server.dart) (conditional export jako `mqtt_client_factory`) → [local_server_io.dart](lib/services/local_server_io.dart) (nativ) / [local_server_stub.dart](lib/services/local_server_stub.dart) (web, no-op). UI: [lib/widgets/local_server_section.dart](lib/widgets/local_server_section.dart) v Nastavení pod sekcí Účet. Start/stop zapojený v [main.dart](lib/main.dart) (`_bootstrapNative`, `AppLifecycleListener.onExitRequested`).
+
+**Detekce:** `server/server.js` se hledá vedle EXE (portable dist), pak v `cwd/server` (dev z repa). Node: přiložený `server/node.exe`, jinak `node` z PATH. Když nic → `LocalServerStatus.unavailable` a **sekce v UI se vůbec nezobrazí** (appka pro terén vypadá jako dřív).
+
+**Volba databáze v UI:** sekce *Lokální server* → řádek **Databáze** → dialog `_DatabaseDialog`
+([local_server_section.dart](lib/widgets/local_server_section.dart)) přepne SQLite/MariaDB a
+uloží `LocalServerDbConfig` do `SharedPreferences` (`local_server_db_*`). Server čte konfiguraci
+jen při startu → dialog po uložení **restartuje** instanci, kterou spustila appka (cizí
+adoptovanou ne, jen upozorní). Heslo k MariaDB leží v prefs otevřeně jako hesla brokerů → DB
+účet ať má práva jen na tu jednu databázi.
+
+**Konfigurace se předává jako env proměnné procesu, ne přes `.env`:**
+- `P2L_DATA_DIR` = `%APPDATA%\P2L-Tester\server-data` — DB **mimo aplikační složku**, jinak by ji přepsalo rozbalení nové verze. Server: [server/db/paths.js](server/db/paths.js), používají `db/index.js` (users.db) a `db/units.js` (units.db) — cesty se čtou **lazy**, ne do konstanty při `require`.
+- `JWT_SECRET` — generovaný jednou (`Random.secure()`, 32 B hex), držený v `SharedPreferences` (`local_server_jwt_secret`). Musí být stabilní, jinak by restart appky zneplatnil vydané tokeny.
+- `PORT` (`local_server_port`, default 3001), `NODE_ENV=production`.
+- `DB_DRIVER` + při MariaDB `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`
+  (z `LocalServerDbConfig`). `P2L_DATA_DIR` platí i při MariaDB — server si tam pořád
+  píše PID file.
+- `INITIAL_ADMIN_USER`/`_PASSWORD` jen při bootstrapu správce — **nikdy se neukládají**, žijí jen v dialogu.
+
+**Pozor na `.env` v devu:** při spuštění serveru z repa dotenv `.env` načte (naše env proměnné mají prioritu, protože dotenv existující `process.env` nepřepisuje). Proto se v devu naseeduje admin z `.env` a `needsAdminBootstrap` je false — v portable distu `.env` chybí, takže nabídka „Založit správce" naskočí.
+
+**Klíčová pravidla:**
+- **Cizí server se nikdy nezabíjí.** Když `/api/health` odpoví před startem, proces se jen adoptuje (`ownsProcess = false`) a při zavření appky zůstane běžet. Chrání `npm run dev` v terminálu.
+- **Sirotci přes PID file.** PID si píše **sám server** ([server.js](server/server.js) → `<dataDir>/server.pid`), protože jen on zná svůj skutečný PID. Hard kill appky (Správce úloh) graceful hook nespustí → při dalším startu appka PID přečte, ověří přes `tasklist`, že je to `node.exe` (PID se recyklují), a zabije. Úklid běží **jen když health neodpovídá**, takže nemůže sestřelit funkční instanci. Na Windows je `Process.kill()` TerminateProcess → SIGTERM handler v serveru neproběhne, PID file maže appka.
+- **`needsAdminBootstrap` se ptá serveru**, ne filesystému — `GET /api/bootstrap-status` (bez auth, vrací jen `{hasUsers: bool}`). Existence `users.db` nestačí: soubor vznikne i při startu nad prázdnou DB, takže by nabídka zmizela dřív, než by uživatel účet vytvořil.
+- **`AuthSession.preferLocalBase`** nasměruje session na lokální port před `restore()`. Uložený **vzdálený** base (firemní server) má přednost a zůstane; uložený **loopback s jiným portem** se přepíše.
+- **Pořadí startu:** `LocalServer.init()` → `maybeAutostart()` → `AuthSession.restore()`. Kdyby restore běželo hned, narazilo by na ještě nenaběhnutý server a skončilo ve stavu `offline` (uživatel by musel klikat „Zkusit znovu").
+
+**Testy:** [test/local_server_test.dart](test/local_server_test.dart) reálně spouští Node na portu 3097 (start/health/stop, adopce cizího procesu, úklid sirotka). Vyžadují `HttpOverrides.global = null` — `TestWidgetsFlutterBinding` jinak na každý HTTP request vrací 400 a health probe nikdy neprojde. Skipují se, když chybí Node nebo `server/node_modules`. Server: [server/test/paths.test.js](server/test/paths.test.js), [server/test/bootstrap.test.js](server/test/bootstrap.test.js).
+
+---
+
 ## Deployment topology
 
 Aplikace má 3 nasazovací scénáře:
@@ -332,8 +446,10 @@ Detail v [README.md §Typy nasazení](README.md).
 
 ## Version and Recent Changes
 
-Current version: **2.80** (see `main.dart`)  
+Current version: **2.82** (see `main.dart`)  
 Recent themes:
+- v2.82: **Server umí MariaDB (sdílená evidence) + Docker image.** (1) **Dva drivery, jedna datová vrstva** — přepínač `DB_DRIVER` (`sqlite` default | `mariadb`), rozdíly izoluje nový [server/db/adapter.js](server/db/adapter.js); celá vrstva (`db/units.js`, `db/users.js`, `db/init.js`, routes, CLI skripty) je **async**, protože MySQL klient synchronní být nemůže. Detail pravidel (transakce přes `tx`, časové značky z JS, `LIMIT` jako konstanta, dialektové fragmenty) v sekci *Databázová vrstva serveru* výše. Schémata po dialektech: `schema.mariadb.sql`, `units-schema.mariadb.sql`. (2) **Volba databáze z UI** — sekce *Lokální server* → *Databáze* přepne SQLite/MariaDB, uloží `LocalServerDbConfig` do `SharedPreferences` a restartuje server, který appka spustila. `GET /api/health` vrací typ driveru → appka pozná adopci serveru nad jinou DB (`LocalServer.dbMismatch`). (3) **Přenos dat** — `npm run migrate-users` (bcrypt hashe 1:1, zdroj read-only, idempotentní), jednotky přes `GET /api/units/export` → `POST /api/units/import`. `npm run db-check` ověří spojení mimo server. (4) **Docker** — [server/Dockerfile](server/Dockerfile) (dvoustage `node:22-bookworm-slim`, native moduly se kompilují jen v build stage, běh jako `node`, `HEALTHCHECK` na `/api/health`, data ve volume `/data` přes `P2L_DATA_DIR`) + [server/docker-compose.yml](server/docker-compose.yml) (backend + `mariadb:11.4`, port DB se na host nemapuje, API default na loopback) a `.env.docker.example`; `.env` se do image nekopíruje, konfigurace jde env proměnnými. Testy: `npm test` (SQLite `:memory:`, 68) i `npm run test:mariadb` (tatáž sada proti reálné MariaDB, `TEST_DB_NAME`). Návod k nasazení v [server/README.md](server/README.md) §Docker.
+- v2.81: **Portable Windows distribuce — appka si spouští vlastní server pro databázi.** Windows EXE nosí Node server v podadresáři `server\` (viz `tools\pack-portable.ps1`) a **spustí ho při startu, ukončí při zavření** → databáze jednotek funguje bez instalace Node a bez ručního `npm start`. (1) **Launcher** [local_server_io.dart](lib/services/local_server_io.dart) + web stub, conditional export; detekce serveru vedle EXE / v repu, přiložený `node.exe` s fallbackem na PATH; health probe na `/api/health`. (2) **Data mimo aplikační složku** — nový [server/db/paths.js](server/db/paths.js) s override `P2L_DATA_DIR`, appka míří na `%APPDATA%\P2L-Tester\server-data`, takže rozbalení novější verze nepřepíše `units.db`. `.env` se nepoužívá (obsahuje secret) — konfigurace jde jako env proměnné, `JWT_SECRET` se generuje jednou do `SharedPreferences`. (3) **Cizí server se adoptuje, ne zabíjí** (`ownsProcess`) — chrání `npm run dev`. (4) **Sirotci přes PID file**, který píše sám server; úklid ověřuje přes `tasklist`, že PID patří `node.exe`, a běží jen když health neodpovídá. (5) **Bootstrap správce** — nový endpoint `GET /api/bootstrap-status` (bez auth, jen `{hasUsers}`); při prázdné DB nabídne UI založení účtu, restartuje server s `INITIAL_ADMIN_*` a hned přihlásí (heslo se nikam neukládá). (6) **`AuthSession.preferLocalBase`** — session jde na lokální port, ale uložený vzdálený server má přednost; `restore()` se volá až po naběhnutí serveru, takže se přeskočí stav „offline" a klikání na „Zkusit znovu". (7) **UI** sekce „Lokální server (databáze)" v Nastavení pod Účtem (stav / autostart / Spustit-Zastavit / Log), zobrazí se jen když je server k dispozici. Testy: nový [test/local_server_test.dart](test/local_server_test.dart) (reálný start Node na 3097, adopce, sirotek), [server/test/paths.test.js](server/test/paths.test.js), [server/test/bootstrap.test.js](server/test/bootstrap.test.js) + rozšířený `auth_session_test.dart` — celkem 196 Flutter + 46 server testů. Návod §9.1.
 - v2.80: **Databáze jednotek — ruční evidence, hromadné akce, zpřesnění driftu, UX změny brokera.** (1) **Ruční editace evidence** (broker/WiFi/jas) na kartě jednotky v DB — ikona ✎ v hlavičce sekce Konfigurace, zápis přes existující `saveDesired` (`PUT /units/:id/desired`); pro jednotky nedosažitelné přes MQTT (nasazené u zákazníka). `_ConfigEvidenceDialog` vrací fragment (uložení řeší volající), hesla předvyplněná skutečnou hodnotou (jinak by top-level merge přemazal). (2) **Hromadné akce v seznamu DB** ve stylu HomeScreen (zatržítka u řádků + „Vybrat vše"/„Zrušit" nad seznamem + tlačítko „Hromadné úpravy" `settings_remote` v AppBaru): **Změnit parametry** (evidence; předvyplní hodnoty, které mají všechny vybrané shodné, přes `POST /units/bulk/common-desired`), **Změnit stav/zákazníka/umístění** (meta), **Smazat** (jen admin, potvrzení opsáním počtu). Bulk endpointy `POST /units/bulk/{desired,meta,delete,common-desired}` (transakce, delete tolerantní k chybějícím ID, admin gating), **hloubkový merge desired** (`updateDesired` slévá broker/wifi po podklíčích — částečný fragment nepřemaže ostatní podpole), `UnitDbService.isAdmin` z `AuthSession.user.isAdmin`. (3) **Drift v2.1 — „Nesoulad" jen když je co ověřit:** klient `UnitDbCard.driftWarnings` i server `computeDrift` hlásí drift jen když jsme jednotku viděli **až po** poslední změně evidence (`last_seen ≥ desired_updated_at`) — čerstvá, ještě nepozorovaná změna (jednotka odešla na jiný broker / offline) = čekající → žádný banner. ⚠ na HomeScreen jen u **online** jednotek. V seznamu DB se u čekající změny ukáže **zamýšlený** broker (z evidence), ne stará observed adresa. Dedup: „jednotka hlásí" se nezobrazí, když se shoduje s „uloženo v NVS". (4) **UX změny brokera:** po potvrzení (ack) jednotka **zmizí ze seznamu** (`_forgetUnit` místo jen offline) — opustila tenhle broker; když se někde znovu ozve, přijde jako nová a auto-fetch (get_param+GET-DEVICES+GET-CONFIG) se spustí přes cestu prvního ALIVE. Status **„U jednotky X / U N jednotek potvrzen příjem požadavku na změnu brokera 'DEV'"** (1 kus → ID; správná pluralizace „jednotky/jednotek"; píše do `_statusMessage` = hlavní bar, ne `_setStatus`). WiFi zůstává offline-until-alive (nemění broker). (5) **Prostorově úspornější detail karty** (menší chrome sekcí/řádků, menší písmo popisků, kratší nejdelší labely). Testy: rozšířené `unit_db_screen_test.dart` + server `units.test.js`. Návod §10.
 - v2.79: **Sloučené pohledy v detailu karty jednotek v DB + čitelný čas.** Detail karty slučuje pohledy evidence/uloženo/běží do jednoho řádku na parametr (shoda → ✓, rozdíl → rozepsané), časové značky čitelně.
 - v2.78: **DB5 (PRD-DB v2) — UNIT GET-CONFIG do observed vrstvy + drift v2 + ⚠ na HomeScreen.** Nový FW `P2L_26071501NT` přidal UNIT `GET-CONFIG` → appka teď z jednotky čte kompletní konfiguraci (uloženo v NVS: broker/SSID/statická IP/dns/gw/maska/mqttUser/mqttInsec/cert + reálný stav `actualIp`/`actualSSID`). (1) **CommandService:** `firmwareSupportsGetConfig` (práh datum ≥ 260715, vzor `firmwareSupportsBin`), `buildGetConfigCommand(unitId, {user, password})` — s přihlašovacími údaji FW vrací i **skutečná hesla** (`PSWD`/`mqttPassword` jako string), bez nich bool „je nastaveno". (2) **P2LUnit:** pole `unitConfig` + `updateFromGetConfig` (osvěží i FW/MAC). (3) **AppState:** subscribe `O/+/UNIT/+/GET-CONFIG`, `_handleGetConfigResponse` → push do DB, `fetchConfig` (gating na nová gen přes **ID ≥ 1000 || isNewGen** — samotný `isNewGen` je vratký: FW hlásí ID s prefixem `u` → jinak false; FW config creds `admin`/`smartbox` default, přepsatelné přes SharedPreferences `get_config_user`/`get_config_password`), volané z `fetchDevices`. (4) **Rozhodnutí (interní tool):** do evidence se ukládají i skutečná hesla — **žádná redakce**; ochrana = HTTPS + auth + přístup k serveru (šifrování = budoucí DB8). Server tri-state pojistka: pozdější bool `true` (odpověď na `{}` od jiného klienta na sběrnici) **nepřepíše** dřív zachycené skutečné heslo (`mergeConfigSecrets`). (5) **Server:** sloupce `unit_config_json`/`unit_config_fetched_at` (přes `ensureObservedColumns`), `computeDrift` **v2** (3 kategorie: evidence↔uloženo / uloženo↔běží / evidence↔kde-žije; DHCP = prázdný string), `getUnit` vrací `unit_config`, `listUnits` unit config neúniká. (6) **UnitDbCard:** `driftWarnings` v2 (fallback na get_param u starého FW), `acceptObservedFragment` preferuje GET-CONFIG. (7) **UI:** karta má sekci **„Uloženo v jednotce (GET-CONFIG)"** (nastaveno vs. běží, hesla maskovaná s okem); na **HomeScreen** v řádku jednotky **⚠ ikona** (jen přihlášený + jednotka má v DB drift) → klik otevře kartu; `AppState._dbDriftIds` z `GET /units` (debounce, jen přihlášený). Ověřeno **naživo na jednotce 1209** (FW 26071501NT): `{}` → bool hesla, creds → skutečná hesla; DHCP=`""`, `actualIp` reálná. Testy: `unit_get_config_test.dart` (nový), rozšířené `command_service_devices_test`/`unit_db_service_test`/`unit_db_screen_test` + server `units.test.js`. Detail v [PRD-DB/02-PRD-konfigurace.md](PRD-DB/02-PRD-konfigurace.md). Návod §2 (⚠ ikona) + §10 (sekce GET-CONFIG, drift v2). **Potvrzení příjmu (request_id ACK):** hromadná změna WiFi/brokera/firmwaru už neběží naslepo — `set_WiFi`/`set_Mqtt`/`update` se posílají s rostoucím `request_id` (`CommandService.nextRequestId`, rozsah **1–65535** = FW limit 16bit/5 míst, wraparound; seed ze sekund epochy mod 65535 → přes restart nekoliduje; jednotka nesmí opakovat posledních 10 → čítač to garantuje), appka subscribuje `O/+/P2L/+/CMD` a čeká na `{"status":"received"}` (`_handleCmdAck`, timeout 5 s). **Desired se do DB zapíše až po potvrzení** (`_sendTrackedConfigCmd`) — offline jednotka příkaz nedostane, uživatel vidí „NEPOTVRDILA (offline?)" a evidence nelže; u firmwaru se i offline-until-alive nastaví až po acku. Stará gen (ack neumí) → pošle s `-1` a potvrdí optimisticky jako dřív. LED test / get_param zůstávají na `-1` (bez acku). Návod §4. **Config CMD topic:** `_sendTrackedConfigCmd` posílá config příkazy na topic podle spolehlivého „`isNewGen || ID ≥ 1000`" (ne jen vratký `isNewGen` — FW hlásí ID s „u" prefixem → false), takže nová jednotka (1209) jde na `I/001209/P2L/011209/CMD` (ne starou `I/u1209/SERVER/CMD`) a ackne na jeho zrcadle `O/001209/P2L/011209/CMD`. **Auto-refresh observed po config změně:** změna brokera/WiFi jednotku restartuje → `onConfirmed` ji přes `_expectRestartReread` zaregistruje a po návratu (`_handleAlive`) appka zavolá `_autoRefreshObserved` = get_param + GET-DEVICES + GET-CONFIG. get_param je nutné, aby se obnovil i `mqtt_server` (jinak `computeDrift` kat. 3 hlásí falešný drift ze zastaralého snapshotu). Stejný refresh běží i při prvním ALIVE (i po reconnectu na jiný broker).

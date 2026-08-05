@@ -3,5 +3,9 @@ data/*.db
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal
+# PID běžícího serveru (píše si ho server.js kvůli úklidu sirotků)
+data/server.pid
 .env
+# Konfigurace docker-compose (JWT secret, heslo k DB) — šablona je .env.docker.example
+.env.docker
 *.log

@@ -214,14 +214,62 @@ Otevři přes menu **☰** vpravo nahoře → *Nastavení*.
 - **Export / Import nastavení** (`import_export`) — kompletní záloha profilů, šablon a LED schématu do JSON. Import přepíše stávající.
 - **Administrace uživatelů** — jen ve webové verzi pro adminy (správa přihlašovacích účtů).
 - **Účet** (sekce dole) — jediné místo pro správu účtu (v horní liště žádná ikona účtu není).
-  - *Windows/Android:* **volitelné** přihlášení k firemnímu serveru (stejné účty jako webová verze). Bez přihlášení appka funguje beze změny; přihlášení je potřeba pro centrální databázi jednotek (§10). Zadává se adresa serveru (např. `192.168.1.10:3001`), jméno a heslo. Přihlášení se pamatuje (7 dní) — po restartu appky se obnoví samo. Když je server nedostupný, sekce ukáže „Server nedostupný" s tlačítkem *Zkusit znovu*; na zbytek aplikace to nemá vliv.
+  - *Windows/Android:* **volitelné** přihlášení k serveru (stejné účty jako webová verze). Bez přihlášení appka funguje beze změny; přihlášení je potřeba pro centrální databázi jednotek (§10). Zadává se adresa serveru (např. `192.168.1.10:3001`), jméno a heslo. Přihlášení se pamatuje (7 dní) — po restartu appky se obnoví samo. Když je server nedostupný, sekce ukáže „Server nedostupný" s tlačítkem *Zkusit znovu*; na zbytek aplikace to nemá vliv.
   - *Web:* ukazuje přihlášeného uživatele a tlačítko **Odhlásit se** (přihlášení řeší vstupní obrazovka).
+- **Lokální server (databáze)** — viz §9.1. Zobrazí se jen ve Windows verzi, která má server přiložený. Volba databáze (soubor / sdílená MariaDB) je v §9.2.
+
+### 9.1 Lokální server (databáze) — Windows
+
+Databáze P2L modulů (§10) potřebuje server. Windows verze si ho **může nosit s sebou**: pokud je ve složce s aplikací podadresář `server\`, appka server **automaticky spustí při svém startu a ukončí při zavření**. Nemusíš nic instalovat ani spouštět ručně — databáze prostě funguje.
+
+Sekce **Lokální server (databáze)** v *Nastavení* (dole, pod *Účtem*) ukazuje:
+
+| Stav | Význam |
+|------|--------|
+| 🟢 **Běží (spuštěn aplikací)** | Server nastartovala appka a při zavření ho ukončí. |
+| 🟢 **Běží (spuštěn zvlášť)** | Na portu už někdo odpovídal (např. server spuštěný v příkazové řádce). Appka ho jen používá a při zavření ho **nechá běžet**. |
+| ⏳ **Startuje…** | Naskakuje (obvykle 1–3 s). |
+| ⏹ **Neběží** | Vypnutý — spustíš tlačítkem *Spustit*. |
+| 🔴 **Start selhal** | Něco se pokazilo; tlačítko *Log* ukáže výpis serveru. |
+
+- **Databáze** — kam server ukládá data: **SQLite** (soubor v tomto počítači, výchozí) nebo **MariaDB** (sdílená databáze na serveru). Viz §9.2.
+- **Spouštět se aplikací** — přepínač automatického startu. Když ho vypneš, server se spustí až tlačítkem *Spustit*.
+- **Založit účet správce** — objeví se **jen při prvním spuštění**, kdy je databáze prázdná a není se čím přihlásit. Zadáš jméno a heslo (min. 8 znaků), appka účet vytvoří a hned tě přihlásí.
+- **Spustit / Zastavit** a **Log** — ruční ovládání a diagnostika.
+
+**Kde jsou data.** Při volbě *SQLite* leží databáze v `%APPDATA%\P2L-Tester\server-data` (tj. `C:\Users\<jméno>\AppData\Roaming\P2L-Tester\server-data`), **ne** ve složce aplikace. Díky tomu můžeš novou verzi rozbalit přes starou nebo do jiné složky a **o data nepřijdeš**. Zálohu si můžeš udělat i z appky: *Databáze P2L modulů* → ☰ → *Exportovat databázi* (§10).
+
+**Poznámky:**
+- Appka nikdy nezabije server, který nespustila — když si ho pustíš zvlášť v příkazové řádce, zůstane běžet i po zavření appky.
+- Když appku ukončíš násilím (Správce úloh), server může zůstat běžet; při dalším spuštění ho appka najde a uklidí.
+- Přihlašovací účty jsou uložené v té databázi, kterou server používá — u *SQLite* jsou tedy jen v tomto počítači, u *MariaDB* společné pro všechny.
+
+### 9.2 Sdílená databáze (MariaDB)
+
+Když má být evidence **společná pro víc počítačů**, nasměruj server na MariaDB. Klepni v sekci *Lokální server* na **Databáze**, přepni na **MariaDB** a vyplň:
+
+| Pole | Co zadat |
+|------|----------|
+| **Server** / **Port** | adresa databázového serveru, port obvykle `3306` |
+| **Databáze** | jméno databáze (např. `P2Lunits`) — **musí už existovat**, tabulky si server vytvoří sám |
+| **Uživatel** / **Heslo** | databázový účet s právy na tu databázi |
+
+Po *Uložit* se server sám restartuje s novým nastavením. Když se k databázi nedostane, dialog to napíše (detail v *Log*).
+
+Poznámky:
+- Údaje se pamatují, takže přepnutím zpět na *SQLite* o ně nepřijdeš.
+- Když *Databáze* svítí **oranžově**, běžící server jede nad jinou databází, než máš nastavenou — typicky proto, že ho spustil někdo jiný (stav *Běží (spuštěn zvlášť)*). Pak ho restartuj ručně, jinak by se zápisy ukládaly jinam.
+- Účty pro přihlášení do appky jsou v té samé databázi, takže při MariaDB se přihlásíš stejným účtem z každého počítače.
+
+**Android a web server spustit nemohou** (nemají Node runtime a prohlížeč se na databázi přímo nepřipojí). Tam se appka přihlašuje k serveru **na síti** — adresu zadáš v *Nastavení → Účet*. Když má být evidence dostupná i z mobilu nebo z webu, musí být jeden server spuštěný trvale (typicky na tom stroji, kde je MariaDB) a všichni se hlásí na něj.
 
 ---
 
 ## 10. Databáze P2L modulů
 
-Centrální evidence P2L modulů na firemním serveru. Otevři přes menu **☰** → *Databáze P2L modulů* — položka je vidět **jen po přihlášení** (na Windows/Android přes *Nastavení → Účet*, na webu vždy).
+Centrální evidence P2L modulů. Otevři přes menu **☰** → *Databáze P2L modulů* — položka je vidět **jen po přihlášení** (na Windows/Android přes *Nastavení → Účet*, na webu vždy).
+
+Databáze běží na serveru. Ve Windows verzi ho appka může mít **přiložený a spouštět ho sama** (§9.1) — pak stačí spustit aplikaci a přihlásit se; data si drží buď lokálně, nebo ve sdílené MariaDB (§9.2). Android a web se vždy přihlašují k serveru na síti (adresa v *Nastavení → Účet*).
 
 Karty jednotek **vznikají a aktualizují se samy** běžnou prací s appkou: jakmile je uživatel přihlášený, každé ALIVE, načtení detailu (`get_param`), seznam devices i každá konfigurační akce (broker, WiFi, jas, firmware) se zapíší na kartu jednotky. Nic se nezadává ručně — kromě údajů níže.
 

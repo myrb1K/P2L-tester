@@ -1,0 +1,20 @@
+# Co se nemá dostat do build kontextu.
+#
+# Hlavní důvody: (1) node_modules z Windows hostu obsahuje native moduly
+# zkompilované pro Windows — v Linux image by nefungovaly, (2) .env nese
+# JWT secret a heslo k databázi.
+
+node_modules/
+data/
+.env
+.env.docker
+*.log
+
+# Do image se nekopírují (Dockerfile bere jen server.js, db, routes, scripts).
+test/
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+.env.example
+.env.docker.example
