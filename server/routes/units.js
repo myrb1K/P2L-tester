@@ -9,6 +9,9 @@
 //   PUT /:id/desired   ← set_Mqtt / set_WiFi / jas / OTA
 //   PUT /:id/meta      ← uživatel edituje název/umístění/poznámku/stav
 //   POST /:id/change-id ← change_ID (karta se přenáší vč. historie)
+//
+// Datová vrstva je asynchronní (db/adapter.js — SQLite i MariaDB), takže
+// handlery jsou async a `wrap` awaituje.
 
 const express = require('express');
 
@@ -49,9 +52,9 @@ function mapErrorToStatus(err) {
 
 // Obalí handler try/catch na UnitOpError → JSON chyba se správným statusem.
 function wrap(handler) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     try {
-      handler(req, res);
+      await handler(req, res);
     } catch (e) {
       if (e instanceof UnitOpError) {
         return res.status(mapErrorToStatus(e)).json({ error: e.code, message: e.message });
@@ -65,8 +68,8 @@ function makeRouter(db) {
   const router = express.Router();
   router.use(requireAuth);
 
-  router.get('/', wrap((req, res) => {
-    res.json({ units: listUnits(db) });
+  router.get('/', wrap(async (req, res) => {
+    res.json({ units: await listUnits(db) });
   }));
 
   // Export / import celé DB (kompletní záloha / obnova). MUSÍ být před /:id,
@@ -74,106 +77,106 @@ function makeRouter(db) {
   // (requireAuth výš), bez admin gatingu — hesla už jsou na kartě viditelná
   // přihlášenému a upsert (sloučení) nic nemaže, jen jako ostatní zápisy.
   // Společný obal zálohy (stejný formát pro celou DB i podmnožinu).
-  function exportEnvelope(ids) {
+  async function exportEnvelope(ids) {
     return {
       format: 'p2l-tester.unit-db',
       version: 1,
       exportedAt: new Date().toISOString(),
-      units: exportUnits(db, ids),
+      units: await exportUnits(db, ids),
     };
   }
 
   // GET = celá DB; POST {ids} = jen vybrané jednotky (1 nebo víc).
-  router.get('/export', wrap((req, res) => {
-    res.json(exportEnvelope(null));
+  router.get('/export', wrap(async (req, res) => {
+    res.json(await exportEnvelope(null));
   }));
 
-  router.post('/export', wrap((req, res) => {
+  router.post('/export', wrap(async (req, res) => {
     const { ids } = req.body || {};
-    res.json(exportEnvelope(ids));
+    res.json(await exportEnvelope(ids));
   }));
 
-  router.post('/import', wrap((req, res) => {
+  router.post('/import', wrap(async (req, res) => {
     const body = req.body || {};
     if (body.format !== 'p2l-tester.unit-db') {
       return res
         .status(400)
         .json({ error: 'invalid_body', message: 'Neznámý formát souboru (očekávám zálohu databáze).' });
     }
-    const result = importUnits(db, body.units, req.user.username);
+    const result = await importUnits(db, body.units, req.user.username);
     res.json({ ok: true, ...result });
   }));
 
-  router.get('/:id', wrap((req, res) => {
-    const unit = getUnit(db, req.params.id);
+  router.get('/:id', wrap(async (req, res) => {
+    const unit = await getUnit(db, req.params.id);
     if (!unit) return res.status(404).json({ error: 'not_found' });
     res.json({ unit });
   }));
 
-  router.get('/:id/history', wrap((req, res) => {
-    const unit = getUnit(db, req.params.id);
+  router.get('/:id/history', wrap(async (req, res) => {
+    const unit = await getUnit(db, req.params.id);
     if (!unit) return res.status(404).json({ error: 'not_found' });
-    res.json({ history: getHistory(db, req.params.id) });
+    res.json({ history: await getHistory(db, req.params.id) });
   }));
 
-  router.put('/:id/observed', wrap((req, res) => {
-    const id = upsertObserved(db, req.params.id, req.body || {});
+  router.put('/:id/observed', wrap(async (req, res) => {
+    const id = await upsertObserved(db, req.params.id, req.body || {});
     res.json({ ok: true, id });
   }));
 
-  router.put('/:id/desired', wrap((req, res) => {
-    const id = updateDesired(db, req.params.id, req.body, req.user.username);
+  router.put('/:id/desired', wrap(async (req, res) => {
+    const id = await updateDesired(db, req.params.id, req.body, req.user.username);
     res.json({ ok: true, id });
   }));
 
-  router.put('/:id/meta', wrap((req, res) => {
-    const id = updateMeta(db, req.params.id, req.body || {}, req.user.username);
+  router.put('/:id/meta', wrap(async (req, res) => {
+    const id = await updateMeta(db, req.params.id, req.body || {}, req.user.username);
     res.json({ ok: true, id });
   }));
 
-  router.post('/:id/change-id', wrap((req, res) => {
+  router.post('/:id/change-id', wrap(async (req, res) => {
     const { newId } = req.body || {};
     if (typeof newId !== 'string' && typeof newId !== 'number') {
       return res.status(400).json({ error: 'invalid_body', message: 'Chybí newId.' });
     }
-    const id = changeUnitId(db, req.params.id, String(newId), req.user.username);
+    const id = await changeUnitId(db, req.params.id, String(newId), req.user.username);
     res.json({ ok: true, id });
   }));
 
-  router.delete('/:id', wrap((req, res) => {
+  router.delete('/:id', wrap(async (req, res) => {
     if (!req.user.isAdmin) {
       return res.status(403).json({ error: 'admin_required' });
     }
-    deleteUnit(db, req.params.id);
+    await deleteUnit(db, req.params.id);
     res.status(204).end();
   }));
 
   // ── Hromadné operace ──────────────────────────────────────────────────
   // POST (ne PUT/DELETE) + pevné cesty /bulk/* → nekolidují s /:id routami.
-  router.post('/bulk/desired', wrap((req, res) => {
+  router.post('/bulk/desired', wrap(async (req, res) => {
     const { ids, fragment } = req.body || {};
-    const count = bulkUpdateDesired(db, ids, fragment, req.user.username);
+    const count = await bulkUpdateDesired(db, ids, fragment, req.user.username);
     res.json({ ok: true, count });
   }));
 
-  router.post('/bulk/meta', wrap((req, res) => {
+  router.post('/bulk/meta', wrap(async (req, res) => {
     const { ids, meta } = req.body || {};
-    const count = bulkUpdateMeta(db, ids, meta || {}, req.user.username);
+    const count = await bulkUpdateMeta(db, ids, meta || {}, req.user.username);
     res.json({ ok: true, count });
   }));
 
   // Společné hodnoty evidence vybraných (předvyplnění dialogu hromadné editace).
-  router.post('/bulk/common-desired', wrap((req, res) => {
+  router.post('/bulk/common-desired', wrap(async (req, res) => {
     const { ids } = req.body || {};
-    res.json({ common: commonDesired(db, ids) });
+    res.json({ common: await commonDesired(db, ids) });
   }));
 
-  router.post('/bulk/delete', wrap((req, res) => {
+  router.post('/bulk/delete', wrap(async (req, res) => {
     if (!req.user.isAdmin) {
       return res.status(403).json({ error: 'admin_required' });
     }
     const { ids } = req.body || {};
-    const count = bulkDeleteUnits(db, ids);
+    const count = await bulkDeleteUnits(db, ids);
     res.json({ ok: true, count });
   }));
 

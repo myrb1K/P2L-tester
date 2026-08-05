@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // Použití: node scripts/add-user.js <username> <password> [--admin]
 
-const { openDb } = require('../db');
-const { createUser, UserOpError } = require('../db/users');
-const { die, parseArgs } = require('./_lib');
+const { createUser } = require('../db/users');
+const { die, parseArgs, runCli } = require('./_lib');
 
 const { positional, flags } = parseArgs(process.argv.slice(2));
 const [username, password] = positional;
@@ -12,8 +11,8 @@ if (!username || !password) {
   die('Použití: node scripts/add-user.js <username> <password> [--admin]');
 }
 
-try {
-  createUser(openDb(), {
+runCli(async (db) => {
+  await createUser(db, {
     username,
     password,
     isAdmin: flags.has('admin'),
@@ -21,7 +20,4 @@ try {
   console.log(
     `✓ Uživatel '${username}' vytvořen${flags.has('admin') ? ' jako admin' : ''}.`
   );
-} catch (e) {
-  if (e instanceof UserOpError) die(e.message);
-  throw e;
-}
+});

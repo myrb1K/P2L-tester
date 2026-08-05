@@ -11,6 +11,7 @@ import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
 import '../services/file_export.dart';
 import '../widgets/account_section.dart';
+import '../widgets/local_server_section.dart';
 import 'admin_users_screen.dart';
 import 'auth_gate.dart';
 import 'help_screen.dart';
@@ -872,6 +873,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 const AccountSection(),
+                // Lokální server pro databázi jednotek — zobrazí se jen když
+                // je vedle EXE přiložený portable server (jinak SizedBox).
+                const LocalServerSection(),
               ],
             ),
           ),

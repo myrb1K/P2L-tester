@@ -1,0 +1,84 @@
+# Nasazení serveru P2L Testeru v Dockeru: backend + MariaDB.
+#
+#   cp .env.docker.example .env.docker      # vyplnit JWT_SECRET a DB_PASSWORD
+#   docker compose --env-file .env.docker up -d --build
+#
+# `--env-file` je potřeba u KAŽDÉHO příkazu (up, logs, exec, down) — compose
+# z něj bere hodnoty pro ${...} níže. Bez něj se použijí jen defaulty a příkaz
+# skončí chybou na chybějícím JWT_SECRET.
+#
+# Kdo má MariaDB vlastní (firemní server), tenhle compose nepotřebuje — stačí
+# image ze Dockerfile a `docker run` s DB_* proměnnými, viz README §Docker.
+
+name: p2l-tester
+
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    # Databázi zakládá image z MARIADB_DATABASE, a to s default charsetem
+    # serveru — proto se utf8mb4 vynucuje tady. Schéma tabulek si server
+    # dodělá sám při startu (db/*.mariadb.sql).
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-P2Lunits}
+      MARIADB_USER: ${DB_USER:-p2l}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD musí být nastavené (viz .env.docker)}
+      # Root účet appka nepotřebuje — DB_USER má na svou databázi ALL PRIVILEGES.
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    # Port 3306 se na host ZÁMĚRNĚ nemapuje — databáze je dostupná jen pro
+    # `api` přes interní síť compose. Kdo potřebuje připojit klienta zvenčí,
+    # ať přidá `ports: ["127.0.0.1:3306:3306"]` (loopback, ne 0.0.0.0).
+
+  api:
+    build:
+      context: .
+    image: p2l-tester-server:latest
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      P2L_DATA_DIR: /data
+      # Musí být stabilní: změna JWT_SECRET zneplatní všechny vydané tokeny
+      # (web i nativní klienti se budou muset přihlásit znovu).
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET musí být nastavené, min. 32 znaků (viz .env.docker)}
+      DB_DRIVER: mariadb
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-P2Lunits}
+      DB_USER: ${DB_USER:-p2l}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD musí být nastavené (viz .env.docker)}
+      DB_CONNECTION_LIMIT: ${DB_CONNECTION_LIMIT:-10}
+      # Jen když Flutter web build servíruje někdo jiný než tenhle server.
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # Použije se jen při prvním startu nad prázdnou tabulkou users; potom se
+      # ignoruje. Po prvním přihlášení heslo změnit.
+      INITIAL_ADMIN_USER: ${INITIAL_ADMIN_USER:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    ports:
+      # Default jen loopback — pro přístup ze sítě (EXE/APK klienti) přepiš
+      # API_BIND na 0.0.0.0 a port si ochraň firewallem / reverzní proxy.
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-3001}:3001"
+    volumes:
+      # Při DB_DRIVER=mariadb je tu jen server.pid; volume se drží proto, aby
+      # přepnutí na sqlite nebo přiložení dalších dat nic nepřepsalo.
+      - api-data:/data
+
+volumes:
+  db-data:
+  api-data:

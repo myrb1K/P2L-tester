@@ -1,6 +1,7 @@
 // CRUD vrstva centrální databáze jednotek (PRD-DB/01-PRD.md, milestone DB2).
-// Sdílená mezi API routes (routes/units.js) a testy. better-sqlite3,
-// synchronní — stejný vzor jako db/users.js.
+// Sdílená mezi API routes (routes/units.js) a testy. Běží nad db/adapter.js,
+// takže stejná logika obsluhuje SQLite i MariaDB — asynchronně (MariaDB klient
+// synchronní být nemůže).
 //
 // Zásady:
 // - Observed updaty NEgenerují historii (ALIVE chodí à 5 min — byl by šum).
@@ -10,13 +11,17 @@
 // - Karta vzniká upsertem při prvním kontaktu (observed) i při prvním
 //   zápisu desired/meta — generace se v tom případě odvodí z ID
 //   (>= 1000 = nová, jinak stará; stejná heuristika jako v appce).
+// - Časové značky zapisuje aplikace jako ISO 8601 (adapter.nowIso), ne SQL
+//   funkce — `datetime('now')` a `UTC_TIMESTAMP()` by se lišily formátem.
+// - Uvnitř db.transaction(...) se dotazuje přes předaný `tx`, ne přes vnější
+//   handle (viz hlavička db/adapter.js).
 
-const path = require('path');
-const fs = require('fs');
-const Database = require('better-sqlite3');
+const { openAdapter, nowIso } = require('./adapter');
+const { dataPath } = require('./paths');
 
-const UNITS_DB_PATH = path.join(__dirname, '..', 'data', 'units.db');
-const SCHEMA_PATH = path.join(__dirname, 'units-schema.sql');
+// Lazy (ne konstanta při require) kvůli P2L_DATA_DIR — viz db/paths.js.
+// Relevantní jen pro SQLite driver.
+const unitsDbPath = () => dataPath('units.db');
 
 const VALID_STATUS = ['active', 'faulty', 'stock', 'retired'];
 
@@ -25,6 +30,19 @@ const VALID_STATUS = ['active', 'faulty', 'stock', 'retired'];
 // při otevření DB (vyčistí přebytky z doby před retencí).
 const HISTORY_RETENTION = 5;
 
+// Strop pro jedno ořezání historie. `LIMIT <n> OFFSET 5` je portable způsob,
+// jak vybrat „všechno kromě 5 nejnovějších" — MariaDB nezná SQLite `LIMIT -1`.
+const PRUNE_BATCH = 100000;
+
+// Sloupce tabulky units v pořadí pro import/upsert.
+const UNIT_COLUMNS = [
+  'id', 'generation', 'mac', 'hw_model', 'firmware', 'ip', 'battery',
+  'ssid', 'mqtt_server', 'mqtt_port', 'brightness', 'seen_on_broker',
+  'unit_config_json', 'unit_config_fetched_at', 'last_seen', 'devices_json',
+  'desired_json', 'desired_updated_at', 'desired_updated_by',
+  'name', 'location', 'note', 'status', 'created_at', 'updated_at',
+];
+
 class UnitOpError extends Error {
   constructor(code, message) {
     super(message);
@@ -32,55 +50,84 @@ class UnitOpError extends Error {
   }
 }
 
-// `:memory:` pro testy, jinak data/units.db.
-function openUnitsDb(dbPath = UNITS_DB_PATH) {
-  if (dbPath !== ':memory:') {
-    const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  }
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
-  ensureObservedColumns(db);
-  pruneAllHistory(db);
+/// Otevře databázi jednotek. Bez argumentu se driver bere z env (DB_DRIVER)
+/// a SQLite soubor z data/units.db.
+///
+/// Pro pohodlí testů přijímá i samotnou cestu k SQLite souboru (`:memory:`).
+async function openUnitsDb(optsOrPath) {
+  const opts = typeof optsOrPath === 'string' ? { sqliteFile: optsOrPath } : { ...optsOrPath };
+  const db = await openAdapter({
+    schemas: ['units-schema'],
+    sqliteFile: opts.sqliteFile || unitsDbPath(),
+    driver: opts.driver,
+    config: opts.config,
+  });
+  await prepareUnitsSchema(db);
   return db;
+}
+
+/// Doplnění chybějících sloupců + úklid historie. Vyčleněno, aby to šlo pustit
+/// i nad handlem otevřeným jinde (MariaDB má users i units v jedné databázi,
+/// takže server otevírá jeden pool — viz db/index.js openDatabases).
+async function prepareUnitsSchema(db) {
+  await ensureObservedColumns(db);
+  await pruneAllHistory(db);
 }
 
 // Jednorázový úklid: u každé jednotky nechá jen posledních HISTORY_RETENTION
 // záznamů historie. Řeší data z doby před zavedením retence.
-function pruneAllHistory(db) {
-  db.prepare(
-    `DELETE FROM unit_history WHERE id NOT IN (
-       SELECT id FROM (
-         SELECT id, ROW_NUMBER() OVER (
-           PARTITION BY unit_id ORDER BY id DESC
-         ) AS rn FROM unit_history
-       ) WHERE rn <= ?
-     )`
-  ).run(HISTORY_RETENTION);
+async function pruneAllHistory(db) {
+  const rows = await db.all(
+    'SELECT unit_id FROM unit_history GROUP BY unit_id HAVING COUNT(*) > :keep',
+    { keep: HISTORY_RETENTION }
+  );
+  for (const r of rows) await pruneHistory(db, r.unit_id);
+}
+
+// Ořeže historii jedné jednotky na HISTORY_RETENTION nejnovějších záznamů.
+//
+// Dvoufázově (SELECT id → DELETE ... IN), protože MariaDB nedovolí v subquery
+// DELETE odkázat na mazanou tabulku ("You can't specify target table").
+// LIMIT/OFFSET jsou vlastní konstanty vložené do SQL, ne parametry: MariaDB
+// je v prepared statements přijímá nespolehlivě (a nic tu nepřichází od
+// uživatele, takže se nic neriskuje).
+async function pruneHistory(db, unitId) {
+  const rows = await db.all(
+    `SELECT id FROM unit_history WHERE unit_id = :id
+     ORDER BY id DESC LIMIT ${PRUNE_BATCH} OFFSET ${HISTORY_RETENTION}`,
+    { id: unitId }
+  );
+  if (rows.length === 0) return;
+  const ids = rows.map((r) => r.id);
+  await db.run(
+    `DELETE FROM unit_history WHERE id IN (${ids.map(() => '?').join(', ')})`,
+    ids
+  );
 }
 
 // Mini-migrace: CREATE TABLE IF NOT EXISTS existující DB nerozšíří, takže
 // nové observed sloupce (DB3: ssid/mqtt_server/mqtt_port/brightness) doplní
 // ALTER TABLE. Idempotentní — přidá jen chybějící.
-function ensureObservedColumns(db) {
-  const existing = new Set(db.pragma('table_info(units)').map((c) => c.name));
+async function ensureObservedColumns(db) {
+  const existing = await db.columns('units');
   const wanted = {
-    ssid: 'TEXT',
-    mqtt_server: 'TEXT',
-    mqtt_port: 'INTEGER',
-    brightness: 'INTEGER',
+    ssid: { sqlite: 'TEXT', mariadb: 'VARCHAR(128)' },
+    mqtt_server: { sqlite: 'TEXT', mariadb: 'VARCHAR(255)' },
+    mqtt_port: { sqlite: 'INTEGER', mariadb: 'INT' },
+    brightness: { sqlite: 'INTEGER', mariadb: 'INT' },
     // Host brokeru, přes který appka jednotku naposledy viděla (ALIVE).
     // Na rozdíl od mqtt_server (jen z get_param) se plní každým kontaktem —
     // drift „jednotka žije na jiném brokeru" je vidět hned po discovery.
-    seen_on_broker: 'TEXT',
+    seen_on_broker: { sqlite: 'TEXT', mariadb: 'VARCHAR(255)' },
     // DB5: poslední UNIT GET-CONFIG 1:1 (nakonfigurováno + actualIp/actualSSID,
     // hesla jako bool) + čas načtení. Bohatší observed než get_param.
-    unit_config_json: 'TEXT',
-    unit_config_fetched_at: 'TEXT',
+    unit_config_json: { sqlite: 'TEXT', mariadb: 'LONGTEXT' },
+    unit_config_fetched_at: { sqlite: 'TEXT', mariadb: 'VARCHAR(32)' },
   };
-  for (const [col, type] of Object.entries(wanted)) {
-    if (!existing.has(col)) db.exec(`ALTER TABLE units ADD COLUMN ${col} ${type}`);
+  for (const [col, types] of Object.entries(wanted)) {
+    if (!existing.has(col)) {
+      await db.exec(`ALTER TABLE units ADD COLUMN ${col} ${types[db.dialect]}`);
+    }
   }
 }
 
@@ -135,29 +182,38 @@ function scrubSecrets(value) {
   return out;
 }
 
-function addHistory(db, unitId, username, action, detail) {
-  db.prepare(
-    'INSERT INTO unit_history (unit_id, username, action, detail_json) VALUES (?, ?, ?, ?)'
-  ).run(unitId, username, action, detail == null ? null : JSON.stringify(scrubSecrets(detail)));
+async function addHistory(db, unitId, username, action, detail) {
+  await db.run(
+    `INSERT INTO unit_history (unit_id, at, username, action, detail_json)
+     VALUES (:unit_id, :at, :username, :action, :detail_json)`,
+    {
+      unit_id: unitId,
+      at: nowIso(),
+      username,
+      action,
+      detail_json: detail == null ? null : JSON.stringify(scrubSecrets(detail)),
+    }
+  );
   // Retence: na jednotku držíme jen posledních HISTORY_RETENTION záznamů.
-  db.prepare(
-    `DELETE FROM unit_history WHERE unit_id = ? AND id NOT IN (
-       SELECT id FROM unit_history WHERE unit_id = ? ORDER BY id DESC LIMIT ?
-     )`
-  ).run(unitId, unitId, HISTORY_RETENTION);
+  await pruneHistory(db, unitId);
 }
 
-function getHistory(db, rawId, limit = 200) {
+async function getHistory(db, rawId, limit = 200) {
   const id = normalizeUnitId(rawId);
-  return db
-    .prepare('SELECT at, username, action, detail_json FROM unit_history WHERE unit_id = ? ORDER BY id DESC LIMIT ?')
-    .all(id, limit)
-    .map((r) => ({
-      at: r.at,
-      username: r.username,
-      action: r.action,
-      detail: r.detail_json ? JSON.parse(r.detail_json) : null,
-    }));
+  // LIMIT inline (viz pruneHistory) — hodnota je z kódu, ne z requestu, ale
+  // pro jistotu ji stejně protáhneme přes celočíselnou kontrolu.
+  const n = Number.isInteger(limit) && limit > 0 ? limit : 200;
+  const rows = await db.all(
+    `SELECT at, username, action, detail_json FROM unit_history
+     WHERE unit_id = :id ORDER BY id DESC LIMIT ${n}`,
+    { id }
+  );
+  return rows.map((r) => ({
+    at: r.at,
+    username: r.username,
+    action: r.action,
+    detail: r.detail_json ? JSON.parse(r.detail_json) : null,
+  }));
 }
 
 // Drift v2 (PRD-DB v2 §6): souhrnný boolean pro řádek seznamu. Tři kategorie
@@ -167,8 +223,9 @@ function getHistory(db, rawId, limit = 200) {
 //   1) evidence ↔ uloženo v NVS (mqttAddress/SSID z GET-CONFIG)
 //   2) uloženo ↔ reálně běží (ip↔actualIp, SSID↔actualSSID) — i bez desired
 //   3) evidence ↔ kde ji vidíme (mqtt_server / seen_on_broker)
-// SQLite `datetime('now')` ('YYYY-MM-DD HH:MM:SS', UTC bez tz) i ISO string
-// z appky ('…T…Z') → Date v UTC. Zrcadlí klientský _parseTime.
+// Časy jsou ISO 8601 z appky i ze serveru ('…T…Z'); starší SQLite data mohou
+// nést `datetime('now')` tvar ('YYYY-MM-DD HH:MM:SS', UTC bez tz) → obojí
+// převedeme na Date v UTC. Zrcadlí klientský _parseTime.
 function parseTs(v) {
   if (typeof v !== 'string' || !v) return null;
   let s = v.includes('T') ? v : `${v.replace(' ', 'T')}Z`;
@@ -239,60 +296,58 @@ function computeDrift(desiredJson, row) {
 // Seznam pro přehled/inventuru — BEZ desired_json (hesla!) a bez
 // devices_json (objem); detail karty vrací getUnit. Navíc příznak `drift`
 // (nesoulad desired vs. observed) spočítaný server-side.
-function listUnits(db) {
-  return db
-    .prepare(
-      `SELECT id, generation, mac, name, location, status, last_seen, firmware,
-              ip, battery, updated_at,
-              ssid, mqtt_server, mqtt_port, brightness, seen_on_broker,
-              unit_config_json, desired_json, desired_updated_at
-       FROM units ORDER BY CAST(id AS INTEGER)`
-    )
-    .all()
-    .map((row) => {
-      const {
-        desired_json: desiredJson,
-        unit_config_json: unitConfigJson,
-        desired_updated_at: desiredUpdatedAt, // jen pro výpočet, nevrací se
-        ssid, mqtt_server: mqttServer, mqtt_port: mqttPort, brightness,
-        seen_on_broker: seenOnBroker,
-        ...rest
-      } = row;
-      // Adresa brokeru pro řádek seznamu (není tajná — desired_json s hesly
-      // dál nevracíme). Když je evidence čerstvě změněná a jednotku jsme od té
-      // doby neviděli (odešla na nový broker), ukaž ZAMÝŠLENÝ broker z evidence
-      // — jinak by řádek dál svítil starou adresou. Jinak realita: uloženo
-      // v NVS (GET-CONFIG) → hlášeno jednotkou (get_param) → kde ji appka viděla.
-      let cfgBroker = null;
-      let desiredBroker = null;
-      if (unitConfigJson) {
-        try {
-          cfgBroker = JSON.parse(unitConfigJson).mqttAddress || null;
-        } catch {
-          /* poškozený JSON → ignoruj */
-        }
+async function listUnits(db) {
+  const rows = await db.all(
+    `SELECT id, generation, mac, name, location, status, last_seen, firmware,
+            ip, battery, updated_at,
+            ssid, mqtt_server, mqtt_port, brightness, seen_on_broker,
+            unit_config_json, desired_json, desired_updated_at
+     FROM units ORDER BY ${db.sql.castInt('id')}`
+  );
+  return rows.map((row) => {
+    const {
+      desired_json: desiredJson,
+      unit_config_json: unitConfigJson,
+      desired_updated_at: desiredUpdatedAt, // jen pro výpočet, nevrací se
+      ssid, mqtt_server: mqttServer, mqtt_port: mqttPort, brightness,
+      seen_on_broker: seenOnBroker,
+      ...rest
+    } = row;
+    // Adresa brokeru pro řádek seznamu (není tajná — desired_json s hesly
+    // dál nevracíme). Když je evidence čerstvě změněná a jednotku jsme od té
+    // doby neviděli (odešla na nový broker), ukaž ZAMÝŠLENÝ broker z evidence
+    // — jinak by řádek dál svítil starou adresou. Jinak realita: uloženo
+    // v NVS (GET-CONFIG) → hlášeno jednotkou (get_param) → kde ji appka viděla.
+    let cfgBroker = null;
+    let desiredBroker = null;
+    if (unitConfigJson) {
+      try {
+        cfgBroker = JSON.parse(unitConfigJson).mqttAddress || null;
+      } catch {
+        /* poškozený JSON → ignoruj */
       }
-      if (desiredJson) {
-        try {
-          const d = JSON.parse(desiredJson);
-          desiredBroker = (d && d.broker && d.broker.address) || null;
-        } catch {
-          /* poškozený JSON → ignoruj */
-        }
+    }
+    if (desiredJson) {
+      try {
+        const d = JSON.parse(desiredJson);
+        desiredBroker = (d && d.broker && d.broker.address) || null;
+      } catch {
+        /* poškozený JSON → ignoruj */
       }
-      const observedBroker = cfgBroker || mqttServer || seenOnBroker || null;
-      const changed = parseTs(desiredUpdatedAt);
-      const seen = parseTs(row.last_seen);
-      const pending = desiredBroker && changed && (!seen || seen < changed);
-      const broker =
-        (pending ? desiredBroker : null) || observedBroker || desiredBroker || null;
-      return { ...rest, broker, drift: computeDrift(desiredJson, row) };
-    });
+    }
+    const observedBroker = cfgBroker || mqttServer || seenOnBroker || null;
+    const changed = parseTs(desiredUpdatedAt);
+    const seen = parseTs(row.last_seen);
+    const pending = desiredBroker && changed && (!seen || seen < changed);
+    const broker =
+      (pending ? desiredBroker : null) || observedBroker || desiredBroker || null;
+    return { ...rest, broker, drift: computeDrift(desiredJson, row) };
+  });
 }
 
-function getUnit(db, rawId) {
+async function getUnit(db, rawId) {
   const id = normalizeUnitId(rawId);
-  const row = db.prepare('SELECT * FROM units WHERE id = ?').get(id);
+  const row = await db.get('SELECT * FROM units WHERE id = :id', { id });
   if (!row) return null;
   const {
     devices_json: devicesJson,
@@ -308,30 +363,34 @@ function getUnit(db, rawId) {
   };
 }
 
-function unitExists(db, id) {
-  return !!db.prepare('SELECT 1 FROM units WHERE id = ?').get(id);
+async function unitExists(db, id) {
+  return !!(await db.get('SELECT 1 AS x FROM units WHERE id = :id', { id }));
 }
 
 // Založí prázdnou kartu, pokud neexistuje. Vrací kanonické ID.
-function ensureUnit(db, rawId, generation) {
+async function ensureUnit(db, rawId, generation) {
   const id = normalizeUnitId(rawId);
   const gen = generation === 'old' || generation === 'new' ? generation : deriveGeneration(id);
-  db.prepare(
-    'INSERT INTO units (id, generation) VALUES (?, ?) ON CONFLICT(id) DO NOTHING'
-  ).run(id, gen);
+  const now = nowIso();
+  await db.run(
+    `INSERT INTO units (id, generation, status, created_at, updated_at)
+     VALUES (:id, :generation, 'active', :created_at, :updated_at)
+     ${db.sql.onConflictDoNothing('id')}`,
+    { id, generation: gen, created_at: now, updated_at: now }
+  );
   return id;
 }
 
 // Observed vrstva — merge: přepisují se jen dodaná pole (partial update,
 // např. ALIVE nese jen firmware+baterii, get_param zbytek). Bez historie.
-function upsertObserved(db, rawId, obs = {}) {
-  const id = ensureUnit(db, rawId, obs.generation);
+async function upsertObserved(db, rawId, obs = {}) {
+  const id = await ensureUnit(db, rawId, obs.generation);
   const sets = [];
   const params = { id };
   // GET-CONFIG snapshot: chraň dřív zachycená skutečná hesla před pozdějším bool.
   let configToStore = obs.unitConfig;
   if (obs.unitConfig !== undefined) {
-    const prev = db.prepare('SELECT unit_config_json FROM units WHERE id = ?').get(id);
+    const prev = await db.get('SELECT unit_config_json FROM units WHERE id = :id', { id });
     configToStore = mergeConfigSecrets(obs.unitConfig, prev && prev.unit_config_json);
   }
   const map = {
@@ -350,22 +409,23 @@ function upsertObserved(db, rawId, obs = {}) {
   };
   for (const [col, val] of Object.entries(map)) {
     if (val !== undefined) {
-      sets.push(`${col} = @${col}`);
+      sets.push(`${col} = :${col}`);
       params[col] = val;
     }
   }
   if (obs.unitConfig !== undefined) {
-    sets.push(`unit_config_fetched_at = @unit_config_fetched_at`);
-    params.unit_config_fetched_at = obs.lastSeen || new Date().toISOString();
+    sets.push('unit_config_fetched_at = :unit_config_fetched_at');
+    params.unit_config_fetched_at = obs.lastSeen || nowIso();
   }
   if (obs.generation === 'old' || obs.generation === 'new') {
-    sets.push('generation = @generation');
+    sets.push('generation = :generation');
     params.generation = obs.generation;
   }
-  sets.push(`last_seen = @last_seen`);
-  params.last_seen = obs.lastSeen || new Date().toISOString();
-  sets.push(`updated_at = datetime('now')`);
-  db.prepare(`UPDATE units SET ${sets.join(', ')} WHERE id = @id`).run(params);
+  sets.push('last_seen = :last_seen');
+  params.last_seen = obs.lastSeen || nowIso();
+  sets.push('updated_at = :updated_at');
+  params.updated_at = nowIso();
+  await db.run(`UPDATE units SET ${sets.join(', ')} WHERE id = :id`, params);
   return id;
 }
 
@@ -373,12 +433,12 @@ function upsertObserved(db, rawId, obs = {}) {
 // (set_Mqtt → {broker}, set_WiFi → {wifi}, …), takže poslaný fragment
 // přepíše jen svoje klíče a zbytek desired zůstává. Historie dostává jen
 // fragment (se scrubnutými hesly).
-function updateDesired(db, rawId, fragment, username) {
+async function updateDesired(db, rawId, fragment, username) {
   if (fragment === null || typeof fragment !== 'object' || Array.isArray(fragment)) {
     throw new UnitOpError('invalid_body', 'desired musí být JSON objekt');
   }
-  const id = ensureUnit(db, rawId);
-  const row = db.prepare('SELECT desired_json FROM units WHERE id = ?').get(id);
+  const id = await ensureUnit(db, rawId);
+  const row = await db.get('SELECT desired_json FROM units WHERE id = :id', { id });
   const current = row?.desired_json ? JSON.parse(row.desired_json) : {};
   // Hloubkový merge o jednu úroveň: vnořené objekty (broker, wifi) se slévají
   // po podklíčích, ne nahrazují vcelku — jinak by částečný fragment (např. jen
@@ -388,26 +448,28 @@ function updateDesired(db, rawId, fragment, username) {
   for (const [k, v] of Object.entries(fragment)) {
     merged[k] = isObj(v) && isObj(merged[k]) ? { ...merged[k], ...v } : v;
   }
-  db.prepare(
-    `UPDATE units SET desired_json = ?, desired_updated_at = datetime('now'),
-     desired_updated_by = ?, updated_at = datetime('now') WHERE id = ?`
-  ).run(JSON.stringify(merged), username, id);
-  addHistory(db, id, username, 'desired', fragment);
+  const now = nowIso();
+  await db.run(
+    `UPDATE units SET desired_json = :desired_json, desired_updated_at = :at,
+     desired_updated_by = :by, updated_at = :at WHERE id = :id`,
+    { desired_json: JSON.stringify(merged), at: now, by: username, id }
+  );
+  await addHistory(db, id, username, 'desired', fragment);
   return id;
 }
 
 // Meta vrstva — partial update (jen dodaná pole) + historie.
-function updateMeta(db, rawId, meta = {}, username) {
+async function updateMeta(db, rawId, meta = {}, username) {
   if (meta.status !== undefined && !VALID_STATUS.includes(meta.status)) {
     throw new UnitOpError('invalid_status', `Neplatný stav '${meta.status}' (povolené: ${VALID_STATUS.join(', ')})`);
   }
-  const id = ensureUnit(db, rawId);
+  const id = await ensureUnit(db, rawId);
   const sets = [];
   const params = { id };
   const changed = {};
   for (const col of ['name', 'location', 'note', 'status']) {
     if (meta[col] !== undefined) {
-      sets.push(`${col} = @${col}`);
+      sets.push(`${col} = :${col}`);
       params[col] = meta[col];
       changed[col] = meta[col];
     }
@@ -415,40 +477,40 @@ function updateMeta(db, rawId, meta = {}, username) {
   if (sets.length === 0) {
     throw new UnitOpError('invalid_body', 'Žádné pole ke změně (name / location / note / status)');
   }
-  sets.push(`updated_at = datetime('now')`);
-  db.prepare(`UPDATE units SET ${sets.join(', ')} WHERE id = @id`).run(params);
-  addHistory(db, id, username, 'meta', changed);
+  sets.push('updated_at = :updated_at');
+  params.updated_at = nowIso();
+  await db.run(`UPDATE units SET ${sets.join(', ')} WHERE id = :id`, params);
+  await addHistory(db, id, username, 'meta', changed);
   return id;
 }
 
 // Přečíslování jednotky (change_ID) — karta se PŘENÁŠÍ včetně historie,
 // nezakládá se nová (PRD §7 R6).
-function changeUnitId(db, rawOldId, rawNewId, username) {
+async function changeUnitId(db, rawOldId, rawNewId, username) {
   const oldId = normalizeUnitId(rawOldId);
   const newId = normalizeUnitId(rawNewId);
   if (oldId === newId) throw new UnitOpError('same_id', 'Nové ID je shodné se starým.');
-  if (!unitExists(db, oldId)) throw new UnitOpError('not_found', `Jednotka '${oldId}' v DB není.`);
-  if (unitExists(db, newId)) throw new UnitOpError('duplicate', `Jednotka '${newId}' už v DB existuje.`);
-  const tx = db.transaction(() => {
-    db.prepare(
-      `UPDATE units SET id = ?, generation = ?, updated_at = datetime('now') WHERE id = ?`
-    ).run(newId, deriveGeneration(newId), oldId);
-    db.prepare('UPDATE unit_history SET unit_id = ? WHERE unit_id = ?').run(newId, oldId);
-    addHistory(db, newId, username, 'change_id', { from: oldId, to: newId });
+  if (!(await unitExists(db, oldId))) throw new UnitOpError('not_found', `Jednotka '${oldId}' v DB není.`);
+  if (await unitExists(db, newId)) throw new UnitOpError('duplicate', `Jednotka '${newId}' už v DB existuje.`);
+  await db.transaction(async (tx) => {
+    await tx.run(
+      'UPDATE units SET id = :newId, generation = :generation, updated_at = :updated_at WHERE id = :oldId',
+      { newId, generation: deriveGeneration(newId), updated_at: nowIso(), oldId }
+    );
+    await tx.run('UPDATE unit_history SET unit_id = :newId WHERE unit_id = :oldId', { newId, oldId });
+    await addHistory(tx, newId, username, 'change_id', { from: oldId, to: newId });
   });
-  tx();
   return newId;
 }
 
 // Smazání karty včetně historie (jen admin — vynucuje route).
-function deleteUnit(db, rawId) {
+async function deleteUnit(db, rawId) {
   const id = normalizeUnitId(rawId);
-  if (!unitExists(db, id)) throw new UnitOpError('not_found', `Jednotka '${id}' v DB není.`);
-  const tx = db.transaction(() => {
-    db.prepare('DELETE FROM unit_history WHERE unit_id = ?').run(id);
-    db.prepare('DELETE FROM units WHERE id = ?').run(id);
+  if (!(await unitExists(db, id))) throw new UnitOpError('not_found', `Jednotka '${id}' v DB není.`);
+  await db.transaction(async (tx) => {
+    await tx.run('DELETE FROM unit_history WHERE unit_id = :id', { id });
+    await tx.run('DELETE FROM units WHERE id = :id', { id });
   });
-  tx();
 }
 
 // ── Hromadné operace (bulk endpointy) ──────────────────────────────────────
@@ -461,21 +523,19 @@ function requireIds(ids) {
   }
 }
 
-function bulkUpdateDesired(db, ids, fragment, username) {
+async function bulkUpdateDesired(db, ids, fragment, username) {
   requireIds(ids);
-  const tx = db.transaction((list) => {
-    for (const rawId of list) updateDesired(db, rawId, fragment, username);
+  await db.transaction(async (tx) => {
+    for (const rawId of ids) await updateDesired(tx, rawId, fragment, username);
   });
-  tx(ids);
   return ids.length;
 }
 
-function bulkUpdateMeta(db, ids, meta, username) {
+async function bulkUpdateMeta(db, ids, meta, username) {
   requireIds(ids);
-  const tx = db.transaction((list) => {
-    for (const rawId of list) updateMeta(db, rawId, meta, username);
+  await db.transaction(async (tx) => {
+    for (const rawId of ids) await updateMeta(tx, rawId, meta, username);
   });
-  tx(ids);
   return ids.length;
 }
 
@@ -483,13 +543,14 @@ function bulkUpdateMeta(db, ids, meta, username) {
 // dialogu hromadné editace. Každé pole (i vnořené broker/wifi po podklíčích)
 // se zařadí jen když ho mají VŠECHNY vybrané a je shodné; jinak se vynechá
 // (v dialogu prázdné). Heslo se vrátí jen když ho mají všichni stejné.
-function commonDesired(db, ids) {
+async function commonDesired(db, ids) {
   requireIds(ids);
-  const desireds = ids.map((rawId) => {
+  const desireds = [];
+  for (const rawId of ids) {
     const id = normalizeUnitId(rawId);
-    const row = db.prepare('SELECT desired_json FROM units WHERE id = ?').get(id);
-    return row && row.desired_json ? JSON.parse(row.desired_json) : {};
-  });
+    const row = await db.get('SELECT desired_json FROM units WHERE id = :id', { id });
+    desireds.push(row && row.desired_json ? JSON.parse(row.desired_json) : {});
+  }
   const allEqual = (vals) =>
     vals.every((v) => v !== undefined) && vals.every((v) => v === vals[0]);
   const common = {};
@@ -515,19 +576,18 @@ function commonDesired(db, ids) {
 
 // Tolerantní k chybějícím ID — seznam pochází z klienta a mezitím mohlo ID
 // zmizet; přeskočíme ho místo abychom shodili celou dávku.
-function bulkDeleteUnits(db, ids) {
+async function bulkDeleteUnits(db, ids) {
   requireIds(ids);
   let n = 0;
-  const tx = db.transaction((list) => {
-    for (const rawId of list) {
+  await db.transaction(async (tx) => {
+    for (const rawId of ids) {
       const id = normalizeUnitId(rawId);
-      if (!unitExists(db, id)) continue;
-      db.prepare('DELETE FROM unit_history WHERE unit_id = ?').run(id);
-      db.prepare('DELETE FROM units WHERE id = ?').run(id);
+      if (!(await unitExists(tx, id))) continue;
+      await tx.run('DELETE FROM unit_history WHERE unit_id = :id', { id });
+      await tx.run('DELETE FROM units WHERE id = :id', { id });
       n++;
     }
   });
-  tx(ids);
   return n;
 }
 
@@ -536,13 +596,11 @@ function bulkDeleteUnits(db, ids) {
 // hesly) + historie. Určeno pro plný backup i přenos mezi servery.
 // [ids] === null → celá DB; jinak jen vybrané (tolerantní k chybějícím ID —
 // přeskočí je). Formát řádku je stejný, ať jde o jednu jednotku nebo všechny.
-function exportUnits(db, ids = null) {
+async function exportUnits(db, ids = null) {
   let idList;
   if (ids == null) {
-    idList = db
-      .prepare('SELECT id FROM units ORDER BY CAST(id AS INTEGER)')
-      .all()
-      .map((r) => r.id);
+    const rows = await db.all(`SELECT id FROM units ORDER BY ${db.sql.castInt('id')}`);
+    idList = rows.map((r) => r.id);
   } else {
     if (!Array.isArray(ids) || ids.length === 0) {
       throw new UnitOpError('invalid_body', 'ids musí být neprázdné pole');
@@ -551,16 +609,16 @@ function exportUnits(db, ids = null) {
   }
   const out = [];
   for (const id of idList) {
-    const unit = getUnit(db, id);
+    const unit = await getUnit(db, id);
     if (!unit) continue; // tolerantní k chybějícímu ID
-    unit.history = getHistory(db, id, 10000);
+    unit.history = await getHistory(db, id, 10000);
     out.push(unit);
   }
   return out;
 }
 
 // Celá DB (zpětně kompatibilní alias).
-function exportAll(db) {
+async function exportAll(db) {
   return exportUnits(db, null);
 }
 
@@ -569,65 +627,34 @@ function exportAll(db) {
 // nemaže). Historie importované jednotky se nahradí historií ze zálohy, takže
 // opakovaný import téhož souboru je idempotentní (neduplikuje). Vše v jedné
 // transakci. Vrací { created, updated, total }.
-function importUnits(db, units, username) {
+async function importUnits(db, units, username) {
   if (!Array.isArray(units)) {
     throw new UnitOpError('invalid_body', 'units musí být pole');
   }
   const toJson = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
-  const upsert = db.prepare(
-    `INSERT INTO units (
-       id, generation, mac, hw_model, firmware, ip, battery,
-       ssid, mqtt_server, mqtt_port, brightness, seen_on_broker,
-       unit_config_json, unit_config_fetched_at, last_seen, devices_json,
-       desired_json, desired_updated_at, desired_updated_by,
-       name, location, note, status, created_at, updated_at
-     ) VALUES (
-       @id, @generation, @mac, @hw_model, @firmware, @ip, @battery,
-       @ssid, @mqtt_server, @mqtt_port, @brightness, @seen_on_broker,
-       @unit_config_json, @unit_config_fetched_at, @last_seen, @devices_json,
-       @desired_json, @desired_updated_at, @desired_updated_by,
-       @name, @location, @note, @status,
-       COALESCE(@created_at, datetime('now')), datetime('now')
-     )
-     ON CONFLICT(id) DO UPDATE SET
-       generation = excluded.generation, mac = excluded.mac,
-       hw_model = excluded.hw_model, firmware = excluded.firmware,
-       ip = excluded.ip, battery = excluded.battery, ssid = excluded.ssid,
-       mqtt_server = excluded.mqtt_server, mqtt_port = excluded.mqtt_port,
-       brightness = excluded.brightness, seen_on_broker = excluded.seen_on_broker,
-       unit_config_json = excluded.unit_config_json,
-       unit_config_fetched_at = excluded.unit_config_fetched_at,
-       last_seen = excluded.last_seen, devices_json = excluded.devices_json,
-       desired_json = excluded.desired_json,
-       desired_updated_at = excluded.desired_updated_at,
-       desired_updated_by = excluded.desired_updated_by,
-       name = excluded.name, location = excluded.location, note = excluded.note,
-       status = excluded.status, updated_at = datetime('now')`
-  );
-  const delHist = db.prepare('DELETE FROM unit_history WHERE unit_id = ?');
-  const insHist = db.prepare(
-    'INSERT INTO unit_history (unit_id, at, username, action, detail_json) VALUES (?, ?, ?, ?, ?)'
-  );
-  const pruneHist = db.prepare(
-    `DELETE FROM unit_history WHERE unit_id = ? AND id NOT IN (
-       SELECT id FROM unit_history WHERE unit_id = ? ORDER BY id DESC LIMIT ?
-     )`
-  );
+  // Při konfliktu se přepíše vše kromě PK a created_at (to zůstává původní).
+  const updateCols = UNIT_COLUMNS.filter((c) => c !== 'id' && c !== 'created_at');
+  const upsertSql =
+    `INSERT INTO units (${UNIT_COLUMNS.join(', ')})
+     VALUES (${UNIT_COLUMNS.map((c) => `:${c}`).join(', ')})
+     ${db.sql.onConflictUpdate('id', updateCols)}`;
+
   let created = 0;
   let updated = 0;
-  const tx = db.transaction((list) => {
-    for (const u of list) {
+  await db.transaction(async (tx) => {
+    for (const u of units) {
       if (!u || typeof u !== 'object' || Array.isArray(u)) {
         throw new UnitOpError('invalid_body', 'Každá jednotka musí být objekt');
       }
       const id = normalizeUnitId(u.id);
-      const existed = unitExists(db, id);
+      const existed = await unitExists(tx, id);
       const generation =
         u.generation === 'old' || u.generation === 'new'
           ? u.generation
           : deriveGeneration(id);
       const status = VALID_STATUS.includes(u.status) ? u.status : 'active';
-      upsert.run({
+      const now = nowIso();
+      await tx.run(upsertSql, {
         id,
         generation,
         mac: u.mac ?? null,
@@ -651,34 +678,39 @@ function importUnits(db, units, username) {
         location: u.location ?? null,
         note: u.note ?? null,
         status,
-        created_at: u.created_at ?? null,
+        created_at: u.created_at ?? now,
+        updated_at: now,
       });
       // Historie: nahraď snímkem ze zálohy. getHistory vrací DESC → vkládáme
       // vzestupně (reverse), ať auto-increment id kopíruje původní pořadí.
-      delHist.run(id);
+      await tx.run('DELETE FROM unit_history WHERE unit_id = :id', { id });
       const hist = Array.isArray(u.history) ? [...u.history].reverse() : [];
       for (const h of hist) {
         if (!h || typeof h !== 'object') continue;
-        insHist.run(
-          id,
-          h.at || new Date().toISOString(),
-          h.username || username,
-          h.action || 'import',
-          h.detail == null ? null : JSON.stringify(h.detail)
+        await tx.run(
+          `INSERT INTO unit_history (unit_id, at, username, action, detail_json)
+           VALUES (:unit_id, :at, :username, :action, :detail_json)`,
+          {
+            unit_id: id,
+            at: h.at || nowIso(),
+            username: h.username || username,
+            action: h.action || 'import',
+            detail_json: h.detail == null ? null : JSON.stringify(h.detail),
+          }
         );
       }
-      pruneHist.run(id, id, HISTORY_RETENTION);
+      await pruneHistory(tx, id);
       if (existed) updated += 1;
       else created += 1;
     }
   });
-  tx(units);
   return { created, updated, total: created + updated };
 }
 
 module.exports = {
   openUnitsDb,
-  UNITS_DB_PATH,
+  prepareUnitsSchema,
+  unitsDbPath,
   UnitOpError,
   VALID_STATUS,
   normalizeUnitId,

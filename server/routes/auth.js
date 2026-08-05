@@ -62,18 +62,25 @@ function tokenFromReq(req) {
   return null;
 }
 
+// Express 4 nezachytí odmítnutý promise z async handleru (skončil by jako
+// unhandled rejection), takže chybu předáme error middleware ručně.
+function wrap(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
+}
+
 function makeRouter(db) {
   const router = express.Router();
 
-  router.post('/login', (req, res) => {
+  router.post('/login', wrap(async (req, res) => {
     const { username, password, rememberMe } = req.body || {};
     if (typeof username !== 'string' || typeof password !== 'string') {
       return res.status(400).json({ error: 'invalid_body' });
     }
 
-    const user = db
-      .prepare('SELECT id, username, password_hash, is_admin FROM users WHERE username = ?')
-      .get(username.trim());
+    const user = await db.get(
+      'SELECT id, username, password_hash, is_admin FROM users WHERE username = :username',
+      { username: username.trim() }
+    );
 
     // Konstantní čas: i když user neexistuje, projedeme bcrypt.compare proti
     // dummy hashi, aby útočník nepoznal, jestli username existuje.
@@ -95,7 +102,7 @@ function makeRouter(db) {
       token,
       user: { username: user.username, isAdmin: !!user.is_admin },
     });
-  });
+  }));
 
   router.post('/logout', (req, res) => {
     res.clearCookie(SESSION_COOKIE, { path: '/' });
@@ -116,6 +123,18 @@ function makeRouter(db) {
       res.status(401).json({ error: 'invalid_session' });
     }
   });
+
+  // Má databáze vůbec nějakého uživatele? Bez auth — odpověď je jediný bool
+  // a klient ho potřebuje PŘED přihlášením.
+  //
+  // Používá portable Windows EXE (lib/services/local_server_io.dart): při
+  // první instalaci je DB prázdná a appka musí nabídnout založení správce.
+  // Existence souboru users.db na to nestačí — vznikne i při startu serveru
+  // nad prázdnou DB, takže by nabídka zmizela a nebylo by se čím přihlásit.
+  router.get('/bootstrap-status', wrap(async (req, res) => {
+    const { n } = await db.get('SELECT COUNT(*) AS n FROM users');
+    res.json({ hasUsers: n > 0 });
+  }));
 
   return router;
 }
