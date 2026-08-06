@@ -1,0 +1,55 @@
+# Nasazení backendu proti UŽ EXISTUJÍCÍ MariaDB (firemní server, kolegova
+# instalace). Databázi tenhle compose nespravuje ani nezakládá — jen se na ni
+# připojí.
+#
+#   docker compose -f docker-compose.external-db.yml --env-file .env.docker up -d --build
+#
+# Pro nasazení, kde má MariaDB vzniknout taky v Dockeru, použij základní
+# docker-compose.yml.
+
+name: p2l-tester
+
+services:
+  api:
+    build:
+      context: .
+    image: p2l-tester-server:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      P2L_DATA_DIR: /data
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET musí být nastavené, min. 32 znaků (viz .env.docker)}
+      DB_DRIVER: mariadb
+      # MariaDB běžící přímo na hostu (ne v kontejneru) NENÍ na 127.0.0.1 —
+      # to je uvnitř kontejneru sám kontejner. Použij `host.docker.internal`
+      # (funguje díky extra_hosts níže) nebo IP toho stroje v LAN.
+      DB_HOST: ${DB_HOST:?DB_HOST musí být nastavené (host.docker.internal nebo IP serveru)}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-P2Lunits}
+      DB_USER: ${DB_USER:-p2l}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD musí být nastavené (viz .env.docker)}
+      DB_CONNECTION_LIMIT: ${DB_CONNECTION_LIMIT:-10}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # Použije se jen při prvním startu nad prázdnou tabulkou users.
+      # POZOR: pokud se pak dělá `npm run migrate-users`, tenhle účet se
+      # přeskočí a zůstane s heslem odsud — viz README §Docker.
+      INITIAL_ADMIN_USER: ${INITIAL_ADMIN_USER:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    ports:
+      # Tady je default 0.0.0.0 — smysl tohoto nasazení je obsloužit APK a web
+      # ze sítě. Port si ochraň firewallem (jen firemní LAN/VPN), případně dej
+      # dopředu reverzní proxy s TLS a publikuj jen na loopback.
+      - "${API_BIND:-0.0.0.0}:${API_PORT:-3001}:3001"
+    volumes:
+      # Při mariadb driveru je tu jen server.pid; volume drží, aby si server
+      # měl kam psát i po restartu kontejneru.
+      - api-data:/data
+    # Umožní `DB_HOST=host.docker.internal` i na Linuxu (Docker Desktop na
+    # Windows/Macu to jméno zná sám, linuxový engine ne).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  api-data:

@@ -43,7 +43,35 @@ API se defaultně publikuje **na loopback** (`API_BIND=127.0.0.1`) — pro klien
 z sítě (EXE/APK na jiných počítačích) nastav `API_BIND=0.0.0.0`. Port MariaDB se
 ven nemapuje vůbec, databáze je dostupná jen pro kontejner `api`.
 
-### Jen image (vlastní / firemní MariaDB)
+### Proti existující MariaDB (firemní server)
+
+Když už MariaDB běží (nativně nebo v jiném kontejneru), použij
+[docker-compose.external-db.yml](docker-compose.external-db.yml) — spustí **jen backend**,
+databázi nezakládá ani nespravuje:
+
+```bash
+cd server
+cp .env.docker.example .env.docker     # JWT_SECRET, DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
+docker compose -f docker-compose.external-db.yml --env-file .env.docker up -d --build
+docker compose -f docker-compose.external-db.yml --env-file .env.docker logs -f api
+```
+
+Tři pasti tohoto nasazení:
+
+- **`DB_HOST=127.0.0.1` nefunguje** — uvnitř kontejneru je to sám kontejner. Pro MariaDB
+  na tom samém stroji použij `host.docker.internal` (compose to mapuje na `host-gateway`,
+  takže to platí i na Linuxu) nebo IP serveru v LAN.
+- **MariaDB musí spojení z Dockeru přijmout** — `bind-address` nesmí být jen `127.0.0.1`
+  a uživatel potřebuje grant pro adresu kontejneru (`'p2l'@'%'` nebo `'p2l'@'172.%'`).
+- **`INITIAL_ADMIN_*` vs. `migrate-users`** — nad prázdnou DB si server admina naseeduje sám,
+  a pozdější `npm run migrate-users` to jméno **přeskočí** (účet zůstane s heslem z env, ne
+  s původním). Pokud se mají účty migrovat, buď `INITIAL_ADMIN_*` nevyplňuj vůbec, nebo
+  migruj s `--overwrite`.
+
+`API_BIND` je tady defaultně `0.0.0.0` (smysl nasazení je obsloužit APK a web ze sítě) —
+port si ochraň firewallem, případně před něj dej reverzní proxy s TLS a publikuj jen loopback.
+
+### Jen image (`docker run`)
 
 ```bash
 docker build -t p2l-tester-server:latest server

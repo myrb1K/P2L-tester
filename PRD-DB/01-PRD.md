@@ -8,6 +8,12 @@
 Navazuje na dokončenou webovou variantu ([PRD-WEB](../PRD-WEB/README.md)) — znovu využívá její auth
 backend (`server/`, Node + Express + SQLite + JWT).
 
+> **⚠ Aktualizace 2026-08-06:** §8 („offline fronta") nahrazuje
+> [03-PRD-sync.md](03-PRD-sync.md) — místo jednosměrné fronty zápisů se řeší plná
+> offline-first synchronizace lokální (in-app SQLite) a serverové DB, kde je server
+> zdrojem pravdy. Zároveň padá předpoklad „žádná MariaDB" z §1: server od v2.82 umí
+> oba drivery a poběží trvale na firemním serveru.
+
 > **⚠ Aktualizace 2026-07-16:** §4.1 (inventář observed) a milestones **DB5+** nahrazuje
 > [02-PRD-konfigurace.md](02-PRD-konfigurace.md) — nový FW `P2L_26071501NT` přidal UNIT
 > `GET-CONFIG`/`SET-CONFIG` a mění předpoklad „konfigurace se z jednotky nedá vyčíst".
