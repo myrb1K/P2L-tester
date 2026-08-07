@@ -285,6 +285,29 @@ class LocalUnitDb {
         .toList();
   }
 
+  /// Poslední lokálně vzniklé změny napříč jednotkami — offline náhrada
+  /// serverového auditu (obrazovka Změny, DB12).
+  Future<List<UnitDbEvent>> recentHistory({int limit = 200}) async {
+    final rows = await _require.query(
+      'local_history',
+      orderBy: 'at DESC',
+      limit: limit,
+    );
+    return rows
+        .map(
+          (r) => UnitDbEvent(
+            at: r['at'] as String? ?? '',
+            username: r['username'] as String? ?? '—',
+            action: r['action'] as String? ?? '',
+            detail: _decodeMap(r['detail_json'] as String?),
+            unitId: r['unit_id'] as String?,
+            layer: r['layer'] as String?,
+            origin: r['origin'] as String?,
+          ),
+        )
+        .toList();
+  }
+
   Future<int> outboxCount() async {
     final r = await _require.rawQuery('SELECT COUNT(*) AS c FROM outbox');
     return (r.first['c'] as num).toInt();

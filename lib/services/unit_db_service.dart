@@ -251,6 +251,45 @@ class UnitDbService {
     }
   }
 
+  // ─── Audit napříč jednotkami (DB12) ───────────────────────────────────
+  //
+  // Audit je serverová veličina — lokální DB drží jen změny vzniklé na tomhle
+  // zařízení. Offline se proto ukáže aspoň to (viz [fetchLocalAudit]).
+
+  /// Stránka změn napříč jednotkami. Hází [UnitDbException] (obrazovka Změny
+  /// z ní zobrazí hlášku + „Zkusit znovu").
+  Future<UnitDbAuditPage> fetchAudit({
+    String? unitId,
+    String? username,
+    String? layer,
+    String? origin,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final q = <String, String>{
+      if (unitId != null && unitId.isNotEmpty) 'unitId': unitId,
+      'username': ?username,
+      'layer': ?layer,
+      'origin': ?origin,
+      'limit': '$limit',
+      'offset': '$offset',
+    };
+    final query = q.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    return UnitDbAuditPage.fromJson(await _getJson('/units/history?$query'));
+  }
+
+  Future<UnitDbAuditFilters> fetchAuditFilters() async =>
+      UnitDbAuditFilters.fromJson(await _getJson('/units/history/filters'));
+
+  /// Změny vzniklé na tomhle zařízení — záloha pro offline režim, kde na
+  /// serverový audit nedosáhneme.
+  Future<List<UnitDbEvent>> fetchLocalAudit() async {
+    if (!_useLocal) return const [];
+    return _local.recentHistory();
+  }
+
   // ─── Pull ze serveru (DB10) ───────────────────────────────────────────
   //
   // Rozdílové stahování podle revizí: `GET /units/changes?since=<rev>`.

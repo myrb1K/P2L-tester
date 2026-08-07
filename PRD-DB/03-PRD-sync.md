@@ -239,7 +239,7 @@ si hned stáhne výsledek (včetně vlastní přehlasované karty).
 | **DB9** ✅ | Server: `rev` + čítač, `*_updated_at`, tombstones, rozšířený `unit_history`, endpointy `/units/changes` a `/units/sync` (idempotence přes `opId`) | hotovo 2026-08-07; 86 testů nad SQLite. **MariaDB sada zatím neproběhla** — na firemním serveru chybí databáze `P2Lunits_test` a práva pro účet `p2l` (viz server/README §Testy) |
 | **DB10** ✅ | Klient: lokální schéma (**sqflite**, ne drift — viz níže), `UnitDbService` přesměrovaný na lokál, UI čte z lokálu, **pull** ze serveru | hotovo 2026-08-07; appka čte i zapisuje offline, odesílání outboxu je DB11 |
 | **DB11** ✅ | Sync engine: kalibrace hodin, push/pull, konflikty, triggery, indikátor + banner | hotovo 2026-08-07; synchronizace je obousměrná |
-| **DB12** | Obrazovka „Změny" (audit napříč jednotkami) | dohledatelnost |
+| **DB12** ✅ | Obrazovka „Změny" (audit napříč jednotkami) | hotovo 2026-08-07 |
 
 Web se v žádném milníku nemění (R5).
 
@@ -335,6 +335,25 @@ běhu; bez listeneru na `AuthSession` by se do restartu appky nesynchronizovalo 
 
 **`source_device` se bere z LocalUnitDb**, ne z `UnitDbService` — hostname jde jen z `dart:io`
 a service se kompiluje i pro web.
+
+## 9.4 K DB12 — co se při realizaci ukázalo
+
+**`/units/history` musí být registrované před `/:id`**, jinak by spadlo do detailu karty
+s `id='history'` — stejná past jako u `/export`, `/changes` a `/sync`.
+
+**`hasMore` se pozná načtením o řádek víc** (`LIMIT n+1`), ne druhým `COUNT` dotazem nad celou
+`unit_history` — ta poroste rychle a počítat ji při každém scrollu je zbytečné.
+
+**Audit je serverová veličina.** Lokální DB drží jen změny z tohohle zařízení, takže offline
+obrazovka ukáže je a nahoře řekne „server není dostupný — ukazují se jen změny z tohoto
+zařízení". Bez toho by offline vypadala jako prázdná databáze.
+
+**Odhalený flaky test (ne bug v produkci).** Drift testy zapisovaly observed *před* desired,
+takže evidence byla novější než poslední pozorování → `computeDrift` správně vrátil „čekající
+změna, žádný drift". Procházely jen tehdy, když se oba zápisy vešly do stejné milisekundy.
+Opraveno explicitním časem evidence (`hourAgo()`); potvrzeno 8 běhy v řadě. Gate v produkci je
+v pořádku, chyba byla v očekávání testu — a je to připomínka, že testy nad časem potřebují
+časy zadané, ne odvozené od rychlosti stroje.
 
 ---
 

@@ -19,6 +19,7 @@ import '../services/file_export.dart';
 import '../services/local_unit_db.dart';
 import '../services/sync_engine.dart';
 import '../services/unit_db_service.dart';
+import 'changes_screen.dart';
 
 // ─── Seznam ────────────────────────────────────────────────────────────
 
@@ -254,9 +255,14 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
     final n = _selected.length;
     return PopupMenuButton<String>(
       icon: const Icon(Icons.menu),
-      tooltip: 'Import / export databáze',
+      tooltip: 'Změny / import / export',
       onSelected: (v) {
         switch (v) {
+          case 'changes':
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ChangesScreen()),
+            );
           case 'export':
             _exportDatabase();
           case 'export_selected':
@@ -266,6 +272,15 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
         }
       },
       itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'changes',
+          child: ListTile(
+            leading: Icon(Icons.history),
+            title: Text('Změny v databázi'),
+            subtitle: Text('Kdo kdy co změnil (audit)'),
+          ),
+        ),
+        const PopupMenuDivider(),
         const PopupMenuItem(
           value: 'export',
           child: ListTile(
@@ -1012,6 +1027,17 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
               icon: const Icon(Icons.edit_outlined),
               tooltip: 'Upravit údaje',
               onPressed: _editMeta,
+            ),
+          if (card != null)
+            IconButton(
+              icon: const Icon(Icons.history),
+              tooltip: 'Změny této jednotky',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChangesScreen(unitId: card.id),
+                ),
+              ),
             ),
           if (card != null)
             IconButton(

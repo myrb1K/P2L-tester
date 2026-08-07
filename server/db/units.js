@@ -349,6 +349,102 @@ async function getHistory(db, rawId, limit = 200) {
   }));
 }
 
+// ── Audit napříč jednotkami (DB12) ─────────────────────────────────────────
+
+const AUDIT_MAX_LIMIT = 200;
+
+/// Historie napříč všemi jednotkami — podklad obrazovky „Změny“.
+///
+/// Na rozdíl od [getHistory] (jedna karta) filtruje a stránkuje. Vrací
+/// `{events, hasMore}`; `hasMore` se pozná načtením o jeden řádek víc, aby se
+/// nemusel dělat druhý COUNT dotaz nad celou tabulkou.
+///
+/// Hesla v detailu už jsou zamaskovaná od zápisu (scrubSecrets), takže tady
+/// není co filtrovat.
+async function listAudit(db, opts = {}) {
+  const where = [];
+  const params = {};
+  if (opts.unitId) {
+    where.push('unit_id = :unit_id');
+    params.unit_id = normalizeUnitId(opts.unitId);
+  }
+  if (opts.username) {
+    // Jména jsou case-insensitive (stejně jako při přihlášení).
+    where.push(`username = :username${db.sql.collateNoCase}`);
+    params.username = opts.username;
+  }
+  if (opts.layer) {
+    where.push('layer = :layer');
+    params.layer = opts.layer;
+  }
+  if (opts.origin) {
+    where.push('origin = :origin');
+    params.origin = opts.origin;
+  }
+  // Časy jsou ISO 8601 stringy, takže lexikografické porovnání = chronologické.
+  if (opts.since) {
+    where.push('at >= :since');
+    params.since = opts.since;
+  }
+  if (opts.until) {
+    where.push('at <= :until');
+    params.until = opts.until;
+  }
+
+  const limit = Number.isInteger(opts.limit) && opts.limit > 0
+    ? Math.min(opts.limit, AUDIT_MAX_LIMIT)
+    : 50;
+  const offset = Number.isInteger(opts.offset) && opts.offset > 0 ? opts.offset : 0;
+
+  // LIMIT/OFFSET inline (viz pruneHistory) — hodnoty jsou ověřená čísla.
+  const rows = await db.all(
+    `SELECT unit_id, at, username, action, detail_json, uuid, layer, origin,
+            source_device, rev
+     FROM unit_history
+     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+     ORDER BY at DESC, id DESC
+     LIMIT ${limit + 1} OFFSET ${offset}`,
+    params
+  );
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  return {
+    hasMore,
+    events: page.map((r) => ({
+      unitId: r.unit_id,
+      at: r.at,
+      username: r.username,
+      action: r.action,
+      detail: r.detail_json ? JSON.parse(r.detail_json) : null,
+      uuid: r.uuid || null,
+      layer: r.layer || null,
+      origin: r.origin || null,
+      sourceDevice: r.source_device || null,
+      rev: r.rev == null ? null : Number(r.rev),
+    })),
+  };
+}
+
+/// Hodnoty pro rozevírací filtry obrazovky Změny (jen to, co se v datech
+/// opravdu vyskytuje — prázdné nabídky nemají smysl).
+async function auditFilters(db) {
+  const users = await db.all(
+    'SELECT DISTINCT username FROM unit_history ORDER BY username'
+  );
+  const layers = await db.all(
+    'SELECT DISTINCT layer FROM unit_history WHERE layer IS NOT NULL ORDER BY layer'
+  );
+  const origins = await db.all(
+    'SELECT DISTINCT origin FROM unit_history WHERE origin IS NOT NULL ORDER BY origin'
+  );
+  return {
+    usernames: users.map((r) => r.username),
+    layers: layers.map((r) => r.layer),
+    origins: origins.map((r) => r.origin),
+  };
+}
+
 // Drift v2 (PRD-DB v2 §6): souhrnný boolean pro řádek seznamu. Tři kategorie
 // (zrcadlí klientskou UnitDbCard.driftWarnings), počítá se z desired +
 // observed sloupců + GET-CONFIG snapshotu (unit_config_json). Bez GET-CONFIG
@@ -1214,6 +1310,10 @@ module.exports = {
   // sync (DB9)
   listChanges,
   applySyncOps,
+  // audit napříč jednotkami (DB12)
+  listAudit,
+  auditFilters,
+  AUDIT_MAX_LIMIT,
   currentRev,
   CHANGES_MAX_LIMIT,
   historyRetention,

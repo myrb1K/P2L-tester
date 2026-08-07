@@ -21,6 +21,7 @@ class LocalUnitDb {
   Future<List<UnitDbSummary>> listUnits() async => const [];
   Future<UnitDbCard?> getCard(String id) async => null;
   Future<List<UnitDbEvent>> history(String id) async => const [];
+  Future<List<UnitDbEvent>> recentHistory({int limit = 200}) async => const [];
 
   Future<void> applyServerChanges({
     required List<Map<String, dynamic>> units,
