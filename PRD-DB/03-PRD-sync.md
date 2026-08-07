@@ -36,6 +36,13 @@ všechno nahraje na server a zároveň se stáhne, co mezitím udělali ostatní
 Z toho scénáře plyne, že **offline musí být možný i zápis**, ne jen čtení — evidence u zákazníka
 teprve vzniká. Varianta „offline cache jen pro čtení" byla zvážena a **zamítnuta** (2026-08-07).
 
+**Mobil v téže situaci může být online.** Android po připojení k WiFi bez internetu obvykle nechá
+běžet mobilní data paralelně (provoz do `192.168.x.x` přes WiFi na MQTT, na server přes SIM) —
+ale je to závislé na verzi systému, výrobci a nastavení, takže se na to **nelze spoléhat**.
+Appka tedy nesmí stav odvozovat z typu připojení; jediné platné kritérium je, zda odpoví
+`/api/health` (viz §7 bod 1). Notebook bez SIM tuhle šanci nemá vůbec — proto je offline režim
+kritičtější pro EXE, přestože ho mají oba klienti stejný.
+
 ### Co to není
 
 - Není to synchronizace „server → jednotka" (žádný reconcile konfigurace hardware; appka
@@ -184,6 +191,11 @@ Vlastnosti, na kterých to stojí:
 ## 7. Průběh synchronizace
 
 1. **Kalibrace** — `GET /api/health` → `clock_offset_ms`. Když neodpoví, sync končí (zůstává offline).
+   Dvě podmínky, bez kterých to v uzavřených sítích selže: **krátký timeout** (2–3 s, ne default
+   30 s — jinak UI čeká na každý pokus) a **validace obsahu odpovědi**, ne jen HTTP statusu.
+   Captive portály zákazníkových WiFi vrací na libovolný request `200 OK` s přihlašovací
+   stránkou; probe proto musí trvat na JSON s `ok: true` a `db`, jinak by se appka považovala
+   za online a sync by opakovaně padal.
 2. **Push** — outbox v pořadí vzniku, dávkami. Výsledky se zapíšou: `applied`/`superseded` → smaž
    z outboxu, `conflict` → smaž a založ upozornění, `rejected` (např. 403 u mazání) → nech s `last_error`.
 3. **Pull** — `/units/changes?since=last_rev`, dokud `more == true`. Karty se zapisují do
