@@ -317,6 +317,63 @@ void main() {
     expect(await local.getCard('9007'), isNull);
   });
 
+  test('audit napříč jednotkami: filtry, stránkování, nabídky (DB12)', () async {
+    if (!ready()) return;
+    // Několik změn od dvou „uživatelů" (druhý přes přímé API = online zápis).
+    await local.writeMeta('9100', {'name': 'Audit A'}, username: _admin);
+    await local.writeDesired('9100', {'brightness': 25}, username: _admin);
+    await local.writeMeta('9101', {'name': 'Audit B'}, username: _admin);
+    expect(await engine.syncNow(), isTrue);
+    await api('PUT', '/units/9102/meta', body: {'name': 'Přímo online'});
+
+    // Bez filtru vidíme všechno, nejnovější první.
+    final all = await service.fetchAudit(limit: 100);
+    expect(all.events.length, greaterThanOrEqualTo(4));
+    expect(all.events.first.at.compareTo(all.events.last.at) >= 0, isTrue);
+
+    // Filtr na jednotku.
+    final perUnit = await service.fetchAudit(unitId: '9100');
+    expect(perUnit.events.length, 2);
+    expect(perUnit.events.every((e) => e.unitId == '9100'), isTrue);
+
+    // Filtr na vrstvu a na původ (sync = přišlo z fronty, online = přímý zápis).
+    expect((await service.fetchAudit(unitId: '9100', layer: 'desired')).events.length, 1);
+    final viaSync = await service.fetchAudit(unitId: '9100', origin: 'sync');
+    expect(viaSync.events.length, 2);
+    expect(viaSync.events.first.sourceDevice, isNotNull);
+    final online = await service.fetchAudit(unitId: '9102', origin: 'online');
+    expect(online.events.length, 1);
+
+    // Stránkování.
+    final page1 = await service.fetchAudit(limit: 2);
+    expect(page1.events.length, 2);
+    expect(page1.hasMore, isTrue);
+    final page2 = await service.fetchAudit(limit: 2, offset: 2);
+    expect(page2.events.first.at, isNot(page1.events.first.at));
+
+    // Nabídky filtrů se plní z dat.
+    final filters = await service.fetchAuditFilters();
+    expect(filters.usernames, contains(_admin));
+    expect(filters.layers, containsAll(['desired', 'meta']));
+    expect(filters.origins, containsAll(['online', 'sync']));
+  });
+
+  test('audit nevrací hesla', () async {
+    if (!ready()) return;
+    await local.writeDesired('9103', {
+      'wifi': {'ssid': 'HALA', 'password': 'nesmi-uniknout'},
+    }, username: _admin);
+    expect(await engine.syncNow(), isTrue);
+
+    final page = await service.fetchAudit(unitId: '9103');
+    final detail = page.events.first.detail!;
+    expect(detail['wifi']['ssid'], 'HALA');
+    expect(detail['wifi']['password'], '•••');
+    // Kontrola i na surové odpovědi, ať se to neschová v modelu.
+    final raw = await api('GET', '/units/history?unitId=9103');
+    expect(jsonEncode(raw).contains('nesmi-uniknout'), isFalse);
+  });
+
   test('offline → fronta zůstane, po návratu se odešle', () async {
     if (!ready()) return;
     // Simulace offline: service míří na port, kde nic neposlouchá.

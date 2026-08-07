@@ -300,11 +300,26 @@ class UnitDbEvent {
   final String action; // desired | meta | change_id | ...
   final Map<String, dynamic>? detail;
 
+  /// ID jednotky — plní se jen u auditu napříč jednotkami (`/units/history`,
+  /// DB12); v historii jedné karty je zbytečné, takže tam chybí.
+  final String? unitId;
+
+  // Audit rozšířený v DB9 (u záznamů z doby před ním jsou null).
+  final String? layer; // observed | desired | meta | change_id | delete
+  final String? origin; // online | sync | mqtt
+  final String? sourceDevice; // exe@NB-RADEK, apk@Pixel7, web
+  final int? rev;
+
   const UnitDbEvent({
     required this.at,
     required this.username,
     required this.action,
     this.detail,
+    this.unitId,
+    this.layer,
+    this.origin,
+    this.sourceDevice,
+    this.rev,
   });
 
   factory UnitDbEvent.fromJson(Map<String, dynamic> json) => UnitDbEvent(
@@ -312,6 +327,67 @@ class UnitDbEvent {
         username: json['username'] as String? ?? '',
         action: json['action'] as String? ?? '',
         detail: json['detail'] as Map<String, dynamic>?,
+        unitId: json['unitId'] as String?,
+        layer: json['layer'] as String?,
+        origin: json['origin'] as String?,
+        sourceDevice: json['sourceDevice'] as String?,
+        rev: (json['rev'] as num?)?.toInt(),
+      );
+
+  /// Lidský popis akce pro seznam změn.
+  String get actionLabel => switch (action) {
+        'desired' => 'Evidence (broker/WiFi/jas)',
+        'meta' => 'Údaje (název/umístění/stav)',
+        'observed' => 'Stav jednotky',
+        'change_id' => 'Přečíslování',
+        'delete' => 'Smazání karty',
+        'superseded_local' => 'Přehlasovaná změna',
+        'import' => 'Import ze zálohy',
+        _ => action,
+      };
+
+  /// Odkud změna přišla — `sync` znamená, že vznikla offline a dorovnala se.
+  String get originLabel => switch (origin) {
+        'online' => 'online',
+        'sync' => 'ze synchronizace',
+        'mqtt' => 'z MQTT',
+        _ => '',
+      };
+}
+
+/// Stránka auditu napříč jednotkami (`GET /api/units/history`, DB12).
+class UnitDbAuditPage {
+  final List<UnitDbEvent> events;
+  final bool hasMore;
+
+  const UnitDbAuditPage({required this.events, this.hasMore = false});
+
+  factory UnitDbAuditPage.fromJson(Map<String, dynamic> json) => UnitDbAuditPage(
+        events: (json['events'] as List? ?? const [])
+            .cast<Map<String, dynamic>>()
+            .map(UnitDbEvent.fromJson)
+            .toList(),
+        hasMore: json['hasMore'] as bool? ?? false,
+      );
+}
+
+/// Hodnoty pro rozevírací filtry obrazovky Změny.
+class UnitDbAuditFilters {
+  final List<String> usernames;
+  final List<String> layers;
+  final List<String> origins;
+
+  const UnitDbAuditFilters({
+    this.usernames = const [],
+    this.layers = const [],
+    this.origins = const [],
+  });
+
+  factory UnitDbAuditFilters.fromJson(Map<String, dynamic> json) =>
+      UnitDbAuditFilters(
+        usernames: (json['usernames'] as List? ?? const []).cast<String>(),
+        layers: (json['layers'] as List? ?? const []).cast<String>(),
+        origins: (json['origins'] as List? ?? const []).cast<String>(),
       );
 }
 

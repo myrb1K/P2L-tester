@@ -35,6 +35,8 @@ const {
   listChanges,
   applySyncOps,
   currentRev,
+  listAudit,
+  auditFilters,
 } = require('../db/units');
 const unitsRoutes = require('../routes/units');
 
@@ -62,6 +64,14 @@ async function openTestDb() {
 // Časové značky pro testy rozhodování „kdo je novější" (posun v sekundách).
 function isoOffset(seconds) {
   return new Date(Date.now() + seconds * 1000).toISOString();
+}
+
+/// Čas hodinu zpět — pro zápisy evidence v drift testech. `computeDrift` hlásí
+/// nesoulad jen tehdy, když jsme jednotku viděli AŽ PO změně evidence; bez
+/// explicitního času závisel výsledek na tom, jestli se dva zápisy vejdou do
+/// stejné milisekundy (a testy byly flaky).
+function hourAgo() {
+  return isoOffset(-3600);
 }
 
 let db;
@@ -352,19 +362,31 @@ describe('listUnits', () => {
     assert.equal(byId['128'].drift, false);
 
     // Kat.1: evidence broker ≠ uloženo v NVS (mqttAddress z GET-CONFIG).
+    //
+    // Evidence MUSÍ být starší než pozorování: `computeDrift` má gate „drift
+    // hlásíme jen když jsme jednotku viděli až po poslední změně evidence"
+    // (jinak je to čekající změna). Bez explicitního `at` závisel výsledek na
+    // tom, jestli oba zápisy stihnou stejnou milisekundu → test byl flaky.
+    await updateDesired(db, '130', { broker: { address: 'mqtt.novy.cz' } }, 'r', {
+      at: hourAgo(),
+    });
     await upsertObserved(db, '130', { unitConfig: { mqttAddress: 'mqtt.stary.cz', ip: '0.0.0.0' } });
-    await updateDesired(db, '130', { broker: { address: 'mqtt.novy.cz' } }, 'r');
     const drift130 = (await listUnits(db)).find((u) => u.id === '130').drift;
     assert.equal(drift130, true);
   });
 
   test('drift flag: broker/ssid/jas nesoulad → true, shoda/chybějící → false', async () => {
+    // Evidence starší než pozorování (viz gate v předchozím testu).
     // rozpor v brokeru
+    await updateDesired(db, '1209', { broker: { address: 'mqtt.firma.cz' } }, 'r', {
+      at: hourAgo(),
+    });
     await upsertObserved(db, '1209', { mqttServer: 'mqtt.stary.cz' });
-    await updateDesired(db, '1209', { broker: { address: 'mqtt.firma.cz' } }, 'r');
     // shoda ve všem
+    await updateDesired(db, '128', { wifi: { ssid: 'HALA' }, brightness: 80 }, 'r', {
+      at: hourAgo(),
+    });
     await upsertObserved(db, '128', { ssid: 'HALA', brightness: 80 });
-    await updateDesired(db, '128', { wifi: { ssid: 'HALA' }, brightness: 80 }, 'r');
     // bez desired
     await upsertObserved(db, '129', { ssid: 'HALA' });
 
@@ -377,12 +399,18 @@ describe('listUnits', () => {
   test('drift přes seen_on_broker: jednotka se hlásí z jiného brokeru (jen ALIVE, bez get_param)', async () => {
     // Scénář: jednotka přeconfigurovaná mimo appku — desired má starý broker,
     // ALIVE ale přišel přes nový. mqtt_server (get_param) chybí.
+    await updateDesired(
+      db, '1209', { broker: { address: 'mqtt.smartbox.smartci4.com' } }, 'r',
+      { at: hourAgo() },
+    );
     await upsertObserved(db, '1209', { seenOnBroker: 'config.smartbox4you.com' });
-    await updateDesired(db, '1209', { broker: { address: 'mqtt.smartbox.smartci4.com' } }, 'r');
     assert.equal((await listUnits(db))[0].drift, true);
 
-    // Po přenastavení brokeru přes appku (desired = nový) drift zmizí.
-    await updateDesired(db, '1209', { broker: { address: 'config.smartbox4you.com' } }, 'r');
+    // Po přenastavení brokeru přes appku (desired = nový) drift zmizí. Tady
+    // je novější evidence v pořádku — shoda s observed drift stejně vylučuje.
+    await updateDesired(db, '1209', { broker: { address: 'config.smartbox4you.com' } }, 'r', {
+      at: hourAgo(),
+    });
     assert.equal((await listUnits(db))[0].drift, false);
   });
 });
@@ -946,6 +974,73 @@ describe('applySyncOps — rozhodování konfliktů', () => {
       () => applySyncOps(db, [{ unitId: '1209', layer: 'meta' }], {}),
       /opId/
     );
+  });
+
+  test('audit napříč jednotkami: filtry, řazení, stránkování', async () => {
+    // Tři jednotky, dva uživatelé, dvě vrstvy — ať je na čem filtrovat.
+    await updateMeta(db, '1209', { name: 'A' }, 'radek');
+    await updateDesired(db, '1209', { brightness: 10 }, 'radek');
+    await updateMeta(db, '1300', { name: 'B' }, 'kolega');
+    await applySyncOps(db, [{
+      opId: 'audit-1', unitId: '1400', layer: 'meta',
+      at: new Date().toISOString(), payload: { name: 'C' },
+    }], { username: 'radek', sourceDevice: 'apk@Pixel' });
+
+    // Bez filtru: všechno, nejnovější první.
+    const all = await listAudit(db);
+    assert.equal(all.events.length, 4);
+    assert.equal(all.hasMore, false);
+    assert.ok(all.events[0].at >= all.events[3].at, 'řazení musí být DESC');
+
+    // Podle jednotky.
+    const perUnit = await listAudit(db, { unitId: 'u1209' }); // i s prefixem
+    assert.equal(perUnit.events.length, 2);
+    assert.ok(perUnit.events.every((e) => e.unitId === '1209'));
+
+    // Podle uživatele (case-insensitive) a vrstvy.
+    assert.equal((await listAudit(db, { username: 'KOLEGA' })).events.length, 1);
+    assert.equal((await listAudit(db, { layer: 'desired' })).events.length, 1);
+
+    // Podle původu: zápis přes sync vs. přímý.
+    const viaSync = await listAudit(db, { origin: 'sync' });
+    assert.equal(viaSync.events.length, 1);
+    assert.equal(viaSync.events[0].sourceDevice, 'apk@Pixel');
+    assert.equal((await listAudit(db, { origin: 'online' })).events.length, 3);
+
+    // Stránkování: hasMore se pozná bez druhého COUNT dotazu.
+    const page1 = await listAudit(db, { limit: 3 });
+    assert.equal(page1.events.length, 3);
+    assert.equal(page1.hasMore, true);
+    const page2 = await listAudit(db, { limit: 3, offset: 3 });
+    assert.equal(page2.events.length, 1);
+    assert.equal(page2.hasMore, false);
+  });
+
+  test('audit nevrací hesla a nese detail změny', async () => {
+    await updateDesired(db, '1209', {
+      wifi: { ssid: 'HALA', password: 'tajne' },
+    }, 'radek');
+    const { events } = await listAudit(db, { unitId: '1209' });
+    assert.equal(events[0].detail.wifi.ssid, 'HALA');
+    assert.equal(events[0].detail.wifi.password, '•••');
+  });
+
+  test('auditFilters vrací jen hodnoty, které v datech jsou', async () => {
+    await updateMeta(db, '1209', { name: 'A' }, 'radek');
+    await updateDesired(db, '1300', { brightness: 5 }, 'kolega');
+    const f = await auditFilters(db);
+    assert.deepEqual(f.usernames, ['kolega', 'radek']);
+    assert.deepEqual(f.layers.sort(), ['desired', 'meta']);
+    assert.deepEqual(f.origins, ['online']);
+  });
+
+  test('audit umí časový rozsah', async () => {
+    await updateMeta(db, '1209', { name: 'A' }, 'radek');
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const past = new Date(Date.now() - 60_000).toISOString();
+    assert.equal((await listAudit(db, { since: past })).events.length, 1);
+    assert.equal((await listAudit(db, { since: future })).events.length, 0);
+    assert.equal((await listAudit(db, { until: past })).events.length, 0);
   });
 
   test('duplicitní op se nezapíše dvakrát do historie', async () => {

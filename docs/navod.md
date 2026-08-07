@@ -320,6 +320,24 @@ hlášení je vždy to platné.
 
 Webová verze lokální kopii nemá — běží na serveru, takže když server nejede, nejede ani web.
 
+### Změny v databázi (kdo kdy co změnil)
+
+Hamburger **☰** → **Změny v databázi** otevře přehled změn **napříč všemi jednotkami** — na
+rozdíl od historie na kartě, která ukazuje jen jednu jednotku. Každý řádek říká, které jednotky
+se změna týká, co se změnilo (evidence / údaje / smazání / přečíslování), kdy, kdo to udělal,
+**odkud** (online, ze synchronizace, z MQTT) a **z jakého zařízení** (např. `exe@NB-RADEK`,
+`apk@Pixel7`).
+
+Filtrovat lze podle **ID jednotky**, **uživatele**, **co se změnilo** a **odkud** — filtry se
+kombinují, ikona ⌦ v liště je zruší. Dole je **Načíst další** (po 50 záznamech). Hesla se
+v přehledu nikdy neobjeví (jsou maskovaná už při zápisu).
+
+Na kartě jednotky je zkratka: ikona **↺** v liště otevře tentýž přehled s předvyplněným
+filtrem na tu jednotku.
+
+Když server není dostupný, přehled ukáže aspoň změny **z tohoto zařízení** a napíše to nahoře —
+audit celé databáze žije na serveru.
+
 **Import / export databáze.** Hamburger **☰** vpravo nahoře v hlavičce obrazovky nabízí:
 - **Exportovat databázi** — stáhne **kompletní zálohu** celé databáze do JSON souboru: všechny jednotky se všemi vrstvami (evidence včetně hesel, observed / GET-CONFIG, meta) i historií. Vhodné pro zálohu nebo přenos na jiný server.
 - **Importovat databázi** — načte dřív exportovaný soubor a **sloučí** ho do databáze: jednotky, které v souboru jsou, se podle ID **aktualizují** (nové se přidají), jednotky mimo soubor zůstanou beze změny — **nic se nemaže**. Před zápisem appka ukáže potvrzení s počtem jednotek. Opakovaný import stejného souboru nic nepokazí.

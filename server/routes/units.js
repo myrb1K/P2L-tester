@@ -34,6 +34,8 @@ const {
   importUnits,
   listChanges,
   applySyncOps,
+  listAudit,
+  auditFilters,
 } = require('../db/units');
 
 function mapErrorToStatus(err) {
@@ -134,6 +136,32 @@ function makeRouter(db) {
       isAdmin: !!req.user.isAdmin,
       sourceDevice: typeof sourceDevice === 'string' ? sourceDevice.slice(0, 64) : null,
     }));
+  }));
+
+  // ── Audit napříč jednotkami (DB12) ────────────────────────────────────
+  // Taky před /:id — jinak by `/units/history` spadlo do detailu (id='history').
+
+  router.get('/history', wrap(async (req, res) => {
+    const q = req.query;
+    const num = (v) => {
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    res.json(await listAudit(db, {
+      unitId: q.unitId || undefined,
+      username: q.username || undefined,
+      layer: q.layer || undefined,
+      origin: q.origin || undefined,
+      since: q.since || undefined,
+      until: q.until || undefined,
+      limit: num(q.limit),
+      offset: num(q.offset),
+    }));
+  }));
+
+  // Hodnoty do rozevíracích filtrů (jen to, co se v datech vyskytuje).
+  router.get('/history/filters', wrap(async (req, res) => {
+    res.json(await auditFilters(db));
   }));
 
   router.get('/:id', wrap(async (req, res) => {
