@@ -27,6 +27,7 @@ import '../models/unit_db.dart';
 import 'auth_api.dart' show authApiBase;
 import 'auth_http_client.dart';
 import 'auth_session.dart';
+import 'local_unit_db.dart';
 
 /// Chyba čtecích/editačních operací DB — obrazovka Databáze jednotek z ní
 /// zobrazuje hlášku + „Zkusit znovu" (na rozdíl od push*, které se polykají).
@@ -45,11 +46,13 @@ class UnitDbService {
 
   final AuthSession _session;
   final http.Client _client;
+  final LocalUnitDb _local;
   final Map<String, DateTime> _lastThrottledPush = {};
 
-  UnitDbService({AuthSession? session, http.Client? client})
+  UnitDbService({AuthSession? session, http.Client? client, LocalUnitDb? local})
     : _session = session ?? AuthSession.instance,
-      _client = client ?? createAuthClient();
+      _client = client ?? createAuthClient(),
+      _local = local ?? LocalUnitDb.instance;
 
   /// Globální instance pro AppState.
   static final UnitDbService instance = UnitDbService();
@@ -57,6 +60,11 @@ class UnitDbService {
   /// Web je za AuthGate vždy přihlášený (session cookie), nativ podle
   /// opt-in loginu.
   bool get _enabled => kIsWeb || _session.isLoggedIn;
+
+  /// Jde evidence přes lokální DB (offline-first, DB10)? Na webu nikdy
+  /// (stub → `isAvailable == false`, PRD-DB/03 R5), na nativu když se lokální
+  /// DB podařilo otevřít. Když ne, chová se appka jako do DB9 — přímé HTTP.
+  bool get _useLocal => _local.isAvailable;
 
   /// Je přihlášený uživatel admin? Rozhoduje o zobrazení akce „Smazat"
   /// (server ji stejně vynucuje — tohle je jen UX gating). Na webu neznáme
@@ -84,7 +92,10 @@ class UnitDbService {
     String? seenOnBroker,
   }) async {
     if (!_enabled) return;
-    if (throttled) {
+    // Throttle je kvůli síti (ALIVE chodí často). Do lokální DB se zapisuje
+    // vždy — je to levné a offline evidence má ukazovat aktuální stav; ve
+    // frontě k odeslání se observed operace stejně slévají do jedné.
+    if (throttled && !_useLocal) {
       final last = _lastThrottledPush[unit.id];
       if (last != null && DateTime.now().difference(last) < _throttleWindow) {
         return;
@@ -110,6 +121,10 @@ class UnitDbService {
         'unitConfig': unit.unitConfig,
       if (modules != null) 'devices': modules.map((m) => m.toJson()).toList(),
     };
+    if (_useLocal) {
+      await _localWrite(() => _local.writeObserved(unit.id, body));
+      return;
+    }
     await _put('/units/${unit.id}/observed', body);
   }
 
@@ -117,7 +132,27 @@ class UnitDbService {
   /// klíčích ({broker}, {wifi}, {brightness}, {dispBrightness}, {fwUrl}).
   Future<void> pushDesired(String unitId, Map<String, dynamic> fragment) async {
     if (!_enabled) return;
+    if (_useLocal) {
+      await _localWrite(
+        () => _local.writeDesired(unitId, fragment, username: _username),
+      );
+      return;
+    }
     await _put('/units/$unitId/desired', fragment);
+  }
+
+  String? get _username => _session.user?.username;
+
+  /// Lokální zápis nesmí shodit MQTT akci ani UI — stejná zásada jako u
+  /// fire-and-forget HTTP pushů. Selže-li (plný disk, zamčená DB), evidence
+  /// o té změně neví, ale appka jede dál.
+  Future<void> _localWrite(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      // ignore: avoid_print
+      print('UnitDbService: lokální zápis selhal: $e');
+    }
   }
 
   /// Přenese kartu na nové ID po change_ID. Jednotka bez karty v DB → 404,
@@ -157,6 +192,12 @@ class UnitDbService {
   // obrazovce potřebuje vědět, že server nejede / session vypršela.
 
   Future<List<UnitDbSummary>> fetchUnits() async {
+    if (_useLocal) {
+      // Nejdřív se pokus dorovnat ze serveru, pak čti lokál. Offline pull
+      // tiše selže a zobrazí se poslední známý stav — o tom je celý DB10.
+      await pullFromServer();
+      return _local.listUnits();
+    }
     final json = await _getJson('/units');
     return (json['units'] as List)
         .cast<Map<String, dynamic>>()
@@ -165,22 +206,95 @@ class UnitDbService {
   }
 
   Future<UnitDbCard> fetchUnit(String id) async {
+    if (_useLocal) {
+      final card = await _local.getCard(id);
+      if (card != null) return card;
+      throw const UnitDbException('Jednotka v databázi není.');
+    }
     final json = await _getJson('/units/$id');
     return UnitDbCard.fromJson(json['unit'] as Map<String, dynamic>);
   }
 
+  /// Audit karty. Serverová historie se nestahuje (pull vrací karty, ne
+  /// historii), takže online se bere z API a offline se ukáže aspoň to, co
+  /// vzniklo na tomhle zařízení.
   Future<List<UnitDbEvent>> fetchHistory(String id) async {
-    final json = await _getJson('/units/$id/history');
-    return (json['history'] as List)
-        .cast<Map<String, dynamic>>()
-        .map(UnitDbEvent.fromJson)
-        .toList();
+    try {
+      final json = await _getJson('/units/$id/history');
+      return (json['history'] as List)
+          .cast<Map<String, dynamic>>()
+          .map(UnitDbEvent.fromJson)
+          .toList();
+    } on UnitDbException {
+      if (!_useLocal) rethrow;
+      return _local.history(id);
+    }
   }
+
+  // ─── Pull ze serveru (DB10) ───────────────────────────────────────────
+  //
+  // Rozdílové stahování podle revizí: `GET /units/changes?since=<rev>`.
+  // Plný sync (odesílání outboxu, konflikty, triggery) přijde v DB11 —
+  // tady jde jen o to, aby lokální DB měla serverová data.
+
+  static const _pullTimeout = Duration(seconds: 6);
+  static const _maxPullPages = 50; // strop proti nekonečné smyčce
+
+  /// Dorovná lokální DB ze serveru. Vrací počet stažených karet; chyby
+  /// **polyká** (offline je normální stav, ne selhání).
+  Future<int> pullFromServer() async {
+    if (!_useLocal || !_enabled) return 0;
+    var applied = 0;
+    try {
+      var since = (await _local.syncState()).lastRev;
+      for (var page = 0; page < _maxPullPages; page++) {
+        final res = await _client
+            .get(Uri.parse('$_base/units/changes?since=$since&limit=500'))
+            .timeout(_pullTimeout);
+        if (res.statusCode != 200) break;
+        final json = jsonDecode(res.body) as Map<String, dynamic>;
+        final units = (json['units'] as List? ?? const [])
+            .cast<Map<String, dynamic>>();
+        final deleted = (json['deleted'] as List? ?? const [])
+            .cast<Map<String, dynamic>>();
+        final maxRev = (json['maxRev'] as num?)?.toInt() ?? since;
+        final serverTs = DateTime.tryParse(json['serverTs'] as String? ?? '');
+        await _local.applyServerChanges(
+          units: units,
+          deleted: deleted,
+          maxRev: maxRev,
+          serverTs: serverTs,
+        );
+        // Kalibrace hodin: podle serverového času, ne podle místních (telefon
+        // po vybití nebo notebook bez NTP se rozchází i o dny) — PRD §4.4.
+        if (serverTs != null) {
+          final offset = serverTs.difference(DateTime.now().toUtc()).inMilliseconds;
+          await _local.saveSyncState(clockOffsetMs: offset);
+        }
+        applied += units.length;
+        if (json['more'] != true) break;
+        since = maxRev;
+      }
+    } catch (_) {
+      // offline / server nedostupný → zůstane poslední známý stav
+    }
+    return applied;
+  }
+
+  /// Kolik lokálních změn čeká na odeslání (indikátor v UI).
+  Future<int> pendingChanges() => _useLocal ? _local.outboxCount() : Future.value(0);
 
   /// Uloží desired fragment s potvrzením výsledku (na rozdíl od
   /// fire-and-forget [pushDesired]). Používá akce „Převzít skutečnost do
   /// evidence" na kartě — uživatel potřebuje vědět, jestli se to povedlo.
   Future<void> saveDesired(String id, Map<String, dynamic> fragment) async {
+    if (_useLocal) {
+      // Offline-first: zapíše se do lokální DB a odešle se, až bude server
+      // k dispozici. Uživateli to potvrdíme hned — o čekajících změnách
+      // informuje indikátor synchronizace, ne chybová hláška.
+      await _local.writeDesired(id, fragment, username: _username);
+      return;
+    }
     final http.Response res;
     try {
       res = await _client
@@ -213,6 +327,10 @@ class UnitDbService {
       'note': ?note,
       'status': ?status,
     };
+    if (_useLocal) {
+      await _local.writeMeta(id, body, username: _username);
+      return;
+    }
     final http.Response res;
     try {
       res = await _client
@@ -232,23 +350,51 @@ class UnitDbService {
 
   /// Hromadná editace evidence (desired) vybraných jednotek — jeden POST,
   /// server řeší v transakci. Vrací počet zpracovaných jednotek.
-  Future<int> bulkSaveDesired(List<String> ids, Map<String, dynamic> fragment) {
+  ///
+  /// Lokální režim: zapíše se po jednotkách do lokální DB (každá dostane svou
+  /// operaci do fronty, takže případný konflikt se řeší per jednotka).
+  Future<int> bulkSaveDesired(
+    List<String> ids,
+    Map<String, dynamic> fragment,
+  ) async {
+    if (_useLocal) {
+      for (final id in ids) {
+        await _local.writeDesired(id, fragment, username: _username);
+      }
+      return ids.length;
+    }
     return _bulkPost('/units/bulk/desired', {'ids': ids, 'fragment': fragment});
   }
 
   /// Hromadná editace meta polí (stav / zákazník / umístění).
-  Future<int> bulkSaveMeta(List<String> ids, Map<String, dynamic> meta) {
+  Future<int> bulkSaveMeta(List<String> ids, Map<String, dynamic> meta) async {
+    if (_useLocal) {
+      for (final id in ids) {
+        await _local.writeMeta(id, meta, username: _username);
+      }
+      return ids.length;
+    }
     return _bulkPost('/units/bulk/meta', {'ids': ids, 'meta': meta});
   }
 
   /// Hromadné smazání jednotek (jen admin — server vynucuje, 403 → výjimka).
-  Future<int> bulkDelete(List<String> ids) {
+  ///
+  /// Lokálně smaže hned; server operaci při syncu odmítne (`rejected`), pokud
+  /// uživatel adminem není. Proto UI mazání nabízí jen adminovi (isAdmin).
+  Future<int> bulkDelete(List<String> ids) async {
+    if (_useLocal) {
+      for (final id in ids) {
+        await _local.writeDelete(id, username: _username);
+      }
+      return ids.length;
+    }
     return _bulkPost('/units/bulk/delete', {'ids': ids});
   }
 
   /// Společné hodnoty evidence vybraných jednotek (pro předvyplnění dialogu
   /// hromadné editace). Vrací fragment jen s poli, která mají všechny shodná.
   Future<Map<String, dynamic>> bulkCommonDesired(List<String> ids) async {
+    if (_useLocal) return _commonDesiredLocal(ids);
     final http.Response res;
     try {
       res = await _client
@@ -266,6 +412,41 @@ class UnitDbService {
     _throwForStatus(res);
     final json = jsonDecode(res.body) as Map<String, dynamic>;
     return (json['common'] as Map?)?.cast<String, dynamic>() ?? {};
+  }
+
+  /// Lokální varianta `commonDesired` — hodnota se vrátí jen když ji mají
+  /// VŠECHNY vybrané jednotky shodnou (jinak zůstane v dialogu prázdná).
+  /// Zrcadlí serverovou logiku v db/units.js.
+  Future<Map<String, dynamic>> _commonDesiredLocal(List<String> ids) async {
+    final desireds = <Map<String, dynamic>>[];
+    for (final id in ids) {
+      final card = await _local.getCard(id);
+      desireds.add(card?.desired ?? const {});
+    }
+    bool allEqual(List<Object?> vals) =>
+        vals.every((v) => v != null) &&
+        vals.every((v) => v == vals.first);
+
+    final common = <String, dynamic>{};
+    for (final key in ['brightness', 'dispBrightness']) {
+      final vals = desireds.map((d) => d[key]).toList();
+      if (allEqual(vals)) common[key] = vals.first;
+    }
+    const groups = {
+      'broker': ['address', 'port', 'user', 'password'],
+      'wifi': ['ssid', 'password'],
+    };
+    for (final entry in groups.entries) {
+      final sub = <String, dynamic>{};
+      for (final field in entry.value) {
+        final vals = desireds
+            .map((d) => (d[entry.key] as Map?)?[field])
+            .toList();
+        if (allEqual(vals)) sub[field] = vals.first;
+      }
+      if (sub.isNotEmpty) common[entry.key] = sub;
+    }
+    return common;
   }
 
   Future<int> _bulkPost(String path, Map<String, dynamic> body) async {

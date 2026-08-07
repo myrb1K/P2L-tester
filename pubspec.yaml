@@ -39,9 +39,24 @@ dependencies:
   share_plus: ^10.1.2
   path_provider: ^2.1.4
   http: ^1.2.2
+  # Lokální DB jednotek (DB10 — offline evidence). Verze jsou uzavřené pod
+  # sqflite_common_ffi 2.4 / sqlite3 3.x záměrně, viz dependency_overrides.
+  sqflite: ^2.4.2
+  sqflite_common_ffi: '>=2.3.0 <2.4.0'
+  sqlite3_flutter_libs: ^0.5.24
+  path: ^1.9.1
 
 dependency_overrides:
   win32: ^5.5.4
+  # sqlite3 3.x staví native knihovnu přes Dart build hooks, které Flutter tool
+  # na Windows spustí `dart compile kernel` s cestou k hooku v uvozovkách — a na
+  # profilu s mezerou (`C:\Users\Radek Brym`) to skončí
+  # „'C:\Users\Radek' is not recognized as an internal or external command".
+  # Stejná past jako path_provider_foundation 2.6+ níže. Řada 2.x používá
+  # klasické CMake skripty z sqlite3_flutter_libs 0.5.x a funguje.
+  # Rozsahy drží samy direct dependencies výše; tenhle override je pojistka,
+  # aby sqlite3 3.x nepřitáhl tranzitivně někdo jiný.
+  sqlite3: ^2.7.5
   # path_provider_foundation 2.6+ používá Dart native build hooks (objective_c),
   # které Flutter tool na Windows spouští kvůli bugu i když je iOS/macOS, a
   # crashuje na mezerách v cestě k user profilu. Pin na poslední 2.5.x udrží
