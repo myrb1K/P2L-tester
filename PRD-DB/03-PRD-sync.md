@@ -365,3 +365,10 @@ a service se kompiluje i pro web.
 - **Klient:** rozhodovací tabulka §5 jako unit testy sync engine (bez sítě, s fake serverem),
   outbox po restartu appky, kalibrace hodin s rozjetými hodinami (offset ±2 dny),
   bootstrap nad prázdným lokálem, přerušený pull (`more`).
+- **E2E proti reálnému serveru** ([test/sync_e2e_test.dart](../test/sync_e2e_test.dart), hotovo
+  2026-08-07): test si spustí `server/server.js` nad SQLite v temp adresáři (port 3098, vlastní
+  `INITIAL_ADMIN`), přihlásí se a prožene celý cyklus přes skutečné HTTP — push, pull, konflikt
+  i „poslat znovu", idempotenci, audit, tombstone a offline→online. Odhalí to, co fake klient
+  nikdy nemůže: tvar payloadu, chování routeru, serializaci časů.
+  **Pozor:** `DB_DRIVER=sqlite` se procesu předává explicitně — `server/.env` může mít
+  `mariadb` a dotenv existující env nepřepisuje, takže bez toho by test jel proti firemní DB.
