@@ -26,21 +26,37 @@ const unitsDbPath = () => dataPath('units.db');
 const VALID_STATUS = ['active', 'faulty', 'stock', 'retired'];
 
 // Retence historie: na jednotku držíme jen posledních N záznamů, zbytek se
-// maže (drobné akce, ne archiv). Ořezává se při každém zápisu i jednorázově
-// při otevření DB (vyčistí přebytky z doby před retencí).
-const HISTORY_RETENTION = 5;
+// maže. Ořezává se při každém zápisu i jednorázově při otevření DB.
+//
+// DB9 zvedlo hodnotu z 5 na 200: audit má být procházitelný („kdo kdy co
+// změnil", PRD-DB/03-PRD-sync.md §8) a offline klient navíc nahraje celou
+// dávku změn najednou — s pěti záznamy by se skoro vše okamžitě zahodilo.
+// Přepsatelné env `HISTORY_RETENTION` (0 = bez ořezávání). Čte se při každém
+// ořezání, ne jednou při require — jinak by se hodnota nedala změnit v testech
+// (a v provozu by vyžadovala restart).
+const HISTORY_RETENTION_DEFAULT = 200;
+
+function historyRetention() {
+  const raw = parseInt(process.env.HISTORY_RETENTION, 10);
+  return Number.isInteger(raw) && raw >= 0 ? raw : HISTORY_RETENTION_DEFAULT;
+}
 
 // Strop pro jedno ořezání historie. `LIMIT <n> OFFSET 5` je portable způsob,
 // jak vybrat „všechno kromě 5 nejnovějších" — MariaDB nezná SQLite `LIMIT -1`.
 const PRUNE_BATCH = 100000;
 
 // Sloupce tabulky units v pořadí pro import/upsert.
+// `rev` tu není: importovaná karta musí dostat NOVOU revizi z cílového serveru
+// (jinak by si ji klienti nestáhli), nastavuje ji importUnits zvlášť.
 const UNIT_COLUMNS = [
   'id', 'generation', 'mac', 'hw_model', 'firmware', 'ip', 'battery',
   'ssid', 'mqtt_server', 'mqtt_port', 'brightness', 'seen_on_broker',
   'unit_config_json', 'unit_config_fetched_at', 'last_seen', 'devices_json',
   'desired_json', 'desired_updated_at', 'desired_updated_by',
   'name', 'location', 'note', 'status', 'created_at', 'updated_at',
+  // DB9: časy vrstev se přenášejí, aby po importu dál fungovalo rozhodování
+  // „kdo je novější" (bez nich by každý pozdější zápis vyhrál automaticky).
+  'observed_updated_at', 'meta_updated_at', 'meta_updated_by',
 ];
 
 class UnitOpError extends Error {
@@ -71,15 +87,18 @@ async function openUnitsDb(optsOrPath) {
 /// takže server otevírá jeden pool — viz db/index.js openDatabases).
 async function prepareUnitsSchema(db) {
   await ensureObservedColumns(db);
+  await ensureSyncSchema(db);
   await pruneAllHistory(db);
 }
 
 // Jednorázový úklid: u každé jednotky nechá jen posledních HISTORY_RETENTION
 // záznamů historie. Řeší data z doby před zavedením retence.
 async function pruneAllHistory(db) {
+  const keep = historyRetention();
+  if (keep === 0) return;
   const rows = await db.all(
     'SELECT unit_id FROM unit_history GROUP BY unit_id HAVING COUNT(*) > :keep',
-    { keep: HISTORY_RETENTION }
+    { keep }
   );
   for (const r of rows) await pruneHistory(db, r.unit_id);
 }
@@ -92,9 +111,11 @@ async function pruneAllHistory(db) {
 // je v prepared statements přijímá nespolehlivě (a nic tu nepřichází od
 // uživatele, takže se nic neriskuje).
 async function pruneHistory(db, unitId) {
+  const keep = historyRetention();
+  if (keep === 0) return;
   const rows = await db.all(
     `SELECT id FROM unit_history WHERE unit_id = :id
-     ORDER BY id DESC LIMIT ${PRUNE_BATCH} OFFSET ${HISTORY_RETENTION}`,
+     ORDER BY id DESC LIMIT ${PRUNE_BATCH} OFFSET ${keep}`,
     { id: unitId }
   );
   if (rows.length === 0) return;
@@ -129,6 +150,100 @@ async function ensureObservedColumns(db) {
       await db.exec(`ALTER TABLE units ADD COLUMN ${col} ${types[db.dialect]}`);
     }
   }
+}
+
+// ── Sync schéma (DB9) ──────────────────────────────────────────────────────
+//
+// Mini-migrace pro DB, které vznikly před DB9: doplní sync sloupce, pomocné
+// tabulky a indexy. Idempotentní — nad novou DB (schéma už vše má) neudělá nic.
+//
+// Existující karty dostanou `rev = 0`, takže první `listChanges(since=0)`
+// vrátí celou databázi — přesně to, co bootstrap klienta potřebuje.
+async function ensureSyncSchema(db) {
+  const unitCols = await db.columns('units');
+  const unitWanted = {
+    rev: { sqlite: 'INTEGER NOT NULL DEFAULT 0', mariadb: 'BIGINT NOT NULL DEFAULT 0' },
+    observed_updated_at: { sqlite: 'TEXT', mariadb: 'VARCHAR(32)' },
+    meta_updated_at: { sqlite: 'TEXT', mariadb: 'VARCHAR(32)' },
+    meta_updated_by: { sqlite: 'TEXT', mariadb: 'VARCHAR(64)' },
+    deleted_at: { sqlite: 'TEXT', mariadb: 'VARCHAR(32)' },
+    deleted_by: { sqlite: 'TEXT', mariadb: 'VARCHAR(64)' },
+  };
+  for (const [col, types] of Object.entries(unitWanted)) {
+    if (!unitCols.has(col)) {
+      await db.exec(`ALTER TABLE units ADD COLUMN ${col} ${types[db.dialect]}`);
+    }
+  }
+
+  const histCols = await db.columns('unit_history');
+  const histWanted = {
+    uuid: { sqlite: 'TEXT', mariadb: 'VARCHAR(64)' },
+    layer: { sqlite: 'TEXT', mariadb: 'VARCHAR(16)' },
+    origin: { sqlite: 'TEXT', mariadb: 'VARCHAR(16)' },
+    source_device: { sqlite: 'TEXT', mariadb: 'VARCHAR(64)' },
+    rev: { sqlite: 'INTEGER', mariadb: 'BIGINT' },
+  };
+  for (const [col, types] of Object.entries(histWanted)) {
+    if (!histCols.has(col)) {
+      await db.exec(`ALTER TABLE unit_history ADD COLUMN ${col} ${types[db.dialect]}`);
+    }
+  }
+
+  // Tabulky pro čítač revizí a idempotenci pushů. Ve schématu jsou taky, tady
+  // kvůli DB vzniklým před DB9 (schéma se nad existující DB nepřehrává celé).
+  if (db.dialect === 'mariadb') {
+    await db.exec(`CREATE TABLE IF NOT EXISTS sync_counter (
+      id INT NOT NULL PRIMARY KEY, value BIGINT NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    await db.exec(`CREATE TABLE IF NOT EXISTS sync_ops (
+      op_id VARCHAR(64) NOT NULL PRIMARY KEY, unit_id VARCHAR(16) NOT NULL,
+      layer VARCHAR(16) NOT NULL, status VARCHAR(16) NOT NULL,
+      rev BIGINT, applied_at VARCHAR(32) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    await db.run('INSERT IGNORE INTO sync_counter (id, value) VALUES (1, 0)');
+  } else {
+    await db.exec(`CREATE TABLE IF NOT EXISTS sync_counter (
+      id INTEGER PRIMARY KEY, value INTEGER NOT NULL
+    )`);
+    await db.exec(`CREATE TABLE IF NOT EXISTS sync_ops (
+      op_id TEXT PRIMARY KEY, unit_id TEXT NOT NULL, layer TEXT NOT NULL,
+      status TEXT NOT NULL, rev INTEGER, applied_at TEXT NOT NULL
+    )`);
+    await db.run('INSERT OR IGNORE INTO sync_counter (id, value) VALUES (1, 0)');
+  }
+
+  await ensureIndex(db, 'units', 'idx_units_rev', '(rev)');
+  await ensureIndex(db, 'unit_history', 'idx_unit_history_uuid', '(uuid)');
+}
+
+// `CREATE INDEX IF NOT EXISTS` MariaDB neumí a duplicitní index je tam chyba
+// („Duplicate key name"). Spolknout ji je bezpečnější než introspekce přes
+// information_schema — index buď vznikne, nebo už je.
+async function ensureIndex(db, table, name, columns) {
+  try {
+    if (db.dialect === 'mariadb') {
+      await db.exec(`CREATE INDEX ${name} ON ${table} ${columns}`);
+    } else {
+      await db.exec(`CREATE INDEX IF NOT EXISTS ${name} ON ${table} ${columns}`);
+    }
+  } catch (err) {
+    if (!/duplicate key name/i.test(err.message || '')) throw err;
+  }
+}
+
+// Další revize. MUSÍ se volat uvnitř transakce (`tx`), jinak by dva souběžné
+// zápisy mohly dostat totéž číslo: u MariaDB drží `UPDATE` zámek řádku až do
+// commitu, u SQLite serializuje zápisy mutex adapteru.
+async function nextRev(tx) {
+  await tx.run('UPDATE sync_counter SET value = value + 1 WHERE id = 1');
+  const row = await tx.get('SELECT value FROM sync_counter WHERE id = 1');
+  return Number(row ? row.value : 0);
+}
+
+/// Aktuální revize (nejvyšší přidělená) — pro `maxRev` v odpovědích sync API.
+async function currentRev(db) {
+  const row = await db.get('SELECT value FROM sync_counter WHERE id = 1');
+  return Number(row ? row.value : 0);
 }
 
 // 'u0128' / '001209' / '1209' → kanonické '128' / '1209'. Vyhodí při
@@ -182,16 +297,27 @@ function scrubSecrets(value) {
   return out;
 }
 
-async function addHistory(db, unitId, username, action, detail) {
+// `meta` (DB9): { layer, origin, sourceDevice, rev, uuid, at } — audit sloupce
+// pro obrazovku Změn a pro dohledání, odkud zápis přišel. Volitelné, aby starší
+// volání (a testy) fungovala dál; `layer` se pak odvodí z akce.
+async function addHistory(db, unitId, username, action, detail, meta = {}) {
   await db.run(
-    `INSERT INTO unit_history (unit_id, at, username, action, detail_json)
-     VALUES (:unit_id, :at, :username, :action, :detail_json)`,
+    `INSERT INTO unit_history
+       (unit_id, at, username, action, detail_json, uuid, layer, origin, source_device, rev)
+     VALUES (:unit_id, :at, :username, :action, :detail_json, :uuid, :layer, :origin,
+             :source_device, :rev)`,
     {
       unit_id: unitId,
-      at: nowIso(),
+      at: meta.at || nowIso(),
       username,
       action,
       detail_json: detail == null ? null : JSON.stringify(scrubSecrets(detail)),
+      uuid: meta.uuid || null,
+      layer: meta.layer || action,
+      // Bez explicitního origin je to přímý zápis proti serveru (web/online klient).
+      origin: meta.origin || 'online',
+      source_device: meta.sourceDevice || null,
+      rev: meta.rev == null ? null : meta.rev,
     }
   );
   // Retence: na jednotku držíme jen posledních HISTORY_RETENTION záznamů.
@@ -204,7 +330,8 @@ async function getHistory(db, rawId, limit = 200) {
   // pro jistotu ji stejně protáhneme přes celočíselnou kontrolu.
   const n = Number.isInteger(limit) && limit > 0 ? limit : 200;
   const rows = await db.all(
-    `SELECT at, username, action, detail_json FROM unit_history
+    `SELECT at, username, action, detail_json, uuid, layer, origin, source_device, rev
+     FROM unit_history
      WHERE unit_id = :id ORDER BY id DESC LIMIT ${n}`,
     { id }
   );
@@ -213,6 +340,12 @@ async function getHistory(db, rawId, limit = 200) {
     username: r.username,
     action: r.action,
     detail: r.detail_json ? JSON.parse(r.detail_json) : null,
+    // DB9 audit: u záznamů z doby před DB9 jsou null.
+    uuid: r.uuid || null,
+    layer: r.layer || null,
+    origin: r.origin || null,
+    sourceDevice: r.source_device || null,
+    rev: r.rev == null ? null : Number(r.rev),
   }));
 }
 
@@ -302,7 +435,7 @@ async function listUnits(db) {
             ip, battery, updated_at,
             ssid, mqtt_server, mqtt_port, brightness, seen_on_broker,
             unit_config_json, desired_json, desired_updated_at
-     FROM units ORDER BY ${db.sql.castInt('id')}`
+     FROM units WHERE deleted_at IS NULL ORDER BY ${db.sql.castInt('id')}`
   );
   return rows.map((row) => {
     const {
@@ -345,10 +478,14 @@ async function listUnits(db) {
   });
 }
 
-async function getUnit(db, rawId) {
+/// Detail karty. Tombstone (smazaná karta) se chová jako neexistující —
+/// `includeDeleted: true` ji vrátí (používá sync push, aby mohl vrátit
+/// `current` stav u konfliktu).
+async function getUnit(db, rawId, { includeDeleted = false } = {}) {
   const id = normalizeUnitId(rawId);
   const row = await db.get('SELECT * FROM units WHERE id = :id', { id });
   if (!row) return null;
+  if (row.deleted_at && !includeDeleted) return null;
   const {
     devices_json: devicesJson,
     desired_json: desiredJson,
@@ -381,17 +518,75 @@ async function ensureUnit(db, rawId, generation) {
   return id;
 }
 
+// ── Vrstvové zápisy (jádro, DB9) ───────────────────────────────────────────
+//
+// Každý zápis do karty přiděluje novou revizi (`rev`) a razí čas své vrstvy
+// (`observed_updated_at` / `desired_updated_at` / `meta_updated_at`). Podle
+// těch časů se rozhoduje o vítězi, když stejnou vrstvu změnil někdo jiný —
+// viz PRD-DB/03-PRD-sync.md §5.
+//
+// `ctx` (volitelný, plní ho sync push):
+//   at           čas, kdy změna vznikla u klienta (normalizovaný na serverový
+//                čas). Bez něj `nowIso()` → online zápis vždy vyhrává.
+//   username, origin ('online' | 'sync' | 'mqtt'), sourceDevice, uuid
+//
+// Návratový status:
+//   applied     zapsáno
+//   superseded  zahozeno, protože server má novější stav téže vrstvy
+//               (u observed) nebo karta byla mezitím smazána
+//   conflict    ruční vrstva (desired/meta) prohrála s novější serverovou verzí
+//               — nezapsáno, prohraná verze uložena do historie
+function ctxAt(ctx) {
+  return (ctx && ctx.at) || nowIso();
+}
+
+function historyMeta(ctx, rev, layer) {
+  return {
+    at: ctxAt(ctx),
+    uuid: ctx && ctx.uuid,
+    origin: (ctx && ctx.origin) || 'online',
+    sourceDevice: ctx && ctx.sourceDevice,
+    rev,
+    layer,
+  };
+}
+
+// Novější zápis „vyhrává": vrací true, když už v DB je stav mladší než `at`.
+function serverIsNewer(existingAt, at) {
+  const a = parseTs(existingAt);
+  const b = parseTs(at);
+  if (!a || !b) return false; // bez použitelných časů se nikdy neblokuje
+  return a > b;
+}
+
+// Tombstone: zápis starší než smazání se zahazuje (mazání vyhrává, PRD §5).
+// Novější zápis kartu naopak vzkřísí — jednotka fyzicky existuje a evidence se
+// plní automaticky, takže trvalý zákaz by byl matoucí. Tombstone je tedy
+// doručovací mechanismus pro ostatní klienty, ne permanentní blokace.
+function tombstoneBlocks(row, at) {
+  if (!row || !row.deleted_at) return false;
+  return !serverIsNewer(at, row.deleted_at);
+}
+
 // Observed vrstva — merge: přepisují se jen dodaná pole (partial update,
 // např. ALIVE nese jen firmware+baterii, get_param zbytek). Bez historie.
-async function upsertObserved(db, rawId, obs = {}) {
-  const id = await ensureUnit(db, rawId, obs.generation);
+async function applyObserved(tx, rawId, obs = {}, ctx = null) {
+  const at = ctxAt(ctx);
+  const id = await ensureUnit(tx, rawId, obs.generation);
+  const row = await tx.get(
+    'SELECT unit_config_json, observed_updated_at, deleted_at FROM units WHERE id = :id',
+    { id }
+  );
+  if (tombstoneBlocks(row, at)) return { id, status: 'superseded', rev: null };
+  if (serverIsNewer(row && row.observed_updated_at, at)) {
+    return { id, status: 'superseded', rev: null };
+  }
   const sets = [];
   const params = { id };
   // GET-CONFIG snapshot: chraň dřív zachycená skutečná hesla před pozdějším bool.
   let configToStore = obs.unitConfig;
   if (obs.unitConfig !== undefined) {
-    const prev = await db.get('SELECT unit_config_json FROM units WHERE id = :id', { id });
-    configToStore = mergeConfigSecrets(obs.unitConfig, prev && prev.unit_config_json);
+    configToStore = mergeConfigSecrets(obs.unitConfig, row && row.unit_config_json);
   }
   const map = {
     mac: obs.mac,
@@ -423,22 +618,55 @@ async function upsertObserved(db, rawId, obs = {}) {
   }
   sets.push('last_seen = :last_seen');
   params.last_seen = obs.lastSeen || nowIso();
+  sets.push('observed_updated_at = :observed_updated_at');
+  params.observed_updated_at = at;
   sets.push('updated_at = :updated_at');
   params.updated_at = nowIso();
-  await db.run(`UPDATE units SET ${sets.join(', ')} WHERE id = :id`, params);
-  return id;
+  const rev = await nextRev(tx);
+  sets.push('rev = :rev');
+  params.rev = rev;
+  // Novější observed zápis vzkřísí smazanou kartu (viz tombstoneBlocks).
+  if (row && row.deleted_at) {
+    sets.push('deleted_at = NULL', 'deleted_by = NULL');
+  }
+  await tx.run(`UPDATE units SET ${sets.join(', ')} WHERE id = :id`, params);
+  return { id, status: 'applied', rev };
+}
+
+/// Observed vrstva jako samostatná operace (route PUT /:id/observed).
+/// Transakce kvůli `nextRev` — dva souběžné zápisy nesmí dostat totéž rev.
+async function upsertObserved(db, rawId, obs = {}, ctx = null) {
+  const res = await db.transaction((tx) => applyObserved(tx, rawId, obs, ctx));
+  return res.id;
 }
 
 // Desired vrstva — merge po top-level klíčích: appka zapisuje po akcích
 // (set_Mqtt → {broker}, set_WiFi → {wifi}, …), takže poslaný fragment
 // přepíše jen svoje klíče a zbytek desired zůstává. Historie dostává jen
 // fragment (se scrubnutými hesly).
-async function updateDesired(db, rawId, fragment, username) {
+async function applyDesired(tx, rawId, fragment, username, ctx = null) {
   if (fragment === null || typeof fragment !== 'object' || Array.isArray(fragment)) {
     throw new UnitOpError('invalid_body', 'desired musí být JSON objekt');
   }
-  const id = await ensureUnit(db, rawId);
-  const row = await db.get('SELECT desired_json FROM units WHERE id = :id', { id });
+  const at = ctxAt(ctx);
+  const id = await ensureUnit(tx, rawId);
+  const row = await tx.get(
+    'SELECT desired_json, desired_updated_at, deleted_at FROM units WHERE id = :id',
+    { id }
+  );
+  // Karta smazána novějším mazáním, nebo tuhle vrstvu už někdo změnil později:
+  // prohraná verze se nezahazuje mlčky, jde do historie (PRD §5).
+  const lost = tombstoneBlocks(row, at)
+    ? 'superseded'
+    : serverIsNewer(row && row.desired_updated_at, at)
+      ? 'conflict'
+      : null;
+  if (lost) {
+    const rev = await nextRev(tx);
+    await addHistory(tx, id, username, 'superseded_local', fragment,
+      historyMeta(ctx, rev, 'desired'));
+    return { id, status: lost, rev: null };
+  }
   const current = row?.desired_json ? JSON.parse(row.desired_json) : {};
   // Hloubkový merge o jednu úroveň: vnořené objekty (broker, wifi) se slévají
   // po podklíčích, ne nahrazují vcelku — jinak by částečný fragment (např. jen
@@ -448,22 +676,29 @@ async function updateDesired(db, rawId, fragment, username) {
   for (const [k, v] of Object.entries(fragment)) {
     merged[k] = isObj(v) && isObj(merged[k]) ? { ...merged[k], ...v } : v;
   }
-  const now = nowIso();
-  await db.run(
+  const rev = await nextRev(tx);
+  await tx.run(
     `UPDATE units SET desired_json = :desired_json, desired_updated_at = :at,
-     desired_updated_by = :by, updated_at = :at WHERE id = :id`,
-    { desired_json: JSON.stringify(merged), at: now, by: username, id }
+     desired_updated_by = :by, updated_at = :now, rev = :rev,
+     deleted_at = NULL, deleted_by = NULL WHERE id = :id`,
+    { desired_json: JSON.stringify(merged), at, by: username, now: nowIso(), rev, id }
   );
-  await addHistory(db, id, username, 'desired', fragment);
-  return id;
+  await addHistory(tx, id, username, 'desired', fragment, historyMeta(ctx, rev, 'desired'));
+  return { id, status: 'applied', rev };
+}
+
+async function updateDesired(db, rawId, fragment, username, ctx = null) {
+  const res = await db.transaction((tx) => applyDesired(tx, rawId, fragment, username, ctx));
+  return res.id;
 }
 
 // Meta vrstva — partial update (jen dodaná pole) + historie.
-async function updateMeta(db, rawId, meta = {}, username) {
+async function applyMeta(tx, rawId, meta = {}, username, ctx = null) {
   if (meta.status !== undefined && !VALID_STATUS.includes(meta.status)) {
     throw new UnitOpError('invalid_status', `Neplatný stav '${meta.status}' (povolené: ${VALID_STATUS.join(', ')})`);
   }
-  const id = await ensureUnit(db, rawId);
+  const at = ctxAt(ctx);
+  const id = await ensureUnit(tx, rawId);
   const sets = [];
   const params = { id };
   const changed = {};
@@ -477,11 +712,38 @@ async function updateMeta(db, rawId, meta = {}, username) {
   if (sets.length === 0) {
     throw new UnitOpError('invalid_body', 'Žádné pole ke změně (name / location / note / status)');
   }
+  const row = await tx.get(
+    'SELECT meta_updated_at, deleted_at FROM units WHERE id = :id',
+    { id }
+  );
+  const lost = tombstoneBlocks(row, at)
+    ? 'superseded'
+    : serverIsNewer(row && row.meta_updated_at, at)
+      ? 'conflict'
+      : null;
+  if (lost) {
+    const rev = await nextRev(tx);
+    await addHistory(tx, id, username, 'superseded_local', changed,
+      historyMeta(ctx, rev, 'meta'));
+    return { id, status: lost, rev: null };
+  }
+  const rev = await nextRev(tx);
+  sets.push('meta_updated_at = :meta_updated_at', 'meta_updated_by = :meta_updated_by');
+  params.meta_updated_at = at;
+  params.meta_updated_by = username || null;
   sets.push('updated_at = :updated_at');
   params.updated_at = nowIso();
-  await db.run(`UPDATE units SET ${sets.join(', ')} WHERE id = :id`, params);
-  await addHistory(db, id, username, 'meta', changed);
-  return id;
+  sets.push('rev = :rev');
+  params.rev = rev;
+  sets.push('deleted_at = NULL', 'deleted_by = NULL');
+  await tx.run(`UPDATE units SET ${sets.join(', ')} WHERE id = :id`, params);
+  await addHistory(tx, id, username, 'meta', changed, historyMeta(ctx, rev, 'meta'));
+  return { id, status: 'applied', rev };
+}
+
+async function updateMeta(db, rawId, meta = {}, username, ctx = null) {
+  const res = await db.transaction((tx) => applyMeta(tx, rawId, meta, username, ctx));
+  return res.id;
 }
 
 // Přečíslování jednotky (change_ID) — karta se PŘENÁŠÍ včetně historie,
@@ -490,27 +752,68 @@ async function changeUnitId(db, rawOldId, rawNewId, username) {
   const oldId = normalizeUnitId(rawOldId);
   const newId = normalizeUnitId(rawNewId);
   if (oldId === newId) throw new UnitOpError('same_id', 'Nové ID je shodné se starým.');
-  if (!(await unitExists(db, oldId))) throw new UnitOpError('not_found', `Jednotka '${oldId}' v DB není.`);
+  const oldRow = await db.get('SELECT deleted_at FROM units WHERE id = :id', { id: oldId });
+  if (!oldRow || oldRow.deleted_at) {
+    throw new UnitOpError('not_found', `Jednotka '${oldId}' v DB není.`);
+  }
+  // Kolize se hlídá i proti tombstonu — řádek fyzicky existuje, takže by INSERT
+  // stejně spadl na primárním klíči; jen bez čitelné hlášky.
   if (await unitExists(db, newId)) throw new UnitOpError('duplicate', `Jednotka '${newId}' už v DB existuje.`);
   await db.transaction(async (tx) => {
+    const now = nowIso();
+    const rev = await nextRev(tx);
     await tx.run(
-      'UPDATE units SET id = :newId, generation = :generation, updated_at = :updated_at WHERE id = :oldId',
-      { newId, generation: deriveGeneration(newId), updated_at: nowIso(), oldId }
+      `UPDATE units SET id = :newId, generation = :generation, updated_at = :updated_at,
+       rev = :rev WHERE id = :oldId`,
+      { newId, generation: deriveGeneration(newId), updated_at: now, rev, oldId }
     );
     await tx.run('UPDATE unit_history SET unit_id = :newId WHERE unit_id = :oldId', { newId, oldId });
-    await addHistory(tx, newId, username, 'change_id', { from: oldId, to: newId });
+    // Pro ostatní klienty staré ID zaniklo — bez tombstonu by jim v lokální DB
+    // zůstala navěky (karta se stěhuje, nemaže, takže by o ní nic nedozvěděli).
+    const oldRev = await nextRev(tx);
+    await tx.run(
+      `INSERT INTO units (id, generation, status, created_at, updated_at, rev,
+                          deleted_at, deleted_by)
+       VALUES (:id, :generation, 'retired', :created_at, :updated_at, :rev, :deleted_at, :deleted_by)
+       ${db.sql.onConflictUpdate('id', ['rev', 'deleted_at', 'deleted_by', 'updated_at'])}`,
+      {
+        id: oldId, generation: deriveGeneration(oldId), created_at: now, updated_at: now,
+        rev: oldRev, deleted_at: now, deleted_by: username || null,
+      }
+    );
+    await addHistory(tx, newId, username, 'change_id', { from: oldId, to: newId },
+      { rev, layer: 'change_id' });
   });
   return newId;
 }
 
-// Smazání karty včetně historie (jen admin — vynucuje route).
-async function deleteUnit(db, rawId) {
+// Smazání karty — tombstone, ne fyzické mazání (DB9). Bez něj by se karta při
+// dalším syncu vrátila z lokální DB klienta, který o mazání neví. Historie
+// zůstává (audit) a dostane záznam `delete`.
+//
+// Novější zápis kartu vzkřísí (viz tombstoneBlocks) — tombstone je doručovací
+// mechanismus, ne trvalý zákaz.
+async function applyDelete(tx, rawId, username, ctx = null) {
+  const at = ctxAt(ctx);
   const id = normalizeUnitId(rawId);
-  if (!(await unitExists(db, id))) throw new UnitOpError('not_found', `Jednotka '${id}' v DB není.`);
-  await db.transaction(async (tx) => {
-    await tx.run('DELETE FROM unit_history WHERE unit_id = :id', { id });
-    await tx.run('DELETE FROM units WHERE id = :id', { id });
-  });
+  const row = await tx.get('SELECT deleted_at FROM units WHERE id = :id', { id });
+  if (!row) throw new UnitOpError('not_found', `Jednotka '${id}' v DB není.`);
+  if (row.deleted_at) return { id, status: 'applied', rev: null }; // už smazaná → idempotentní
+  const rev = await nextRev(tx);
+  await tx.run(
+    `UPDATE units SET deleted_at = :at, deleted_by = :by, rev = :rev, updated_at = :now
+     WHERE id = :id`,
+    { at, by: username || null, rev, now: nowIso(), id }
+  );
+  // `username` je v historii NOT NULL — u volání bez uživatele (CLI, testy)
+  // zapíšeme 'system', ať se audit nerozbije o chybějící jméno.
+  await addHistory(tx, id, username || 'system', 'delete', null,
+    historyMeta(ctx, rev, 'delete'));
+  return { id, status: 'applied', rev };
+}
+
+async function deleteUnit(db, rawId, username = null, ctx = null) {
+  await db.transaction((tx) => applyDelete(tx, rawId, username, ctx));
 }
 
 // ── Hromadné operace (bulk endpointy) ──────────────────────────────────────
@@ -575,16 +878,17 @@ async function commonDesired(db, ids) {
 }
 
 // Tolerantní k chybějícím ID — seznam pochází z klienta a mezitím mohlo ID
-// zmizet; přeskočíme ho místo abychom shodili celou dávku.
-async function bulkDeleteUnits(db, ids) {
+// zmizet; přeskočíme ho místo abychom shodili celou dávku. Maže tombstonem
+// (viz applyDelete).
+async function bulkDeleteUnits(db, ids, username = null) {
   requireIds(ids);
   let n = 0;
   await db.transaction(async (tx) => {
     for (const rawId of ids) {
       const id = normalizeUnitId(rawId);
-      if (!(await unitExists(tx, id))) continue;
-      await tx.run('DELETE FROM unit_history WHERE unit_id = :id', { id });
-      await tx.run('DELETE FROM units WHERE id = :id', { id });
+      const row = await tx.get('SELECT deleted_at FROM units WHERE id = :id', { id });
+      if (!row || row.deleted_at) continue;
+      await applyDelete(tx, id, username);
       n++;
     }
   });
@@ -599,7 +903,10 @@ async function bulkDeleteUnits(db, ids) {
 async function exportUnits(db, ids = null) {
   let idList;
   if (ids == null) {
-    const rows = await db.all(`SELECT id FROM units ORDER BY ${db.sql.castInt('id')}`);
+    // Tombstones do zálohy nepatří — obnova by pak vzkřísila „smazáno".
+    const rows = await db.all(
+      `SELECT id FROM units WHERE deleted_at IS NULL ORDER BY ${db.sql.castInt('id')}`
+    );
     idList = rows.map((r) => r.id);
   } else {
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -654,6 +961,7 @@ async function importUnits(db, units, username) {
           : deriveGeneration(id);
       const status = VALID_STATUS.includes(u.status) ? u.status : 'active';
       const now = nowIso();
+      const rev = await nextRev(tx);
       await tx.run(upsertSql, {
         id,
         generation,
@@ -680,7 +988,16 @@ async function importUnits(db, units, username) {
         status,
         created_at: u.created_at ?? now,
         updated_at: now,
+        observed_updated_at: u.observed_updated_at ?? u.last_seen ?? null,
+        meta_updated_at: u.meta_updated_at ?? null,
+        meta_updated_by: u.meta_updated_by ?? null,
       });
+      // Nová revize + zrušení případného tombstonu: obnova ze zálohy je zápis,
+      // který si klienti musí stáhnout.
+      await tx.run(
+        'UPDATE units SET rev = :rev, deleted_at = NULL, deleted_by = NULL WHERE id = :id',
+        { rev, id }
+      );
       // Historie: nahraď snímkem ze zálohy. getHistory vrací DESC → vkládáme
       // vzestupně (reverse), ať auto-increment id kopíruje původní pořadí.
       await tx.run('DELETE FROM unit_history WHERE unit_id = :id', { id });
@@ -705,6 +1022,168 @@ async function importUnits(db, units, username) {
     }
   });
   return { created, updated, total: created + updated };
+}
+
+// ── Sync API (DB9, PRD-DB/03-PRD-sync.md §6) ───────────────────────────────
+
+const CHANGES_MAX_LIMIT = 500;
+
+/// Rozdílový pull: karty s `rev > since`, vzestupně po rev.
+///
+/// POZOR — na rozdíl od `listUnits` vrací i `desired` VČETNĚ hesel. Lokální DB
+/// klienta je nese (offline evidence by bez nich nešla zobrazit ani porovnat),
+/// takže je to záměr, ne únik: endpoint je za přihlášením stejně jako
+/// `GET /units/:id` a `/units/export`, které hesla vracejí taky.
+///
+/// Tombstones jdou zvlášť v `deleted` — klient podle nich smaže lokální řádek.
+/// `more: true` znamená „ber dál od maxRev z této dávky".
+async function listChanges(db, since = 0, limit = CHANGES_MAX_LIMIT) {
+  const from = Number.isFinite(Number(since)) && Number(since) > 0 ? Math.floor(Number(since)) : 0;
+  const n = Number.isInteger(limit) && limit > 0 ? Math.min(limit, CHANGES_MAX_LIMIT) : CHANGES_MAX_LIMIT;
+  // LIMIT inline, ne parametrem (viz pruneHistory) — hodnota je ověřené číslo.
+  const rows = await db.all(
+    `SELECT * FROM units WHERE rev > :since ORDER BY rev ASC LIMIT ${n + 1}`,
+    { since: from }
+  );
+  const more = rows.length > n;
+  const page = more ? rows.slice(0, n) : rows;
+  const units = [];
+  const deleted = [];
+  for (const row of page) {
+    if (row.deleted_at) {
+      deleted.push({ id: row.id, rev: Number(row.rev), deletedAt: row.deleted_at });
+      continue;
+    }
+    const {
+      devices_json: devicesJson,
+      desired_json: desiredJson,
+      unit_config_json: unitConfigJson,
+      ...rest
+    } = row;
+    units.push({
+      ...rest,
+      rev: Number(row.rev),
+      devices: devicesJson ? JSON.parse(devicesJson) : null,
+      desired: desiredJson ? JSON.parse(desiredJson) : null,
+      unit_config: unitConfigJson ? JSON.parse(unitConfigJson) : null,
+    });
+  }
+  const pageMaxRev = page.length > 0 ? Number(page[page.length - 1].rev) : from;
+  return {
+    serverTs: nowIso(),
+    // Když je stránka plná, `maxRev` je konec dávky (odtud klient pokračuje);
+    // u poslední dávky je to skutečné maximum, takže se klient dorovná.
+    maxRev: more ? pageMaxRev : Math.max(pageMaxRev, await currentRev(db)),
+    more,
+    units,
+    deleted,
+  };
+}
+
+const SYNC_LAYERS = ['observed', 'desired', 'meta', 'delete'];
+
+/// Dávkový push z outboxu klienta.
+///
+/// Každá operace nese `opId` (UUID) a je **idempotentní**: opakované doručení
+/// (spadlá síť, restart appky) vrátí původní výsledek a nic nezapíše. Proto se
+/// op_id ukládá do `sync_ops`.
+///
+/// `ctx`: { username, sourceDevice, isAdmin } — `isAdmin` gatuje mazání stejně
+/// jako `DELETE /units/:id`.
+///
+/// Každá operace jede ve VLASTNÍ transakci: jedna vadná op nesmí zneplatnit
+/// celou dávku (klient by nevěděl, co přeposlat).
+async function applySyncOps(db, ops, ctx = {}) {
+  if (!Array.isArray(ops)) throw new UnitOpError('invalid_body', 'ops musí být pole');
+  const username = ctx.username || null;
+  const results = [];
+
+  for (const op of ops) {
+    if (!op || typeof op !== 'object' || Array.isArray(op)) {
+      throw new UnitOpError('invalid_body', 'Každá operace musí být objekt');
+    }
+    const { opId, unitId, layer, at, payload } = op;
+    if (typeof opId !== 'string' || opId.length === 0 || opId.length > 64) {
+      throw new UnitOpError('invalid_body', 'opId musí být neprázdný string (max 64 znaků)');
+    }
+    if (!SYNC_LAYERS.includes(layer)) {
+      throw new UnitOpError('invalid_body',
+        `Neznámá vrstva '${layer}' (povolené: ${SYNC_LAYERS.join(', ')})`);
+    }
+
+    // Idempotence: už zpracované op_id vracíme beze změny stavu DB.
+    const known = await db.get('SELECT status, rev FROM sync_ops WHERE op_id = :opId', { opId });
+    if (known) {
+      results.push({
+        opId,
+        status: known.status,
+        rev: known.rev == null ? null : Number(known.rev),
+        duplicate: true,
+      });
+      continue;
+    }
+
+    const opCtx = {
+      at: typeof at === 'string' && at ? at : nowIso(),
+      origin: 'sync',
+      sourceDevice: ctx.sourceDevice || null,
+      uuid: typeof op.historyUuid === 'string' ? op.historyUuid : null,
+    };
+
+    let outcome;
+    try {
+      outcome = await db.transaction(async (tx) => {
+        let res;
+        if (layer === 'observed') {
+          res = await applyObserved(tx, unitId, payload || {}, opCtx);
+        } else if (layer === 'desired') {
+          res = await applyDesired(tx, unitId, payload, username, opCtx);
+        } else if (layer === 'meta') {
+          res = await applyMeta(tx, unitId, payload || {}, username, opCtx);
+        } else {
+          // Mazání smí jen admin — stejné pravidlo jako u DELETE /units/:id,
+          // jinak by se přes sync dala obejít autorizace.
+          if (!ctx.isAdmin) {
+            res = { id: normalizeUnitId(unitId), status: 'rejected', rev: null };
+          } else {
+            res = await applyDelete(tx, unitId, username, opCtx);
+          }
+        }
+        await tx.run(
+          `INSERT INTO sync_ops (op_id, unit_id, layer, status, rev, applied_at)
+           VALUES (:op_id, :unit_id, :layer, :status, :rev, :applied_at)`,
+          {
+            op_id: opId, unit_id: res.id, layer, status: res.status,
+            rev: res.rev, applied_at: nowIso(),
+          }
+        );
+        return res;
+      });
+    } catch (e) {
+      if (e instanceof UnitOpError) {
+        // Vadná operace (neplatné ID, neznámý stav, …) klienta neblokuje: zapíše
+        // se jako `rejected`, ať ji outbox nepřeposílá donekonečna.
+        await db.run(
+          `INSERT INTO sync_ops (op_id, unit_id, layer, status, rev, applied_at)
+           VALUES (:op_id, :unit_id, :layer, 'rejected', NULL, :applied_at)`,
+          { op_id: opId, unit_id: String(unitId || ''), layer, applied_at: nowIso() }
+        );
+        results.push({ opId, status: 'rejected', rev: null, error: e.code, message: e.message });
+        continue;
+      }
+      throw e;
+    }
+
+    const entry = { opId, status: outcome.status, rev: outcome.rev, id: outcome.id };
+    // U konfliktu přiloží aktuální serverový stav, aby klient mohl hned zobrazit
+    // banner „tvoje verze byla přehlasována" bez čekání na pull.
+    if (outcome.status === 'conflict') {
+      entry.current = await getUnit(db, outcome.id, { includeDeleted: true });
+    }
+    results.push(entry);
+  }
+
+  return { serverTs: nowIso(), maxRev: await currentRev(db), results };
 }
 
 module.exports = {
@@ -732,4 +1211,10 @@ module.exports = {
   exportAll,
   exportUnits,
   importUnits,
+  // sync (DB9)
+  listChanges,
+  applySyncOps,
+  currentRev,
+  CHANGES_MAX_LIMIT,
+  historyRetention,
 };

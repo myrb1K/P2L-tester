@@ -32,6 +32,8 @@ const {
   getHistory,
   exportUnits,
   importUnits,
+  listChanges,
+  applySyncOps,
 } = require('../db/units');
 
 function mapErrorToStatus(err) {
@@ -107,6 +109,33 @@ function makeRouter(db) {
     res.json({ ok: true, ...result });
   }));
 
+  // ── Synchronizace (DB9, PRD-DB/03-PRD-sync.md §6) ─────────────────────
+  // Obojí MUSÍ být před /:id, jinak by 'changes' / 'sync' spadlo do detailu.
+
+  // Rozdílový pull. `since` = poslední revize, kterou klient má (0 = bootstrap).
+  // Na rozdíl od GET / vrací desired VČETNĚ hesel — lokální DB klienta je nese,
+  // jinak by offline evidenci nešlo zobrazit (viz komentář u listChanges).
+  router.get('/changes', wrap(async (req, res) => {
+    const since = parseInt(req.query.since, 10);
+    const limit = parseInt(req.query.limit, 10);
+    res.json(await listChanges(
+      db,
+      Number.isFinite(since) ? since : 0,
+      Number.isFinite(limit) ? limit : undefined
+    ));
+  }));
+
+  // Dávkový push outboxu. Idempotentní přes opId, mazání jen pro admina.
+  // `sourceDevice` je informativní popis klienta pro audit (exe@NB-RADEK).
+  router.post('/sync', wrap(async (req, res) => {
+    const { ops, sourceDevice } = req.body || {};
+    res.json(await applySyncOps(db, ops, {
+      username: req.user.username,
+      isAdmin: !!req.user.isAdmin,
+      sourceDevice: typeof sourceDevice === 'string' ? sourceDevice.slice(0, 64) : null,
+    }));
+  }));
+
   router.get('/:id', wrap(async (req, res) => {
     const unit = await getUnit(db, req.params.id);
     if (!unit) return res.status(404).json({ error: 'not_found' });
@@ -147,7 +176,7 @@ function makeRouter(db) {
     if (!req.user.isAdmin) {
       return res.status(403).json({ error: 'admin_required' });
     }
-    await deleteUnit(db, req.params.id);
+    await deleteUnit(db, req.params.id, req.user.username);
     res.status(204).end();
   }));
 
@@ -176,7 +205,7 @@ function makeRouter(db) {
       return res.status(403).json({ error: 'admin_required' });
     }
     const { ids } = req.body || {};
-    const count = await bulkDeleteUnits(db, ids);
+    const count = await bulkDeleteUnits(db, ids, req.user.username);
     res.json({ ok: true, count });
   }));
 

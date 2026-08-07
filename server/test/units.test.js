@@ -32,6 +32,9 @@ const {
   exportAll,
   exportUnits,
   importUnits,
+  listChanges,
+  applySyncOps,
+  currentRev,
 } = require('../db/units');
 const unitsRoutes = require('../routes/units');
 
@@ -47,9 +50,18 @@ async function openTestDb() {
     });
     await db.run('DELETE FROM unit_history');
     await db.run('DELETE FROM units');
+    // DB9: sdílená testovací databáze si mezi testy nesmí nést revize ani
+    // zpracovaná op_id — jinak by test idempotence viděl cizí operace.
+    await db.run('DELETE FROM sync_ops');
+    await db.run('UPDATE sync_counter SET value = 0 WHERE id = 1');
     return db;
   }
   return openUnitsDb(':memory:');
+}
+
+// Časové značky pro testy rozhodování „kdo je novější" (posun v sekundách).
+function isoOffset(seconds) {
+  return new Date(Date.now() + seconds * 1000).toISOString();
 }
 
 let db;
@@ -219,15 +231,31 @@ describe('updateDesired', () => {
     assert.deepEqual(Object.keys(hist[0].detail), ['brightness']);
   });
 
-  test('historie drží jen posledních 5 záznamů (retence)', async () => {
+  test('historie se ořezává na HISTORY_RETENTION nejnovějších', async () => {
+    // Retence je od DB9 200 záznamů (audit má být procházitelný), pro test ji
+    // snížíme na 5 — hodnota se čte při každém ořezání, ne jednou při require.
+    const prev = process.env.HISTORY_RETENTION;
+    process.env.HISTORY_RETENTION = '5';
+    try {
+      for (let i = 1; i <= 8; i++) {
+        await updateDesired(db, '1209', { brightness: i }, 'radek');
+      }
+      const hist = await getHistory(db, '1209');
+      assert.equal(hist.length, 5); // 8 zápisů → jen 5 nejnovějších
+      // Nejnovější první, nejstarší 3 (jas 1–3) odmazané.
+      assert.equal(hist[0].detail.brightness, 8);
+      assert.equal(hist[4].detail.brightness, 4);
+    } finally {
+      if (prev === undefined) delete process.env.HISTORY_RETENTION;
+      else process.env.HISTORY_RETENTION = prev;
+    }
+  });
+
+  test('default retence (200) osm zápisů nemaže', async () => {
     for (let i = 1; i <= 8; i++) {
       await updateDesired(db, '1209', { brightness: i }, 'radek');
     }
-    const hist = await getHistory(db, '1209');
-    assert.equal(hist.length, 5); // 8 zápisů → jen 5 nejnovějších
-    // Nejnovější první, nejstarší 3 (jas 1–3) odmazané.
-    assert.equal(hist[0].detail.brightness, 8);
-    assert.equal(hist[4].detail.brightness, 4);
+    assert.equal((await getHistory(db, '1209')).length, 8);
   });
 });
 
@@ -280,12 +308,18 @@ describe('changeUnitId', () => {
 });
 
 describe('deleteUnit', () => {
-  test('smaže kartu i historii', async () => {
+  // DB9 změnilo mazání na tombstone: karta se chová jako smazaná, ale řádek
+  // zůstává (jinak by se při syncu vrátila z lokální DB klienta) a historie
+  // se zachovává pro audit.
+  test('karta se chová jako smazaná, historie zůstává', async () => {
     await updateMeta(db, '1209', { name: 'X' }, 'r');
     await deleteUnit(db, '1209');
     assert.equal(await getUnit(db, '1209'), null);
-    const { c } = await db.get('SELECT COUNT(*) AS c FROM unit_history');
-    assert.equal(c, 0);
+    assert.equal((await listUnits(db)).length, 0);
+
+    const hist = await getHistory(db, '1209');
+    assert.equal(hist[0].action, 'delete');
+    assert.equal(hist[0].username, 'system'); // bez uživatele (CLI/test)
   });
 });
 
@@ -652,5 +686,276 @@ describe('routes/units', () => {
       assert.equal(body.updated, 1);
       assert.equal((await (await fetch(`${base}/1600`, { headers: h })).json()).unit.name, 'Nová');
     });
+  });
+
+  test('GET /changes vrací desired vč. hesel; POST /sync je idempotentní', async () => {
+    await withServer(async (base) => {
+      const h = { Authorization: `Bearer ${tokenFor('radek', false)}`, 'Content-Type': 'application/json' };
+      await fetch(`${base}/1209/desired`, {
+        method: 'PUT', headers: h,
+        body: JSON.stringify({ broker: { address: 'mqtt.x', password: 'tajne' } }),
+      });
+
+      // Bootstrap pull: since=0 → celá DB. Na rozdíl od GET / nese hesla,
+      // protože lokální DB klienta je potřebuje (viz listChanges).
+      const all = await (await fetch(`${base}/changes?since=0`, { headers: h })).json();
+      assert.equal(all.units.length, 1);
+      assert.equal(all.units[0].desired.broker.password, 'tajne');
+      assert.ok(all.maxRev > 0);
+      assert.equal(all.more, false);
+
+      // Push jedné operace + její opakování (klient nedostal odpověď).
+      const op = {
+        opId: 'route-op-1', unitId: '1300', layer: 'meta',
+        at: new Date().toISOString(), payload: { location: 'Hala A' },
+      };
+      const first = await (await fetch(`${base}/sync`, {
+        method: 'POST', headers: h, body: JSON.stringify({ ops: [op], sourceDevice: 'exe@NB' }),
+      })).json();
+      assert.equal(first.results[0].status, 'applied');
+
+      const again = await (await fetch(`${base}/sync`, {
+        method: 'POST', headers: h, body: JSON.stringify({ ops: [op] }),
+      })).json();
+      assert.equal(again.results[0].duplicate, true);
+      assert.equal(again.results[0].rev, first.results[0].rev);
+
+      // Audit nese, odkud změna přišla.
+      const hist = (await (await fetch(`${base}/1300/history`, { headers: h })).json()).history;
+      assert.equal(hist[0].origin, 'sync');
+      assert.equal(hist[0].sourceDevice, 'exe@NB');
+
+      // Mazání přes sync smí jen admin.
+      const asUser = await (await fetch(`${base}/sync`, {
+        method: 'POST', headers: h,
+        body: JSON.stringify({ ops: [{ opId: 'del-1', unitId: '1300', layer: 'delete' }] }),
+      })).json();
+      assert.equal(asUser.results[0].status, 'rejected');
+
+      const adminH = { Authorization: `Bearer ${tokenFor('admin', true)}`, 'Content-Type': 'application/json' };
+      const asAdmin = await (await fetch(`${base}/sync`, {
+        method: 'POST', headers: adminH,
+        body: JSON.stringify({ ops: [{ opId: 'del-2', unitId: '1300', layer: 'delete' }] }),
+      })).json();
+      assert.equal(asAdmin.results[0].status, 'applied');
+      assert.equal((await fetch(`${base}/1300`, { headers: h })).status, 404);
+    });
+  });
+});
+
+// ── Sync vrstva (DB9, PRD-DB/03-PRD-sync.md) ────────────────────────────────
+
+describe('rev (revize)', () => {
+  test('každý zápis přiděluje novou, rostoucí revizi', async () => {
+    await upsertObserved(db, '1209', { firmware: 'FW1' });
+    const r1 = (await getUnit(db, '1209')).rev;
+    await updateDesired(db, '1209', { brightness: 40 }, 'radek');
+    const r2 = (await getUnit(db, '1209')).rev;
+    await updateMeta(db, '1209', { name: 'A' }, 'radek');
+    const r3 = (await getUnit(db, '1209')).rev;
+    assert.ok(r1 > 0 && r2 > r1 && r3 > r2, `revize nerostou: ${r1}, ${r2}, ${r3}`);
+    assert.equal(await currentRev(db), r3);
+  });
+
+  test('souběžné zápisy nedostanou stejnou revizi', async () => {
+    // 10 paralelních zápisů do různých karet — každý musí mít unikátní rev.
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => upsertObserved(db, String(1400 + i), { firmware: 'F' }))
+    );
+    const rows = await db.all('SELECT rev FROM units');
+    const revs = rows.map((r) => Number(r.rev));
+    assert.equal(new Set(revs).size, revs.length, `duplicitní revize: ${revs.join(',')}`);
+  });
+});
+
+describe('listChanges', () => {
+  test('vrací jen karty novější než since', async () => {
+    await upsertObserved(db, '1209', { firmware: 'FW1' });
+    const first = await listChanges(db, 0);
+    assert.equal(first.units.length, 1);
+
+    // Nic nového → prázdno, ale maxRev se nemění.
+    const nothing = await listChanges(db, first.maxRev);
+    assert.equal(nothing.units.length, 0);
+    assert.equal(nothing.deleted.length, 0);
+
+    await updateMeta(db, '1300', { name: 'Nová' }, 'radek');
+    const delta = await listChanges(db, first.maxRev);
+    assert.equal(delta.units.length, 1);
+    assert.equal(delta.units[0].id, '1300');
+  });
+
+  test('stránkuje a hlásí more', async () => {
+    for (let i = 0; i < 5; i++) await upsertObserved(db, String(1500 + i), { firmware: 'F' });
+    const page1 = await listChanges(db, 0, 2);
+    assert.equal(page1.units.length, 2);
+    assert.equal(page1.more, true);
+
+    const page2 = await listChanges(db, page1.maxRev, 2);
+    assert.equal(page2.units.length, 2);
+    assert.equal(page2.more, true);
+
+    const page3 = await listChanges(db, page2.maxRev, 2);
+    assert.equal(page3.units.length, 1);
+    assert.equal(page3.more, false);
+  });
+
+  test('smazaná karta jde do deleted, ne do units', async () => {
+    await upsertObserved(db, '1209', { firmware: 'FW1' });
+    const before = await listChanges(db, 0);
+    await deleteUnit(db, '1209', 'admin');
+
+    const after = await listChanges(db, before.maxRev);
+    assert.equal(after.units.length, 0);
+    assert.equal(after.deleted.length, 1);
+    assert.equal(after.deleted[0].id, '1209');
+    assert.ok(after.deleted[0].deletedAt);
+  });
+});
+
+describe('tombstones', () => {
+  test('smazaná karta zmizí ze seznamu, detailu i zálohy', async () => {
+    await updateMeta(db, '1209', { name: 'Ke smazání' }, 'radek');
+    await deleteUnit(db, '1209', 'admin');
+
+    assert.equal((await listUnits(db)).length, 0);
+    assert.equal(await getUnit(db, '1209'), null);
+    assert.equal((await exportAll(db)).length, 0);
+  });
+
+  test('historie mazání zůstává pro audit', async () => {
+    await updateMeta(db, '1209', { name: 'X' }, 'radek');
+    await deleteUnit(db, '1209', 'admin');
+    const hist = await getHistory(db, '1209');
+    assert.equal(hist[0].action, 'delete');
+    assert.equal(hist[0].username, 'admin');
+  });
+
+  test('novější zápis kartu vzkřísí, starší se zahodí', async () => {
+    await updateMeta(db, '1209', { name: 'X' }, 'radek');
+    await deleteUnit(db, '1209', 'admin');
+
+    // Zápis z doby PŘED smazáním (opozdilý offline outbox) → mazání vyhrává.
+    const stale = await applySyncOps(db, [{
+      opId: 'stale-1', unitId: '1209', layer: 'observed',
+      at: isoOffset(-60), payload: { firmware: 'STARY' },
+    }], { username: 'radek' });
+    assert.equal(stale.results[0].status, 'superseded');
+    assert.equal(await getUnit(db, '1209'), null);
+
+    // Zápis po smazání → karta se vrátí (jednotka fyzicky existuje).
+    const fresh = await applySyncOps(db, [{
+      opId: 'fresh-1', unitId: '1209', layer: 'observed',
+      at: isoOffset(60), payload: { firmware: 'NOVY' },
+    }], { username: 'radek' });
+    assert.equal(fresh.results[0].status, 'applied');
+    const unit = await getUnit(db, '1209');
+    assert.ok(unit);
+    assert.equal(unit.firmware, 'NOVY');
+  });
+
+  test('change-id nechá za starým ID tombstone', async () => {
+    await updateMeta(db, '1209', { name: 'Přečíslovaná' }, 'radek');
+    await changeUnitId(db, '1209', '1310', 'radek');
+
+    assert.equal(await getUnit(db, '1209'), null);
+    assert.equal((await getUnit(db, '1310')).name, 'Přečíslovaná');
+    const ch = await listChanges(db, 0);
+    assert.ok(ch.deleted.some((d) => d.id === '1209'), 'staré ID musí přijít jako smazané');
+    assert.ok(ch.units.some((u) => u.id === '1310'));
+  });
+});
+
+describe('applySyncOps — rozhodování konfliktů', () => {
+  test('observed: starší pozorování se zahodí, novější zapíše', async () => {
+    await upsertObserved(db, '1209', { firmware: 'AKTUALNI' }, { at: isoOffset(0) });
+
+    const older = await applySyncOps(db, [{
+      opId: 'obs-old', unitId: '1209', layer: 'observed',
+      at: isoOffset(-120), payload: { firmware: 'STARSI' },
+    }], { username: 'radek' });
+    assert.equal(older.results[0].status, 'superseded');
+    assert.equal((await getUnit(db, '1209')).firmware, 'AKTUALNI');
+
+    const newer = await applySyncOps(db, [{
+      opId: 'obs-new', unitId: '1209', layer: 'observed',
+      at: isoOffset(120), payload: { firmware: 'NOVEJSI' },
+    }], { username: 'radek' });
+    assert.equal(newer.results[0].status, 'applied');
+    assert.equal((await getUnit(db, '1209')).firmware, 'NOVEJSI');
+  });
+
+  test('desired: prohraná offline změna nezapíše, ale zůstane v historii', async () => {
+    // Kolega upravil evidenci online (teď).
+    await updateDesired(db, '1209', { broker: { address: 'server.firma.cz' } }, 'kolega');
+
+    // Technik měl offline změnu z dřívějška → prohrává.
+    const res = await applySyncOps(db, [{
+      opId: 'des-old', unitId: '1209', layer: 'desired',
+      at: isoOffset(-3600), payload: { broker: { address: 'stary.broker' } },
+    }], { username: 'radek', sourceDevice: 'exe@NB-RADEK' });
+
+    assert.equal(res.results[0].status, 'conflict');
+    assert.equal(res.results[0].current.desired.broker.address, 'server.firma.cz');
+    assert.equal((await getUnit(db, '1209')).desired.broker.address, 'server.firma.cz');
+
+    const hist = await getHistory(db, '1209');
+    const lost = hist.find((h) => h.action === 'superseded_local');
+    assert.ok(lost, 'přehlasovaná verze musí být v historii');
+    assert.equal(lost.detail.broker.address, 'stary.broker');
+    assert.equal(lost.layer, 'desired');
+    assert.equal(lost.origin, 'sync');
+    assert.equal(lost.sourceDevice, 'exe@NB-RADEK');
+  });
+
+  test('meta: novější offline změna vyhraje nad starší serverovou', async () => {
+    await updateMeta(db, '1209', { name: 'Stary nazev' }, 'kolega', { at: isoOffset(-3600) });
+    const res = await applySyncOps(db, [{
+      opId: 'meta-new', unitId: '1209', layer: 'meta',
+      at: isoOffset(0), payload: { name: 'Novy nazev' },
+    }], { username: 'radek' });
+    assert.equal(res.results[0].status, 'applied');
+    assert.equal((await getUnit(db, '1209')).name, 'Novy nazev');
+  });
+
+  test('vadná operace se odmítne a nezablokuje zbytek dávky', async () => {
+    const res = await applySyncOps(db, [
+      { opId: 'bad-1', unitId: 'xxx', layer: 'meta', payload: { name: 'A' } },
+      { opId: 'ok-1', unitId: '1209', layer: 'meta', payload: { name: 'B' } },
+    ], { username: 'radek' });
+
+    assert.equal(res.results[0].status, 'rejected');
+    assert.equal(res.results[0].error, 'invalid_id');
+    assert.equal(res.results[1].status, 'applied');
+    assert.equal((await getUnit(db, '1209')).name, 'B');
+
+    // Odmítnutá operace se nepřehrává znovu — outbox ji smaže podle výsledku.
+    const retry = await applySyncOps(db, [
+      { opId: 'bad-1', unitId: 'xxx', layer: 'meta', payload: { name: 'A' } },
+    ], { username: 'radek' });
+    assert.equal(retry.results[0].status, 'rejected');
+    assert.equal(retry.results[0].duplicate, true);
+  });
+
+  test('neznámá vrstva a chybné opId jsou chyba requestu', async () => {
+    await assert.rejects(
+      () => applySyncOps(db, [{ opId: 'x', unitId: '1209', layer: 'sabotage' }], {}),
+      /Neznámá vrstva/
+    );
+    await assert.rejects(
+      () => applySyncOps(db, [{ unitId: '1209', layer: 'meta' }], {}),
+      /opId/
+    );
+  });
+
+  test('duplicitní op se nezapíše dvakrát do historie', async () => {
+    const op = {
+      opId: 'dup-1', unitId: '1209', layer: 'meta',
+      at: new Date().toISOString(), payload: { note: 'jednou' },
+    };
+    await applySyncOps(db, [op], { username: 'radek' });
+    await applySyncOps(db, [op], { username: 'radek' });
+    const hist = await getHistory(db, '1209');
+    assert.equal(hist.filter((h) => h.action === 'meta').length, 1);
   });
 });

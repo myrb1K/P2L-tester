@@ -90,6 +90,27 @@ describe('splitStatements', () => {
   test('poslední příkaz bez středníku projde taky', () => {
     assert.deepEqual(splitStatements('SELECT 1'), ['SELECT 1']);
   });
+
+  // Regrese: na CRLF řádcích komentáře nemizely (`.` nematchuje `\r`, `$` bez
+  // `m` sedí na konec stringu), takže komentář se STŘEDNÍKEM rozsekl statement
+  // na půli věty a mysql2 pak v troskách hlásil neznámý placeholder. Windows
+  // checkout má CRLF, takže se to týkalo všech schémat.
+  test('komentáře mizí i na CRLF řádcích (vč. středníku a :něco v textu)', () => {
+    const out = splitStatements(
+      '-- hlavička; s středníkem\r\n' +
+      'CREATE TABLE a (\r\n' +
+      '  rev BIGINT -- revize; podle ní klient pozná, co je nového\r\n' +
+      ');\r\n' +
+      'INSERT IGNORE INTO c (id) VALUES (1);\r\n'
+    );
+    assert.equal(out.length, 2);
+    assert.match(out[0], /^CREATE TABLE a/);
+    assert.match(out[1], /^INSERT IGNORE/);
+    for (const stmt of out) {
+      assert.ok(!stmt.includes('--'), `komentář zůstal v SQL: ${stmt}`);
+      assert.ok(!/:[A-Za-z_]/.test(stmt), `falešný placeholder v SQL: ${stmt}`);
+    }
+  });
 });
 
 describe('adapter — základní operace', () => {
