@@ -143,16 +143,36 @@ class UnitDbService {
 
   String? get _username => _session.user?.username;
 
+  /// Zavolá se po každém lokálním zápisu — SyncEngine si to zapojí a spustí
+  /// odeslání (s debouncem). Callback místo přímého importu, aby nevznikl
+  /// import cyklus UnitDbService ↔ SyncEngine.
+  void Function()? onLocalChange;
+
   /// Lokální zápis nesmí shodit MQTT akci ani UI — stejná zásada jako u
   /// fire-and-forget HTTP pushů. Selže-li (plný disk, zamčená DB), evidence
   /// o té změně neví, ale appka jede dál.
   Future<void> _localWrite(Future<void> Function() op) async {
     try {
       await op();
+      onLocalChange?.call();
     } catch (e) {
       // ignore: avoid_print
       print('UnitDbService: lokální zápis selhal: $e');
     }
+  }
+
+  /// Interaktivní lokální zápis (uživatel čeká na potvrzení). Na rozdíl od
+  /// [_localWrite] chybu **propaguje** — kdyby se do lokální DB nezapsalo,
+  /// uživatel by si jinak myslel, že je změna uložená.
+  Future<T> _localInteractive<T>(Future<T> Function() op) async {
+    final T result;
+    try {
+      result = await op();
+    } catch (e) {
+      throw UnitDbException('Uložení do lokální databáze selhalo: $e');
+    }
+    onLocalChange?.call();
+    return result;
   }
 
   /// Přenese kartu na nové ID po change_ID. Jednotka bez karty v DB → 404,
@@ -284,6 +304,100 @@ class UnitDbService {
   /// Kolik lokálních změn čeká na odeslání (indikátor v UI).
   Future<int> pendingChanges() => _useLocal ? _local.outboxCount() : Future.value(0);
 
+  // ─── Push outboxu + dostupnost serveru (DB11) ─────────────────────────
+
+  static const _probeTimeout = Duration(seconds: 3);
+
+  /// Je server dostupný? Kontroluje **obsah** odpovědi, ne jen HTTP status:
+  /// captive portály zákazníkových WiFi vrací `200 OK` s přihlašovací
+  /// stránkou na cokoli, takže by se appka považovala za online a sync by
+  /// dokola padal (PRD-DB/03 §7 bod 1). Krátký timeout, ať UI nečeká.
+  Future<bool> probeServer() async {
+    if (!_enabled) return false;
+    try {
+      final res = await _client
+          .get(Uri.parse('$_base/health'))
+          .timeout(_probeTimeout);
+      if (res.statusCode != 200) return false;
+      final json = jsonDecode(res.body);
+      return json is Map && json['ok'] == true && json['db'] != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Odešle frontu lokálních změn na `POST /units/sync`.
+  ///
+  /// Server je idempotentní přes `opId`, takže když se odpověď ztratí, další
+  /// pokus nic nezdvojí. Výsledky se vyhodnocují per operace:
+  ///   applied / superseded → z fronty zmizí (superseded = server má novější
+  ///     pozorování, není co řešit)
+  ///   conflict             → z fronty zmizí a uloží se jako [SyncConflict],
+  ///     aby uživatel viděl, že jeho verze prohrála
+  ///   rejected             → z fronty zmizí (vadná operace by se jinak
+  ///     přeposílala donekonečna), zapíše se chyba
+  /// Operace, ke které odpověď nepřišla, zůstává ve frontě.
+  ///
+  /// Vrací počet úspěšně doručených operací; `null` když server nebyl
+  /// dostupný (odlišení „nic k odeslání" od „nepovedlo se").
+  Future<int?> pushOutbox({int batch = 100}) async {
+    if (!_useLocal || !_enabled) return 0;
+    final ops = await _local.pendingOps(limit: batch);
+    if (ops.isEmpty) return 0;
+
+    final http.Response res;
+    try {
+      res = await _client
+          .post(
+            Uri.parse('$_base/units/sync'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'ops': ops.map((o) => o.toWire()).toList(),
+              'sourceDevice': _sourceDevice,
+            }),
+          )
+          .timeout(_bulkTimeout);
+    } catch (_) {
+      return null; // offline → fronta zůstává
+    }
+    if (res.statusCode != 200) return null;
+
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    final results = (json['results'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
+    final byId = {for (final r in results) r['opId'] as String: r};
+
+    var delivered = 0;
+    for (final op in ops) {
+      final r = byId[op.opId];
+      if (r == null) continue; // bez odpovědi → nechat ve frontě
+      final status = r['status'] as String?;
+      if (status == 'conflict') {
+        await _local.recordConflict(
+          unitId: op.unitId,
+          layer: op.layer,
+          payload: op.payload,
+          at: op.at,
+          serverRev: (r['rev'] as num?)?.toInt(),
+        );
+      } else if (status == 'rejected') {
+        await _local.markOpFailed(
+          op.opId,
+          (r['message'] ?? r['error'] ?? 'odmítnuto serverem').toString(),
+        );
+      }
+      await _local.dropOp(op.opId);
+      if (status == 'applied') delivered++;
+    }
+    return delivered;
+  }
+
+  /// Popis klienta pro audit na serveru (`source_device`) — z něj je v historii
+  /// vidět, odkud změna přišla (`exe@NB-RADEK`, `apk@Pixel7`, `web`).
+  /// Bere se z LocalUnitDb, protože ta je platform-specific; `dart:io` tady
+  /// importovat nelze (soubor se kompiluje i pro web).
+  String get _sourceDevice => _local.deviceLabel;
+
   /// Uloží desired fragment s potvrzením výsledku (na rozdíl od
   /// fire-and-forget [pushDesired]). Používá akce „Převzít skutečnost do
   /// evidence" na kartě — uživatel potřebuje vědět, jestli se to povedlo.
@@ -292,7 +406,9 @@ class UnitDbService {
       // Offline-first: zapíše se do lokální DB a odešle se, až bude server
       // k dispozici. Uživateli to potvrdíme hned — o čekajících změnách
       // informuje indikátor synchronizace, ne chybová hláška.
-      await _local.writeDesired(id, fragment, username: _username);
+      await _localInteractive(
+        () => _local.writeDesired(id, fragment, username: _username),
+      );
       return;
     }
     final http.Response res;
@@ -328,7 +444,9 @@ class UnitDbService {
       'status': ?status,
     };
     if (_useLocal) {
-      await _local.writeMeta(id, body, username: _username);
+      await _localInteractive(
+        () => _local.writeMeta(id, body, username: _username),
+      );
       return;
     }
     final http.Response res;
@@ -358,10 +476,12 @@ class UnitDbService {
     Map<String, dynamic> fragment,
   ) async {
     if (_useLocal) {
-      for (final id in ids) {
-        await _local.writeDesired(id, fragment, username: _username);
-      }
-      return ids.length;
+      return _localInteractive(() async {
+        for (final id in ids) {
+          await _local.writeDesired(id, fragment, username: _username);
+        }
+        return ids.length;
+      });
     }
     return _bulkPost('/units/bulk/desired', {'ids': ids, 'fragment': fragment});
   }
@@ -369,10 +489,12 @@ class UnitDbService {
   /// Hromadná editace meta polí (stav / zákazník / umístění).
   Future<int> bulkSaveMeta(List<String> ids, Map<String, dynamic> meta) async {
     if (_useLocal) {
-      for (final id in ids) {
-        await _local.writeMeta(id, meta, username: _username);
-      }
-      return ids.length;
+      return _localInteractive(() async {
+        for (final id in ids) {
+          await _local.writeMeta(id, meta, username: _username);
+        }
+        return ids.length;
+      });
     }
     return _bulkPost('/units/bulk/meta', {'ids': ids, 'meta': meta});
   }
@@ -383,10 +505,12 @@ class UnitDbService {
   /// uživatel adminem není. Proto UI mazání nabízí jen adminovi (isAdmin).
   Future<int> bulkDelete(List<String> ids) async {
     if (_useLocal) {
-      for (final id in ids) {
-        await _local.writeDelete(id, username: _username);
-      }
-      return ids.length;
+      return _localInteractive(() async {
+        for (final id in ids) {
+          await _local.writeDelete(id, username: _username);
+        }
+        return ids.length;
+      });
     }
     return _bulkPost('/units/bulk/delete', {'ids': ids});
   }

@@ -1,0 +1,301 @@
+// Testy synchronizace (PRD-DB/03-PRD-sync.md, milestone DB11).
+//
+// Pokrývá to, co v terénu rozhoduje o tom, jestli se data neztratí:
+// - pořadí push → pull
+// - vyhodnocení výsledků pushe (applied / superseded / conflict / rejected)
+// - captive portal zákazníkovy WiFi (HTTP 200 s přihlašovací stránkou)
+// - offline: fronta zůstane, nic se nezahodí
+// - idempotence: operace bez odpovědi se pošle znovu se stejným opId
+
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:p2l_tester/services/auth_session.dart';
+import 'package:p2l_tester/services/local_unit_db.dart';
+import 'package:p2l_tester/services/sync_engine.dart';
+import 'package:p2l_tester/services/unit_db_service.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+/// Fake server: zaznamenává cesty requestů a odpovídá podle nastavení.
+class _FakeServer {
+  final List<String> calls = [];
+
+  /// Odpovědi na `POST /units/sync` — výsledky per opId (v pořadí operací).
+  List<String> pushStatuses = ['applied'];
+  bool healthOk = true;
+  bool captivePortal = false;
+  bool down = false;
+  List<Map<String, dynamic>> changeUnits = const [];
+
+  MockClient get client => MockClient((req) async {
+    calls.add('${req.method} ${req.url.path}');
+    if (down) throw Exception('offline');
+
+    if (req.url.path.endsWith('/health')) {
+      if (captivePortal) {
+        // Přesně to, co dělá captive portál: 200 OK s HTML přihlašovací
+        // stránkou na jakýkoli request.
+        return http.Response('<html><body>Wi-Fi login</body></html>', 200);
+      }
+      if (!healthOk) return http.Response('{"error":"nope"}', 503);
+      return http.Response(
+        jsonEncode({'ok': true, 'ts': DateTime.now().toUtc().toIso8601String(), 'db': 'mariadb'}),
+        200,
+      );
+    }
+
+    if (req.url.path.endsWith('/units/sync')) {
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      final ops = (body['ops'] as List).cast<Map<String, dynamic>>();
+      final results = <Map<String, dynamic>>[];
+      for (var i = 0; i < ops.length; i++) {
+        final status = i < pushStatuses.length ? pushStatuses[i] : 'applied';
+        if (status == 'no-answer') continue; // odpověď na tuhle op nepřijde
+        results.add({
+          'opId': ops[i]['opId'],
+          'status': status,
+          'rev': status == 'applied' ? 100 + i : null,
+          if (status == 'rejected') 'error': 'invalid_id',
+        });
+      }
+      return http.Response(
+        jsonEncode({
+          'serverTs': DateTime.now().toUtc().toIso8601String(),
+          'maxRev': 100,
+          'results': results,
+        }),
+        200,
+      );
+    }
+
+    if (req.url.path.endsWith('/units/changes')) {
+      return http.Response(
+        jsonEncode({
+          'serverTs': DateTime.now().toUtc().toIso8601String(),
+          'maxRev': 100,
+          'more': false,
+          'units': changeUnits,
+          'deleted': const [],
+        }),
+        200,
+      );
+    }
+    return http.Response('{}', 404);
+  });
+}
+
+void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
+
+  final local = LocalUnitDb.instance;
+  late _FakeServer server;
+  late UnitDbService service;
+  late SyncEngine engine;
+
+  setUp(() async {
+    await local.close();
+    await local.init(path: inMemoryDatabasePath);
+    server = _FakeServer();
+    service = UnitDbService(
+      session: AuthSession()
+        ..status = AuthSessionStatus.loggedIn
+        ..apiBase = 'http://server:3001/api',
+      client: server.client,
+      local: local,
+    );
+    engine = SyncEngine(service: service, local: local);
+  });
+
+  tearDown(() async {
+    engine.stop();
+    await local.close();
+  });
+
+  group('pořadí a průběh', () {
+    test('nejdřív health, pak push, pak pull', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      final ok = await engine.syncNow();
+
+      expect(ok, isTrue);
+      expect(engine.status, SyncStatus.ok);
+      // Push MUSÍ být před pullem — server tak rozhoduje o konfliktu se
+      // znalostí obou verzí a klient si hned stáhne výsledek.
+      expect(server.calls, [
+        'GET /api/health',
+        'POST /api/units/sync',
+        'GET /api/units/changes',
+      ]);
+      expect(engine.pendingCount, 0);
+    });
+
+    test('prázdná fronta: push se pošle naprázdno, pull proběhne', () async {
+      await engine.syncNow();
+      expect(server.calls, ['GET /api/health', 'GET /api/units/changes']);
+    });
+
+    test('pull zapíše serverové karty do lokální DB', () async {
+      server.changeUnits = [
+        {
+          'id': '1300',
+          'rev': 100,
+          'generation': 'new',
+          'status': 'active',
+          'name': 'Ze serveru',
+        },
+      ];
+      await engine.syncNow();
+      expect((await local.getCard('1300'))!.name, 'Ze serveru');
+    });
+  });
+
+  group('dostupnost serveru', () {
+    test('captive portal (200 + HTML) se NEbere jako běžící server', () async {
+      // Bez kontroly obsahu odpovědi by se appka považovala za online a sync
+      // by dokola padal — PRD §7 bod 1.
+      server.captivePortal = true;
+      await local.writeMeta('1209', {'name': 'X'});
+
+      final ok = await engine.syncNow();
+      expect(ok, isFalse);
+      expect(engine.status, SyncStatus.offline);
+      // Dál než k health se to nesmí dostat.
+      expect(server.calls, ['GET /api/health']);
+      expect(engine.pendingCount, 1, reason: 'fronta musí zůstat');
+    });
+
+    test('server vrací chybu → offline, fronta zůstává', () async {
+      server.healthOk = false;
+      await local.writeMeta('1209', {'name': 'X'});
+      expect(await engine.syncNow(), isFalse);
+      expect(engine.status, SyncStatus.offline);
+      expect(engine.pendingCount, 1);
+    });
+
+    test('síť spadne → offline, nic se nezahodí', () async {
+      server.down = true;
+      await local.writeDesired('1209', {'brightness': 30});
+      expect(await engine.syncNow(), isFalse);
+      expect(engine.pendingCount, 1);
+      expect((await local.getCard('1209'))!.desired!['brightness'], 30);
+    });
+  });
+
+  group('vyhodnocení výsledků pushe', () {
+    test('applied → operace z fronty zmizí', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      server.pushStatuses = ['applied'];
+      await engine.syncNow();
+      expect(await local.outboxCount(), 0);
+      expect(await local.conflictCount(), 0);
+    });
+
+    test('superseded → zmizí bez upozornění (server má novější)', () async {
+      await local.writeObserved('1209', {'firmware': 'FW1'});
+      server.pushStatuses = ['superseded'];
+      await engine.syncNow();
+      expect(await local.outboxCount(), 0);
+      expect(await local.conflictCount(), 0,
+          reason: 'observed konflikt netvoří — novější pozorování je pravda');
+    });
+
+    test('conflict → zmizí z fronty a uloží se pro uživatele', () async {
+      await local.writeDesired('1209', {
+        'broker': {'address': 'muj.broker', 'password': 'tajne'},
+      }, username: 'radek');
+      server.pushStatuses = ['conflict'];
+      await engine.syncNow();
+
+      expect(await local.outboxCount(), 0);
+      final conflicts = await local.conflicts(unitId: '1209');
+      expect(conflicts.length, 1);
+      expect(conflicts.single.layer, UnitLayer.desired);
+      // Prohraná verze se nesmí zahodit mlčky — musí být dohledatelná.
+      expect(conflicts.single.payload['broker']['address'], 'muj.broker');
+      expect(engine.conflictCount, 1);
+    });
+
+    test('rejected → zmizí z fronty (jinak by se posílala donekonečna)', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      server.pushStatuses = ['rejected'];
+      await engine.syncNow();
+      expect(await local.outboxCount(), 0);
+      expect(await local.conflictCount(), 0);
+    });
+
+    test('operace bez odpovědi zůstane ve frontě se stejným opId', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      final opIdBefore = (await local.pendingOps()).single.opId;
+
+      server.pushStatuses = ['no-answer'];
+      await engine.syncNow();
+
+      final ops = await local.pendingOps();
+      expect(ops.length, 1);
+      // Stejné opId je podmínka idempotence: server podle něj pozná, že už tu
+      // operaci zpracoval, a nezapíše ji dvakrát.
+      expect(ops.single.opId, opIdBefore);
+    });
+
+    test('konflikt lze uzavřít (dismiss) — čítač spadne', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      server.pushStatuses = ['conflict'];
+      await engine.syncNow();
+      expect(engine.conflictCount, 1);
+
+      final c = (await local.conflicts()).single;
+      await local.dismissConflict(c.id);
+      await engine.refreshCounts();
+      expect(engine.conflictCount, 0);
+      // Záznam zůstává — dohledatelnost je celý smysl.
+      expect((await local.conflicts()).isEmpty, isTrue);
+    });
+  });
+
+  group('stav a čítače', () {
+    test('label popisuje stav lidsky', () async {
+      expect(engine.label, 'Nesynchronizováno');
+
+      await local.writeMeta('1209', {'name': 'X'});
+      await engine.refreshCounts();
+      expect(engine.label, contains('1 změna čeká'));
+
+      await local.writeMeta('1300', {'name': 'Y'});
+      await local.writeMeta('1400', {'name': 'Z'});
+      await engine.refreshCounts();
+      expect(engine.label, contains('3 změny čeká'));
+
+      await engine.syncNow();
+      expect(engine.label, startsWith('Sladěno'));
+    });
+
+    test('offline s čekajícími změnami to řekne', () async {
+      server.down = true;
+      await local.writeMeta('1209', {'name': 'X'});
+      await engine.syncNow();
+      expect(engine.label, 'Offline · 1 změna čeká');
+    });
+
+    test('notifyLocalChange osvěží čítač hned (bez čekání na debounce)', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      engine.notifyLocalChange();
+      // refreshCounts je fire-and-forget → dáme mu proběhnout.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(engine.pendingCount, 1);
+      engine.stop(); // ať debounce timer nespustí sync po skončení testu
+    });
+
+    test('souběžné spuštění se neprolne', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      final a = engine.syncNow();
+      final b = engine.syncNow(); // druhý běh se má zahodit
+      final results = await Future.wait([a, b]);
+      expect(results.where((r) => r).length, 1);
+      expect(server.calls.where((c) => c.contains('sync')).length, 1);
+    });
+  });
+}

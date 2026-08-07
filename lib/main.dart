@@ -13,8 +13,10 @@ import 'screens/splash_screen.dart';
 import 'services/auth_session.dart';
 import 'services/local_server.dart';
 import 'services/local_unit_db.dart';
+import 'services/sync_engine.dart';
+import 'services/unit_db_service.dart';
 
-const String appVersion = '2.82';
+const String appVersion = '2.83';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +48,12 @@ Future<void> _bootstrapNative() async {
     await server.maybeAutostart();
   }
   await AuthSession.instance.restore();
+
+  // Synchronizace lokální DB se serverem (DB11) — až po restore session, aby
+  // první kolo mělo platný token. Engine si zapojí notifikaci o lokálních
+  // zápisech (callback, ne import, kvůli cyklu) a rozjede periodické kolo.
+  UnitDbService.instance.onLocalChange = SyncEngine.instance.notifyLocalChange;
+  unawaited(SyncEngine.instance.start());
 }
 
 class P2LTesterApp extends StatefulWidget {

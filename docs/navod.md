@@ -288,6 +288,38 @@ Karty jednotek **vznikají a aktualizují se samy** běžnou prací s appkou: ja
 
 Pod tím je **historie** změn (kdo, kdy, co — hesla se do historie nikdy nezapisují). Když se to, co jednotka hlásí, liší od evidence, karta nahoře ukáže oranžové **„Nesouhlasí s evidencí"** s konkrétními rozdíly. Nově rozlišuje tři druhy: **evidence × uloženo v jednotce** (nedorazila naše konfigurace?), **uloženo × reálně běží** (statická IP nastavená, ale jede DHCP / jiná WiFi) a **evidence × kde jednotku vidíme** (hlásí se přes jiný broker). Pokud je změna záměrná, tlačítko **„Převzít skutečnost do evidence"** srovná evidenci podle reálného stavu (hesla v evidenci zůstávají původní — jednotka je nehlásí; pokud se změnila taky, pošli konfiguraci přes appku).
 
+### Práce bez připojení k serveru (offline)
+
+Na Windows a Androidu si appka evidenci **drží i u sebe**, takže funguje i tam, kde na server
+nedosáhneš — typicky u zákazníka v jeho síti bez přístupu na internet. Jednotky přes MQTT vidíš
+normálně, evidenci si můžeš **prohlížet i upravovat** a jakmile se server ozve, změny se odešlou
+samy. Nic se nezadává znovu.
+
+V liště obrazovky *Databáze P2L modulů* je **ikona mraku** se stavem:
+
+| Ikona | Znamená |
+|---|---|
+| ☁ zelený mrak s ✓ | vše sladěno se serverem |
+| ☁ oranžový mrak se šipkou + číslo | tolik změn čeká na odeslání |
+| ☁ oranžový přeškrtnutý mrak | server je nedostupný (offline) |
+| ⟳ | právě synchronizuje |
+
+Klepnutím na ikonu se synchronizace spustí ručně; jinak běží sama — po každé změně, po návratu
+signálu a průběžně na pozadí. Číslo u ikony je počet **neodeslaných** změn: dokud tam svítí, data
+jsou jen v tomhle zařízení. Po přihlášení se stáhne i to, co mezitím změnili ostatní.
+
+**Když se dvě změny potkají.** Uprav něco offline a mezitím tutéž věc změní kolega na serveru —
+platí **novější změna**, a protože kolegova je novější, tvoje se neuloží. Aby se neztratila,
+karta ukáže červené **„Tvoje změna byla přehlasována"** s tím, co jsi chtěl zapsat:
+- **Poslat znovu** — zapíše tvoji verzi jako novou změnu (ta už vyhraje, je nejnovější),
+- **Rozumím** — bere na vědomí, banner zmizí (záznam v databázi zůstane dohledatelný).
+
+Když jsi offline nic neměnil a kolega na serveru ano, jeho verze se prostě stáhne — žádné hlášky.
+Údaje, které jednotky hlásí samy (firmware, baterie, IP…), konflikt nikdy nevyvolají: novější
+hlášení je vždy to platné.
+
+Webová verze lokální kopii nemá — běží na serveru, takže když server nejede, nejede ani web.
+
 **Import / export databáze.** Hamburger **☰** vpravo nahoře v hlavičce obrazovky nabízí:
 - **Exportovat databázi** — stáhne **kompletní zálohu** celé databáze do JSON souboru: všechny jednotky se všemi vrstvami (evidence včetně hesel, observed / GET-CONFIG, meta) i historií. Vhodné pro zálohu nebo přenos na jiný server.
 - **Importovat databázi** — načte dřív exportovaný soubor a **sloučí** ho do databáze: jednotky, které v souboru jsou, se podle ID **aktualizují** (nové se přidají), jednotky mimo soubor zůstanou beze změny — **nic se nemaže**. Před zápisem appka ukáže potvrzení s počtem jednotek. Opakovaný import stejného souboru nic nepokazí.

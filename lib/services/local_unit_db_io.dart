@@ -38,7 +38,9 @@ class LocalUnitDb {
   LocalUnitDb._();
   static final LocalUnitDb instance = LocalUnitDb._();
 
-  static const _schemaVersion = 1;
+  // v2 (DB11): tabulka `conflicts` — přehlasované lokální změny, které musí
+  // uživatel vidět (PRD-DB/03 §5).
+  static const _schemaVersion = 2;
 
   Database? _db;
   bool _unavailable = false;
@@ -68,6 +70,10 @@ class LocalUnitDb {
           version: _schemaVersion,
           onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
           onCreate: (db, _) => _createSchema(db),
+          onUpgrade: (db, from, to) async {
+            // Přírůstkově, ať existující lokální data přežijí update appky.
+            if (from < 2) await _createConflictsTable(db);
+          },
         ),
       );
       final st = await syncState();
@@ -161,6 +167,29 @@ class LocalUnitDb {
     );
 
     await db.execute('CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT)');
+    await _createConflictsTable(db);
+  }
+
+  /// Přehlasované lokální změny (DB11). Server při pushi vrátí `conflict`, když
+  /// tutéž vrstvu mezitím změnil někdo jiný novějším zápisem — vítězí server,
+  /// ale prohraná verze se **nesmí zahodit mlčky** (PRD-DB/03 §5), takže se
+  /// uloží sem a UI ji ukáže na kartě.
+  static Future<void> _createConflictsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE conflicts (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        unit_id      TEXT    NOT NULL,
+        layer        TEXT    NOT NULL,
+        payload_json TEXT    NOT NULL,  -- moje prohraná verze
+        at           TEXT    NOT NULL,  -- kdy moje změna vznikla
+        server_rev   INTEGER,           -- revize serverové verze, která vyhrála
+        detected_at  TEXT    NOT NULL,
+        dismissed    INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX idx_conflicts_unit ON conflicts(unit_id, dismissed)',
+    );
   }
 
   // ─── Čas ──────────────────────────────────────────────────────────────
@@ -172,11 +201,29 @@ class LocalUnitDb {
   DateTime now() =>
       DateTime.now().toUtc().add(Duration(milliseconds: _clockOffsetMs));
 
+  /// Popis zařízení pro audit na serveru (`source_device`): `exe@NB-RADEK`,
+  /// `apk@Pixel7`. Hostname jde jen z `dart:io`, proto to sedí tady a ne
+  /// v UnitDbService (ten se kompiluje i pro web).
+  String get deviceLabel {
+    final kind = Platform.isAndroid
+        ? 'apk'
+        : Platform.isWindows
+        ? 'exe'
+        : Platform.operatingSystem;
+    String host;
+    try {
+      host = Platform.localHostname;
+    } catch (_) {
+      host = ''; // na Androidu může být zakázané
+    }
+    return host.isEmpty ? kind : '$kind@$host';
+  }
+
   String _nowIso() => now().toIso8601String();
 
   // ─── Čtení ────────────────────────────────────────────────────────────
 
-  /// Seznam karet pro obrazduku Databáze (bez smazaných). Drift se počítá
+  /// Seznam karet pro obrazovku Databáze (bez smazaných). Drift se počítá
   /// z karty klientem ([UnitDbCard.driftWarnings]), ne serverem — offline
   /// není koho se zeptat.
   Future<List<UnitDbSummary>> listUnits() async {
@@ -621,6 +668,68 @@ class LocalUnitDb {
       };
     }
     return value;
+  }
+
+  // ─── Konflikty (DB11) ─────────────────────────────────────────────────
+
+  Future<void> recordConflict({
+    required String unitId,
+    required UnitLayer layer,
+    required Map<String, dynamic> payload,
+    required DateTime at,
+    int? serverRev,
+  }) async {
+    await _require.insert('conflicts', {
+      'unit_id': unitId,
+      'layer': layer.wire,
+      'payload_json': jsonEncode(payload),
+      'at': at.toUtc().toIso8601String(),
+      'server_rev': serverRev,
+      'detected_at': _nowIso(),
+      'dismissed': 0,
+    });
+  }
+
+  /// Nevyřešené konflikty; [unitId] = jen pro jednu kartu (banner v detailu).
+  Future<List<SyncConflict>> conflicts({String? unitId}) async {
+    final rows = await _require.query(
+      'conflicts',
+      where: unitId == null ? 'dismissed = 0' : 'dismissed = 0 AND unit_id = ?',
+      whereArgs: unitId == null ? null : [unitId],
+      orderBy: 'detected_at DESC',
+    );
+    return rows
+        .map(
+          (r) => SyncConflict(
+            id: (r['id'] as num).toInt(),
+            unitId: r['unit_id'] as String,
+            layer: UnitLayerExt.fromWire(r['layer'] as String),
+            payload: (jsonDecode(r['payload_json'] as String) as Map)
+                .cast<String, dynamic>(),
+            at: DateTime.parse(r['at'] as String),
+            serverRev: (r['server_rev'] as num?)?.toInt(),
+            detectedAt: DateTime.parse(r['detected_at'] as String),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> conflictCount() async {
+    final r = await _require.rawQuery(
+      'SELECT COUNT(*) AS c FROM conflicts WHERE dismissed = 0',
+    );
+    return (r.first['c'] as num).toInt();
+  }
+
+  /// Uživatel konflikt vzal na vědomí (banner zmizí). Záznam zůstává —
+  /// dohledatelnost je celý smysl toho, že se prohraná verze neztratí.
+  Future<void> dismissConflict(int id) async {
+    await _require.update(
+      'conflicts',
+      {'dismissed': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // ─── Stav synchronizace ───────────────────────────────────────────────

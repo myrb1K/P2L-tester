@@ -56,6 +56,45 @@ class OutboxOp {
   };
 }
 
+/// Přehlasovaná lokální změna (DB11). Vzniká, když server při pushi vrátí
+/// `conflict` — tutéž vrstvu mezitím změnil někdo jiný novějším zápisem.
+/// Vítězí server, ale tahle verze se nesmí zahodit mlčky (PRD-DB/03 §5):
+/// uživatel ji uvidí na kartě a může ji poslat znovu jako novou změnu.
+class SyncConflict {
+  final int id;
+  final String unitId;
+  final UnitLayer layer;
+
+  /// Fragment, který jsem chtěl zapsat (moje prohraná verze).
+  final Map<String, dynamic> payload;
+
+  /// Kdy moje změna vznikla.
+  final DateTime at;
+
+  /// Revize serverové verze, která vyhrála.
+  final int? serverRev;
+
+  final DateTime detectedAt;
+
+  const SyncConflict({
+    required this.id,
+    required this.unitId,
+    required this.layer,
+    required this.payload,
+    required this.at,
+    required this.detectedAt,
+    this.serverRev,
+  });
+
+  /// Lidský popis vrstvy pro hlášku v UI.
+  String get layerLabel => switch (layer) {
+    UnitLayer.desired => 'evidence (broker/WiFi/jas)',
+    UnitLayer.meta => 'název/umístění/stav',
+    UnitLayer.observed => 'stav jednotky',
+    UnitLayer.delete => 'smazání',
+  };
+}
+
 /// Stav synchronizace uložený v lokální DB.
 class LocalSyncState {
   /// Nejvyšší revize, kterou už klient má stáhnutou (`since` pro pull).

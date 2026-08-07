@@ -238,7 +238,7 @@ si hned stáhne výsledek (včetně vlastní přehlasované karty).
 |---|---|---|
 | **DB9** ✅ | Server: `rev` + čítač, `*_updated_at`, tombstones, rozšířený `unit_history`, endpointy `/units/changes` a `/units/sync` (idempotence přes `opId`) | hotovo 2026-08-07; 86 testů nad SQLite. **MariaDB sada zatím neproběhla** — na firemním serveru chybí databáze `P2Lunits_test` a práva pro účet `p2l` (viz server/README §Testy) |
 | **DB10** ✅ | Klient: lokální schéma (**sqflite**, ne drift — viz níže), `UnitDbService` přesměrovaný na lokál, UI čte z lokálu, **pull** ze serveru | hotovo 2026-08-07; appka čte i zapisuje offline, odesílání outboxu je DB11 |
-| **DB11** | Sync engine: kalibrace hodin, push/pull, konflikty, triggery, indikátor + banner | dvoucestná synchronizace |
+| **DB11** ✅ | Sync engine: kalibrace hodin, push/pull, konflikty, triggery, indikátor + banner | hotovo 2026-08-07; synchronizace je obousměrná |
 | **DB12** | Obrazovka „Změny" (audit napříč jednotkami) | dohledatelnost |
 
 Web se v žádném milníku nemění (R5).
@@ -308,6 +308,33 @@ zapisuje vždy, aby offline evidence ukazovala aktuální stav.
 
 **`change-id` je zatím online-only** (viz §10 bod 3) — přenos karty mezi dvěma klíči se do
 outboxu jako jedna operace nevejde a offline se dělat nebude.
+
+## 9.3 K DB11 — co se při realizaci ukázalo
+
+**Konflikty potřebují vlastní tabulku.** Server prohranou verzi zapíše do své historie, ale
+klient ji musí umět zobrazit na kartě — proto lokální `conflicts` (schéma v2, přírůstková
+migrace, ať lokální data přežijí update appky). Záznam se `dismissed`, nemaže: dohledatelnost
+je celý smysl toho, že se změna nezahodí mlčky. UI dává „Poslat znovu" (nový zápis s aktuálním
+časem → legitimní výhra) a „Rozumím".
+
+**Výsledky pushe se vyhodnocují per operace** a všechny čtyři stavy končí odebráním z fronty:
+`applied` a `superseded` bez upozornění, `conflict` s uložením prohrané verze, `rejected`
+s poznámkou o chybě — vadná operace by se jinak přeposílala donekonečna. Operace, ke které
+odpověď **nepřišla**, ve frontě zůstane se stejným `opId`; idempotence na serveru zajistí, že
+se druhým pokusem nic nezdvojí.
+
+**Souběžná kola se musí zahazovat.** Bez `_running` guardu by debounce + periodický timer +
+ruční klik poslali tři pushe zároveň a fronta by se rozjela.
+
+**Offline se zkouší po minutě, ne po deseti.** Periodický cyklus je 10 min (změny od ostatních),
+ale když je server nedostupný a fronta neprázdná, plánuje se retry po 1 min — technik po návratu
+do signálu nemá čekat, ani otevírat obrazovku Databáze.
+
+**Engine musí slyšet na přihlášení.** Nativní login je opt-in a uživatel se může přihlásit až za
+běhu; bez listeneru na `AuthSession` by se do restartu appky nesynchronizovalo nic.
+
+**`source_device` se bere z LocalUnitDb**, ne z `UnitDbService` — hostname jde jen z `dart:io`
+a service se kompiluje i pro web.
 
 ---
 
