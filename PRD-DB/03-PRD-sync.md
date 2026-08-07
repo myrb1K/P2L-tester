@@ -26,6 +26,16 @@ tedy míří na jeden server; lokální DB je *cache*, ne druhá pravda.
 4. **Nic se neztratí neviditelně** — přehlasovaná lokální změna skončí v auditu, ne v koši.
 5. **Log v serverové DB** dovolí procházet, kdo/kdy/odkud co změnil (napříč jednotkami).
 
+### 1.1 Referenční scénář
+
+Technik přijede k zákazníkovi s notebookem, připojí se do **jeho** sítě. Na jednotky přes MQTT
+vidí, ale **přístup na internet je zakázaný** → firemní server nedostupný. Konfiguruje jednotky,
+zakládá karty, píše poznámky a stavy. Po návratu do firmy (nebo na hotspot z telefonu) se
+všechno nahraje na server a zároveň se stáhne, co mezitím udělali ostatní.
+
+Z toho scénáře plyne, že **offline musí být možný i zápis**, ne jen čtení — evidence u zákazníka
+teprve vzniká. Varianta „offline cache jen pro čtení" byla zvážena a **zamítnuta** (2026-08-07).
+
 ### Co to není
 
 - Není to synchronizace „server → jednotka" (žádný reconcile konfigurace hardware; appka
@@ -45,7 +55,7 @@ tedy míří na jeden server; lokální DB je *cache*, ne druhá pravda.
 | R3 | Konflikt v `desired`/`meta` řeší **automaticky novější změna**; přehlasovaná verze jde do historie. Uživatel se dozví jen tehdy, když prohrála **jeho vlastní neodeslaná** změna. | **potvrzeno** |
 | R4 | Granularita rozhodování = **vrstva karty** (`observed` / `desired` / `meta`), ne celá karta a ne jednotlivá pole. | **potvrzeno** |
 | R5 | Web zůstává **čistě online** (bez lokální DB) — appka žije na serveru, offline režim tam nemá smysl. | **potvrzeno** |
-| R6 | Lokální Node server na desktopu (Nastavení → *Lokální server*) **zůstává** jako volba pro provoz bez firemního serveru. Jeho budoucnost se rozhodne později. | **odloženo** |
+| R6 | Lokální Node server na desktopu (Nastavení → *Lokální server*) se **po DB10 odstraní** — in-app SQLite ho nahradí. Do té doby zůstává jako funkční záložní cesta. | **potvrzeno 2026-08-07** |
 | R7 | **Šifrování lokální DB** (nese hesla brokerů z `desired`) — odloženo, řeší se později jako DB8. | **odloženo** |
 
 ---
@@ -223,8 +233,46 @@ Web se v žádném milníku nemění (R5).
 
 ---
 
+## 9.1 K R6 — proč lokální Node server skončí
+
+Rozhodnuto **2026-08-07**, po nasazení serveru na `p2ltester.smartbox.smartci4.com`
+(Docker + Traefik, HTTPS na 443, MariaDB `P2Lunits`).
+
+**Pozor na záměnu: nezaniká offline režim, zaniká jen jeho dnešní nosič.** Lokální DB zůstává —
+přesune se z Node serveru do samotné appky (in-app SQLite, DB10), takže referenční scénář §1.1
+funguje dál a poprvé i na Androidu.
+
+Vnitřní Node server v EXE existoval z jediného důvodu: appka neměla vlastní datovou vrstvu,
+takže lokální evidence šla jen přes lokální server nad SQLite. Po DB10 to platit přestane.
+Jediný scénář, který by ho udržel — *místo bez internetu i bez firemní sítě, kde k jedné
+evidenci potřebuje víc lidí zároveň* — neexistuje: firemní server je dostupný přes HTTPS
+z internetu a mobil se na internet dostane všude.
+
+Co odstranění přinese:
+
+| | dnes | po DB10 |
+|---|---|---|
+| portable zip | ≈ 128 MB (`server\` ≈ 100 MB: `node.exe` ~80 MB + `node_modules` ~19 MB) | ≈ 30 MB |
+| závislost na major verzi Node | native moduly (`better-sqlite3`, `bcrypt`) musí sedět s přiloženým `node.exe` | žádná |
+| kód, který zmizí | `local_server_io.dart`, `local_server_section.dart`, PID file + úklid sirotků, adopce cizího serveru, bootstrap správce, `dbMismatch` | — |
+| `tools\pack-portable.ps1` | kopíruje `server\`, hlídá `.env` a `data\` | jen přejmenování exe + zip |
+
+**Timing je podmínka, ne detail:** odstranit **až** bude in-app SQLite hotová, jinak by EXE
+mezitím přišlo o offline režim úplně. Provést jako samostatný commit, ne jako součást DB10.
+
+Poznámka: přepínač *Nastavení → Lokální server → Databáze* (SQLite/MariaDB) je fakticky mrtvý
+už teď — na MariaDB se appka dostane přihlášením ke vzdálenému serveru, lokálním serverem si
+ji nastavovat nemusí.
+
+---
+
 ## 10. Otevřené otázky
 
+0. **Offline autentizace** — dnes je přístup k evidenci vázaný na platný JWT (7 dní).
+   V referenčním scénáři (§1.1) je appka celý den bez serveru; kdyby token mezitím vypršel,
+   nesmí to znamenat ztrátu přístupu k **lokální** DB — přihlásit se totiž nejde. Návrh:
+   expirace tokenu blokuje jen komunikaci se serverem, lokální čtení i zápis běží dál
+   (a sync po návratu vyžádá nové přihlášení). Rozhodnout v DB10.
 1. **Retence historie** — audit poroste rychleji (i observed zápisy z offline klientů). Kolik
    měsíců držet, co prunovat? (Dnes prune existuje v `prepareUnitsSchema`.)
 2. **Mazání karty offline** — mazat smí jen admin. Má se offline mazání vůbec povolit,
