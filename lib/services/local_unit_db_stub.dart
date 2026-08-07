@@ -54,6 +54,17 @@ class LocalUnitDb {
   Future<void> dropOp(String opId) async {}
   Future<void> markOpFailed(String opId, String error) async {}
 
+  Future<void> recordConflict({
+    required String unitId,
+    required UnitLayer layer,
+    required Map<String, dynamic> payload,
+    required DateTime at,
+    int? serverRev,
+  }) async {}
+  Future<List<SyncConflict>> conflicts({String? unitId}) async => const [];
+  Future<int> conflictCount() async => 0;
+  Future<void> dismissConflict(int id) async {}
+
   Future<LocalSyncState> syncState() async => const LocalSyncState();
   Future<void> saveSyncState({
     int? lastRev,
@@ -62,4 +73,7 @@ class LocalUnitDb {
   }) async {}
 
   DateTime now() => DateTime.now().toUtc();
+
+  /// Popis klienta pro audit na serveru — na webu prostě `web`.
+  String get deviceLabel => 'web';
 }

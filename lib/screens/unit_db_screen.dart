@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 
 import '../models/unit_db.dart';
 import '../services/file_export.dart';
+import '../services/local_unit_db.dart';
+import '../services/sync_engine.dart';
 import '../services/unit_db_service.dart';
 
 // ─── Seznam ────────────────────────────────────────────────────────────
@@ -457,6 +459,9 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
       appBar: AppBar(
         title: const Text('Databáze P2L modulů'),
         actions: [
+          // Stav synchronizace + ruční spuštění (jen když je lokální DB, tedy
+          // na EXE/APK — web čte a píše přímo server, není co slaďovat).
+          _SyncStatusButton(onSynced: _load),
           if (_units != null) _bulkMenuButton(),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -1028,6 +1033,9 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
           : ListView(
               padding: const EdgeInsets.all(8),
               children: [
+                // Přehlasovaná lokální změna (DB11) — nad driftem, protože je
+                // to zpráva o TVÉ akci, ne o stavu jednotky.
+                _ConflictBanner(unitId: card.id, onChanged: _load),
                 if (card.driftWarnings.isNotEmpty)
                   Card(
                     color: Colors.orange.withAlpha(25),
@@ -2044,5 +2052,234 @@ class _ErrorRetry extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Stav synchronizace v AppBaru + ruční spuštění (DB11).
+///
+/// Zobrazuje se jen tam, kde je lokální DB (EXE/APK) — na webu se čte a píše
+/// přímo server, takže není co slaďovat a widget se skryje.
+class _SyncStatusButton extends StatelessWidget {
+  const _SyncStatusButton({required this.onSynced});
+
+  /// Po dokončení synchronizace se obrazovka překreslí (mohly přijít změny
+  /// od ostatních uživatelů).
+  final VoidCallback onSynced;
+
+  @override
+  Widget build(BuildContext context) {
+    final engine = SyncEngine.instance;
+    if (!engine.isEnabled) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: engine,
+      builder: (context, _) {
+        final pending = engine.pendingCount;
+        final (icon, color) = switch (engine.status) {
+          SyncStatus.running => (Icons.sync, null),
+          SyncStatus.ok => pending > 0
+              ? (Icons.cloud_upload_outlined, Colors.orange)
+              : (Icons.cloud_done_outlined, Colors.green),
+          SyncStatus.offline => (Icons.cloud_off_outlined, Colors.orange),
+          SyncStatus.idle => (Icons.cloud_queue, null),
+        };
+        final button = IconButton(
+          icon: Icon(icon, color: color),
+          tooltip: '${engine.label}\n(klepnutím synchronizovat)',
+          onPressed: engine.status == SyncStatus.running
+              ? null
+              : () async {
+                  await engine.syncNow();
+                  onSynced();
+                },
+        );
+        // Počet čekajících změn jako odznak — bez něj by uživatel nevěděl, že
+        // se něco neodeslalo.
+        if (pending == 0) return button;
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            button,
+            Positioned(
+              right: 4,
+              top: 6,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$pending',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Banner o přehlasované lokální změně (DB11, PRD-DB/03 §5).
+///
+/// Vzniká, když server při odeslání vrátil `conflict` — tutéž vrstvu mezitím
+/// změnil někdo jiný novějším zápisem. Vítězí server, ale uživatel musí vidět,
+/// že jeho verze prohrála, a mít možnost ji poslat znovu (jako novou změnu,
+/// tedy legitimní výhru).
+class _ConflictBanner extends StatefulWidget {
+  const _ConflictBanner({required this.unitId, required this.onChanged});
+
+  final String unitId;
+  final VoidCallback onChanged;
+
+  @override
+  State<_ConflictBanner> createState() => _ConflictBannerState();
+}
+
+class _ConflictBannerState extends State<_ConflictBanner> {
+  final _local = LocalUnitDb.instance;
+  final _service = UnitDbService.instance;
+  List<SyncConflict> _items = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    if (!_local.isAvailable) return;
+    final items = await _local.conflicts(unitId: widget.unitId);
+    if (mounted) setState(() => _items = items);
+  }
+
+  /// Poslat znovu = nový zápis s aktuálním časem. Server ho tedy přijme
+  /// (je novější než serverová verze) a konflikt se uzavře.
+  Future<void> _resend(SyncConflict c) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      if (c.layer == UnitLayer.desired) {
+        await _service.saveDesired(c.unitId, c.payload);
+      } else if (c.layer == UnitLayer.meta) {
+        await _service.saveMeta(
+          c.unitId,
+          name: c.payload['name'] as String?,
+          location: c.payload['location'] as String?,
+          note: c.payload['note'] as String?,
+          status: c.payload['status'] as String?,
+        );
+      }
+      await _local.dismissConflict(c.id);
+      await SyncEngine.instance.refreshCounts();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Změna odeslána znovu')),
+      );
+    } on UnitDbException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+    await _reload();
+    widget.onChanged();
+  }
+
+  Future<void> _dismiss(SyncConflict c) async {
+    await _local.dismissConflict(c.id);
+    await SyncEngine.instance.refreshCounts();
+    await _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_items.isEmpty) return const SizedBox.shrink();
+    return Card(
+      color: Colors.red.withAlpha(25),
+      margin: const EdgeInsets.only(bottom: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.merge_type, size: 18, color: Colors.red),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Tvoje změna byla přehlasována',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red.shade700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Než se změna odeslala, upravil tutéž část někdo jiný později. '
+              'Platí verze ze serveru — tvoje se neuložila.',
+              style: TextStyle(fontSize: 12),
+            ),
+            for (final c in _items) ...[
+              const Divider(height: 14),
+              Text(
+                '${c.layerLabel} · ${_fmt(c.at)}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              Text(
+                _describe(c.payload),
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => _dismiss(c),
+                    child: const Text('Rozumím'),
+                  ),
+                  const SizedBox(width: 4),
+                  FilledButton(
+                    onPressed: () => _resend(c),
+                    child: const Text('Poslat znovu'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Hesla se nevypisují — v payloadu být mohou (desired nese credentials).
+  static String _describe(Map<String, dynamic> payload) {
+    final parts = <String>[];
+    payload.forEach((k, v) {
+      if (v is Map) {
+        final sub = v.entries
+            .map((e) => RegExp('pass|pswd|secret', caseSensitive: false)
+                    .hasMatch(e.key)
+                ? '${e.key}=•••'
+                : '${e.key}=${e.value}')
+            .join(', ');
+        parts.add('$k: $sub');
+      } else {
+        parts.add('$k=$v');
+      }
+    });
+    return parts.join(' · ');
+  }
+
+  static String _fmt(DateTime t) {
+    final l = t.toLocal();
+    return '${l.day}.${l.month}. ${l.hour.toString().padLeft(2, '0')}:'
+        '${l.minute.toString().padLeft(2, '0')}';
   }
 }
