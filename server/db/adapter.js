@@ -78,9 +78,14 @@ function resolveDriver(override) {
 /// jeden příkaz a `multipleStatements` zapínat nechceme (rozšiřuje dopad
 /// případné injection). Schémata jsou naše, syntax jednoduchá: odstraníme
 /// `--` komentáře a rozdělíme na `;`.
+// POZOR na `\r`: v JS `.` nematchuje řádkové terminátory a `$` bez `m` sedí až
+// na konec stringu, takže na CRLF řádku (`-- text\r`) by `/--.*$/` neodpovídalo
+// vůbec a komentář by v SQL zůstal. Windows checkout má CRLF, takže se to týká
+// každého schématu — proto se řádky dělí `\r?\n`, ne `\n`. (Než se to opravilo,
+// stačil jeden komentář se středníkem a schéma se rozsekalo na půli věty.)
 function splitStatements(script) {
   return script
-    .split('\n')
+    .split(/\r?\n/)
     .map((line) => line.replace(/--.*$/, ''))
     .join('\n')
     .split(';')

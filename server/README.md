@@ -240,13 +240,46 @@ Vše za přihlášením; ID se normalizuje (`u0128`/`001209` → `128`/`1209`).
 | DELETE | `/api/units/:id` | Smaže kartu + historii — **jen isAdmin** (403 jinak) |
 | GET | `/api/units/export` | Kompletní záloha celé DB — všechny karty (observed + desired vč. hesel + meta) + historie; `{format:'p2l-tester.unit-db', version, exportedAt, units:[…]}`. Registrováno **před** `/:id` (jinak by spadlo do `/:id`) |
 | POST | `/api/units/export` | Záloha **jen vybraných** jednotek — body `{ids:[…]}` (1 nebo víc); stejný formát jako GET. Tolerantní k chybějícím ID (přeskočí) |
+| GET | `/api/units/changes?since=<rev>&limit=<n>` | **Sync pull (DB9)** — karty s `rev > since`, vzestupně; `{serverTs, maxRev, more, units, deleted}`. `since=0` = bootstrap. Na rozdíl od `GET /units` vrací `desired` **včetně hesel** (lokální DB klienta je nese, jinak by offline evidenci nešlo zobrazit). Tombstones jdou v `deleted`, ne v `units`. Limit max 500 |
+| POST | `/api/units/sync` | **Sync push (DB9)** — `{ops:[{opId, unitId, layer, at, payload, historyUuid}], sourceDevice}` → `{serverTs, maxRev, results}`. `layer` ∈ `observed·desired·meta·delete`, `status` ∈ `applied·superseded·conflict·rejected`. **Idempotentní přes `opId`** (opakované doručení vrátí původní výsledek s `duplicate: true`). Mazání jen pro admina, jinak `rejected`. Konflikt přiloží aktuální `current` kartu |
 | POST | `/api/units/import` | Obnova ze zálohy — **upsert po ID** (existující přepíše snímkem, nové přidá, cizí nechá; historie jednotky se nahradí → idempotentní). Ověřuje `format`; vrací `{created, updated, total}` |
+
+### Synchronizace (DB9)
+
+Podklad pro offline-first klienty ([PRD-DB/03-PRD-sync.md](../PRD-DB/03-PRD-sync.md)).
+Server je zdroj pravdy, klient si drží lokální kopii a dorovnává se podle `rev`.
+
+- **`rev`** — globální monotónní revize z tabulky `sync_counter`. Inkrementuje se
+  **v téže transakci** jako zápis do karty, takže dva souběžné zápisy nedostanou totéž
+  číslo. Čas se na to použít nedá (dva zápisy v jedné milisekundě).
+- **Časy vrstev** — `observed_updated_at` / `desired_updated_at` / `meta_updated_at`
+  rozhodují, kdo vyhrál, když stejnou vrstvu změnil někdo jiný. Ruční vrstvy
+  (`desired`/`meta`) při prohře vrací `conflict` a prohraná verze se zapíše do historie
+  jako `superseded_local` — nic se nezahazuje mlčky. `observed` konflikt netvoří
+  (novější pozorování je prostě pravda).
+- **Tombstones** — mazání nastaví `deleted_at`, řádek zůstává. Bez toho by se karta při
+  dalším syncu vrátila z lokální DB klienta, který o mazání neví. Novější zápis kartu
+  vzkřísí (jednotka fyzicky existuje), starší se zahodí — tombstone je doručovací
+  mechanismus, ne trvalý zákaz. `change-id` nechá tombstone za starým ID.
+- **Audit** — `unit_history` má navíc `uuid`, `layer`, `origin` (`online`/`sync`/`mqtt`),
+  `source_device` a `rev`. Retence je **200 záznamů na jednotku** (env `HISTORY_RETENTION`,
+  `0` = neomezeně); dřívějších 5 by u procházení změn ani u dávky z offline klienta
+  nestačilo.
+- **Idempotence** — `sync_ops` drží zpracovaná `opId`. Každá operace jede ve vlastní
+  transakci, takže jedna vadná (`rejected`) nezneplatní zbytek dávky.
 
 ## Testy
 
 ```bash
 npm test             # node --test nad SQLite :memory: — nic se neinstaluje
 npm run test:mariadb # tatáž sada proti reálné MariaDB (TEST_DB_NAME)
+```
+
+Pro `test:mariadb` musí testovací databáze **existovat** a účet z `DB_USER` na ni mít práva:
+
+```sql
+CREATE DATABASE P2Lunits_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON P2Lunits_test.* TO 'p2l'@'%';
 ```
 
 `npm run test:mariadb` testovací databázi **před každým testem maže**, proto

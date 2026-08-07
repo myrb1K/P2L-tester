@@ -347,6 +347,32 @@ Express 4 rejected promise nezachytí, proto má každý router `wrap()` helper.
 **Adapter API:** `get/all/run/exec/columns/transaction/close` + `sql` (dialektové fragmenty).
 Parametry pojmenovaně `:name` (rozumí jim better-sqlite3 i mysql2 s `namedPlaceholders`).
 
+### Synchronizační vrstva (DB9, podklad pro offline-first klienty)
+
+Server je zdroj pravdy, klient si drží lokální kopii a dorovnává se podle revizí
+([PRD-DB/03-PRD-sync.md](PRD-DB/03-PRD-sync.md)). Endpointy `GET /api/units/changes?since=<rev>`
+(pull; vrací `desired` **včetně hesel** — lokální DB je nese) a `POST /api/units/sync`
+(push outboxu, idempotentní přes `opId` v tabulce `sync_ops`).
+
+- **`rev`** = globální monotónní čítač (`sync_counter`), inkrement **v téže transakci** jako
+  zápis karty. Čas na to nestačí (dva zápisy v jedné milisekundě). Proto jsou od DB9 všechny
+  zápisy do karty v transakci a `nextRev(tx)` se volá jen uvnitř.
+- **Kdo vyhrál** se řeší per vrstva přes `observed_updated_at` / `desired_updated_at` /
+  `meta_updated_at`. Ruční vrstvy při prohře vrátí `conflict` a prohraná verze jde do historie
+  jako `superseded_local`; `observed` konflikt netvoří (novější pozorování = pravda).
+- **Mazání je tombstone** (`deleted_at`), ne `DELETE` — jinak by se karta vrátila z lokální DB
+  klienta, který o mazání neví. Novější zápis kartu vzkřísí, starší se zahodí. `change-id` nechá
+  tombstone za starým ID. Čtení (`listUnits`/`getUnit`/`export`) tombstones filtrují.
+- **Audit**: `unit_history` + `uuid`/`layer`/`origin`/`source_device`/`rev`; retence **200**
+  záznamů na jednotku (env `HISTORY_RETENTION`, čte se za běhu, `0` = neomezeně) — dřívějších 5
+  by u dávky z offline klienta nestačilo.
+
+**Pozor — `splitStatements` a CRLF:** MariaDB schémata se dělí na statementy ručně
+([db/adapter.js](server/db/adapter.js)) a odstranění `--` komentářů selhávalo na CRLF řádcích
+(v JS `.` nematchuje `\r` a `$` bez `m` sedí na konec stringu). Windows checkout má CRLF, takže
+komentáře v SQL zůstávaly — dokud žádný neobsahoval `;` nebo `:něco`, chyba se neprojevila.
+Opraveno v DB9 (`split(/\r?\n/)`) + regresní test v `adapter.test.js`.
+
 **Pravidla, na která se naráží:**
 - **Uvnitř `db.transaction(fn)` se dotazuj přes předaný `tx`**, ne přes vnější handle.
   U MariaDB drží transakce jedno spojení z poolu; u SQLite je vnější handle serializovaný

@@ -236,7 +236,7 @@ si hned stáhne výsledek (včetně vlastní přehlasované karty).
 
 | # | Rozsah | Výstup |
 |---|---|---|
-| **DB9** | Server: `rev` + čítač, `*_updated_at`, tombstones, rozšířený `unit_history`, endpointy `/units/changes` a `/units/sync` (idempotence přes `opId`) | server testy nad SQLite i MariaDB |
+| **DB9** ✅ | Server: `rev` + čítač, `*_updated_at`, tombstones, rozšířený `unit_history`, endpointy `/units/changes` a `/units/sync` (idempotence přes `opId`) | hotovo 2026-08-07; 86 testů nad SQLite. **MariaDB sada zatím neproběhla** — na firemním serveru chybí databáze `P2Lunits_test` a práva pro účet `p2l` (viz server/README §Testy) |
 | **DB10** | Klient: lokální schéma (drift), `UnitDbService` přesměrovaný na lokál, UI čte z lokálu | appka funguje offline, sync ještě ne |
 | **DB11** | Sync engine: kalibrace hodin, push/pull, konflikty, triggery, indikátor + banner | dvoucestná synchronizace |
 | **DB12** | Obrazovka „Změny" (audit napříč jednotkami) | dohledatelnost |

@@ -40,7 +40,15 @@ CREATE TABLE IF NOT EXISTS units (
   note                   TEXT,
   status                 VARCHAR(16)  NOT NULL DEFAULT 'active',  -- active | faulty | stock | retired
   created_at             VARCHAR(32)  NOT NULL,
-  updated_at             VARCHAR(32)  NOT NULL
+  updated_at             VARCHAR(32)  NOT NULL,
+  -- sync (DB9, PRD-DB/03-PRD-sync.md §4.1)
+  rev                    BIGINT       NOT NULL DEFAULT 0,  -- revize ze sync_counter; podle ní klient pozná, co je nového
+  observed_updated_at    VARCHAR(32),                      -- čas poslední změny observed vrstvy
+  meta_updated_at        VARCHAR(32),                      -- čas poslední změny meta vrstvy
+  meta_updated_by        VARCHAR(64),
+  deleted_at             VARCHAR(32),                      -- tombstone: karta se nemaže fyzicky, jinak by se vrátila z lokálu
+  deleted_by             VARCHAR(64),
+  INDEX idx_units_rev (rev)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS unit_history (
@@ -50,5 +58,34 @@ CREATE TABLE IF NOT EXISTS unit_history (
   username    VARCHAR(64)  NOT NULL,
   action      VARCHAR(32)  NOT NULL,   -- desired | meta | change_id | import | ...
   detail_json LONGTEXT,                -- detail změny; hesla NIKDY (scrubSecrets v db/units.js)
-  INDEX idx_unit_history_unit (unit_id, at)
+  -- audit rozšířený pro sync (DB9, PRD §4.2)
+  uuid          VARCHAR(64),           -- globálně unikátní ID řádku; offline klient si historii generuje sám
+  layer         VARCHAR(16),           -- observed | desired | meta | change_id | delete
+  origin        VARCHAR(16),           -- online | sync | mqtt
+  source_device VARCHAR(64),           -- odkud změna přišla (exe@NB-RADEK, apk@Pixel7, web)
+  rev           BIGINT,                -- revize, kterou zápis vyrobil — spojka mezi auditem a syncem
+  INDEX idx_unit_history_unit (unit_id, at),
+  INDEX idx_unit_history_uuid (uuid)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Globální čítač revizí. Jediný řádek (id = 1); inkrement probíhá VŽDY uvnitř
+-- transakce zápisu, aby dvě souběžné změny nedostaly stejné rev (řádek drží
+-- zámek do commitu). Nepoužívá se čas — dva zápisy ve stejné milisekundě musí
+-- být rozlišitelné.
+CREATE TABLE IF NOT EXISTS sync_counter (
+  id    INT    NOT NULL PRIMARY KEY,
+  value BIGINT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO sync_counter (id, value) VALUES (1, 0);
+
+-- Idempotence pushů: klient posílá operace s vlastním op_id (UUID). Opakované
+-- doručení téže operace (spadlá síť, restart appky) nesmí zápis zdvojit.
+CREATE TABLE IF NOT EXISTS sync_ops (
+  op_id      VARCHAR(64)  NOT NULL PRIMARY KEY,
+  unit_id    VARCHAR(16)  NOT NULL,
+  layer      VARCHAR(16)  NOT NULL,
+  status     VARCHAR(16)  NOT NULL,   -- applied | superseded | rejected
+  rev        BIGINT,                  -- rev, který operace vyrobila (null u superseded/rejected)
+  applied_at VARCHAR(32)  NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
