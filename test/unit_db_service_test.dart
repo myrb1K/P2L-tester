@@ -13,7 +13,9 @@ import 'package:http/testing.dart';
 import 'package:p2l_tester/models/module.dart';
 import 'package:p2l_tester/models/unit.dart';
 import 'package:p2l_tester/services/auth_session.dart';
+import 'package:p2l_tester/services/local_unit_db.dart';
 import 'package:p2l_tester/services/unit_db_service.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _Captured {
   final List<http.Request> requests = [];
@@ -243,5 +245,129 @@ void main() {
     await service.pushObserved(_unit());
     await service.pushDesired('1209', {'brightness': 1});
     await service.pushChangeId('1209', 1350);
+  });
+
+  // ── Lokální (offline-first) režim, DB10 ────────────────────────────────
+  //
+  // Ostatní testy výše jedou přes HTTP, protože LocalUnitDb není otevřená
+  // (`isAvailable == false`) — přesně jako na webu nebo když lokální DB nejde
+  // otevřít. Tady ji naopak otevřeme nad `:memory:`.
+
+  group('lokální režim (DB10)', () {
+    final local = LocalUnitDb.instance;
+
+    setUpAll(() {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    });
+
+    setUp(() async {
+      await local.close();
+      await local.init(path: inMemoryDatabasePath);
+      expect(local.isAvailable, isTrue);
+    });
+
+    tearDown(() async => local.close());
+
+    UnitDbService svc(MockClient client) => UnitDbService(
+      session: AuthSession()
+        ..status = AuthSessionStatus.loggedIn
+        ..apiBase = 'http://server:3001/api',
+      client: client,
+      local: local,
+    );
+
+    test('zápisy jdou do lokální DB, ne přes HTTP', () async {
+      final requests = <http.Request>[];
+      final service = svc(MockClient((req) async {
+        requests.add(req);
+        return http.Response('{"ok":true}', 200);
+      }));
+
+      await service.pushObserved(_unit());
+      await service.pushDesired('1209', {'brightness': 40});
+
+      // Žádný zápisový request — data čekají ve frontě na sync (DB11).
+      expect(requests.where((r) => r.method == 'PUT'), isEmpty);
+      expect(await service.pendingChanges(), 2);
+      final card = await local.getCard('1209');
+      expect(card!.firmware, 'P2L_26070201NT');
+      expect(card.desired!['brightness'], 40);
+    });
+
+    test('pull naplní lokální DB z /units/changes a posune revizi', () async {
+      final service = svc(MockClient((req) async {
+        expect(req.url.path, endsWith('/units/changes'));
+        expect(req.url.queryParameters['since'], '0');
+        return http.Response(
+          jsonEncode({
+            'serverTs': DateTime.now().toUtc().toIso8601String(),
+            'maxRev': 12,
+            'more': false,
+            'units': [
+              {
+                'id': '1300',
+                'rev': 12,
+                'generation': 'new',
+                'status': 'active',
+                'name': 'Ze serveru',
+                'firmware': 'FW7',
+              },
+            ],
+            'deleted': [],
+          }),
+          200,
+        );
+      }));
+
+      final list = await service.fetchUnits();
+      expect(list.single.id, '1300');
+      expect(list.single.name, 'Ze serveru');
+      expect((await local.syncState()).lastRev, 12);
+    });
+
+    test('offline čtení vrátí poslední známý stav, ne chybu', () async {
+      await local.writeMeta('1209', {'name': 'Uloženo offline'});
+      final service = svc(MockClient((_) async => throw Exception('offline')));
+
+      // fetchUnits nejdřív zkusí pull (spadne, spolkne se) → čte lokál.
+      final list = await service.fetchUnits();
+      expect(list.single.name, 'Uloženo offline');
+      expect((await service.fetchUnit('1209')).name, 'Uloženo offline');
+    });
+
+    test('editace offline uspěje a zařadí se do fronty', () async {
+      final service = svc(MockClient((_) async => throw Exception('offline')));
+
+      // saveMeta/saveDesired v online režimu hází UnitDbException; offline-first
+      // je musí přijmout, jinak by uživatel u zákazníka nemohl editovat.
+      await service.saveMeta('1209', name: 'Hala A');
+      await service.saveDesired('1209', {
+        'broker': {'address': 'a.cz', 'password': 'tajne'},
+      });
+
+      final card = await local.getCard('1209');
+      expect(card!.name, 'Hala A');
+      expect(card.desired!['broker']['address'], 'a.cz');
+      expect(await service.pendingChanges(), 2);
+    });
+
+    test('hromadné akce zapíšou lokálně po jednotkách', () async {
+      final service = svc(MockClient((_) async => throw Exception('offline')));
+      final n = await service.bulkSaveMeta(['1209', '1300'], {'status': 'stock'});
+      expect(n, 2);
+      expect((await local.getCard('1300'))!.status, 'stock');
+      expect(await service.pendingChanges(), 2);
+    });
+
+    test('smazání skryje kartu a zařadí delete operaci', () async {
+      await local.writeMeta('1209', {'name': 'X'});
+      final service = svc(MockClient((_) async => throw Exception('offline')));
+
+      await service.bulkDelete(['1209']);
+      expect(await local.getCard('1209'), isNull);
+      final ops = await local.pendingOps();
+      expect(ops.any((o) => o.layer == UnitLayer.delete), isTrue);
+    });
   });
 }

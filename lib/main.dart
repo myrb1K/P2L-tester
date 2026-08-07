@@ -12,6 +12,7 @@ import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/auth_session.dart';
 import 'services/local_server.dart';
+import 'services/local_unit_db.dart';
 
 const String appVersion = '2.82';
 
@@ -32,6 +33,11 @@ void main() {
 /// portable rozložení k dispozici a autostart je zapnutý) a až pak se ověřuje
 /// session. Bez portable serveru se chování nemění — restore jde hned.
 Future<void> _bootstrapNative() async {
+  // Lokální DB jednotek (DB10) — otevřít dřív než cokoli jiného, aby první
+  // zápisy z MQTT (ALIVE hned po připojení) měly kam padnout. Selhání se
+  // nepropaguje: bez lokální DB jede evidence jen online jako do DB9.
+  await LocalUnitDb.instance.init();
+
   final server = LocalServer.instance;
   await server.init();
   if (server.isAvailable && server.autostart) {

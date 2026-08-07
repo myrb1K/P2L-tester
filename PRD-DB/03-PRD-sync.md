@@ -237,7 +237,7 @@ si hned stáhne výsledek (včetně vlastní přehlasované karty).
 | # | Rozsah | Výstup |
 |---|---|---|
 | **DB9** ✅ | Server: `rev` + čítač, `*_updated_at`, tombstones, rozšířený `unit_history`, endpointy `/units/changes` a `/units/sync` (idempotence přes `opId`) | hotovo 2026-08-07; 86 testů nad SQLite. **MariaDB sada zatím neproběhla** — na firemním serveru chybí databáze `P2Lunits_test` a práva pro účet `p2l` (viz server/README §Testy) |
-| **DB10** | Klient: lokální schéma (drift), `UnitDbService` přesměrovaný na lokál, UI čte z lokálu | appka funguje offline, sync ještě ne |
+| **DB10** ✅ | Klient: lokální schéma (**sqflite**, ne drift — viz níže), `UnitDbService` přesměrovaný na lokál, UI čte z lokálu, **pull** ze serveru | hotovo 2026-08-07; appka čte i zapisuje offline, odesílání outboxu je DB11 |
 | **DB11** | Sync engine: kalibrace hodin, push/pull, konflikty, triggery, indikátor + banner | dvoucestná synchronizace |
 | **DB12** | Obrazovka „Změny" (audit napříč jednotkami) | dohledatelnost |
 
@@ -275,6 +275,39 @@ mezitím přišlo o offline režim úplně. Provést jako samostatný commit, ne
 Poznámka: přepínač *Nastavení → Lokální server → Databáze* (SQLite/MariaDB) je fakticky mrtvý
 už teď — na MariaDB se appka dostane přihlášením ke vzdálenému serveru, lokálním serverem si
 ji nastavovat nemusí.
+
+---
+
+## 9.2 K DB10 — co se při realizaci ukázalo
+
+**Zvoleno `sqflite`, ne `drift`.** Schéma je malé a záměrně blízké serverovému, takže
+typová vrstva drift nevyváží codegen krok (`build_runner`) při každé změně.
+
+**`sqlite3` musí zůstat na řadě 2.x.** Verze 3.x staví native knihovnu přes Dart build
+hooks a Flutter tool je na Windows spustí přes `dart compile kernel` s cestou k hooku —
+na profilu s mezerou (`C:\Users\Radek Brym`) to skončí
+`'C:\Users\Radek' is not recognized as an internal or external command`. Stejná past jako
+`path_provider_foundation` 2.6+. V `pubspec.yaml` proto drží: `sqlite3` 2.9.x,
+`sqlite3_flutter_libs` 0.5.x, `sqflite_common_ffi` **pod 2.4.0** (2.4 už na sqlite3 3.x
+trvá; pozor, `^2.3.3` by ji pustil — rozsah musí být uzavřený).
+
+**Pull patří do DB10, ne až do DB11.** Kdyby DB10 jen přepnula čtení na lokál, uživatel
+by po instalaci neviděl nic, co je na serveru — appka by se zhoršila. `UnitDbService`
+proto při `fetchUnits()` nejdřív zkusí `GET /units/changes?since=<rev>` (chyby polyká,
+offline je normální stav) a pak čte lokál. **Odesílání outboxu zůstává na DB11** — do té
+doby lokální změny na server nedojdou.
+
+**Editace offline uspěje.** `saveDesired`/`saveMeta`/bulk zapíšou do lokální DB a vrátí
+úspěch; o čekajících změnách informuje indikátor (DB11), ne chybová hláška. Bez toho by
+uživatel u zákazníka dostával „server nedostupný" na každou editaci.
+
+**Observed operace se ve frontě slučují.** ALIVE chodí à 5 min a po dni offline by fronta
+měla tisíce položek; serveru stačí poslední stav, takže se payload merguje do jedné
+operace na jednotku. Throttle 30 s zůstává jen pro přímou HTTP cestu — do lokální DB se
+zapisuje vždy, aby offline evidence ukazovala aktuální stav.
+
+**`change-id` je zatím online-only** (viz §10 bod 3) — přenos karty mezi dvěma klíči se do
+outboxu jako jedna operace nevejde a offline se dělat nebude.
 
 ---
 

@@ -411,6 +411,48 @@ ani web Node runtime nemají (a prohlížeč se na MySQL port nepřipojí) → t
 k serveru na síti (`Nastavení → Účet`). Pro web servírovaný jinde než API je potřeba
 `CORS_ORIGIN` (platí i v produkci, na rozdíl od dev-only `DEV_CORS_ORIGIN`).
 
+## Lokální DB jednotek v appce (offline evidence, DB10)
+
+Evidence jednotek má od DB10 **lokální SQLite přímo v appce** (EXE i APK) — UI čte a píše
+vždy do ní, sync engine (DB11) ji na pozadí slaďuje se serverem. Web lokální DB nemá
+(běží na serveru, offline režim tam nemá smysl → stub, chová se jako do DB9).
+
+**Kód:** [lib/services/local_unit_db.dart](lib/services/local_unit_db.dart) (conditional
+export) → [local_unit_db_io.dart](lib/services/local_unit_db_io.dart) (sqflite) /
+[local_unit_db_stub.dart](lib/services/local_unit_db_stub.dart) (web, `isAvailable == false`),
+sdílené typy v [local_unit_db_types.dart](lib/services/local_unit_db_types.dart).
+Přepínač je v [unit_db_service.dart](lib/services/unit_db_service.dart) (`_useLocal`).
+Otevírá se v `_bootstrapNative` ([main.dart](lib/main.dart)) **před** lokálním serverem,
+aby první ALIVE měl kam padnout.
+
+**Tabulky:** `units_cache` (karta jako JSON blob + vytažené sloupce pro seznam a
+rozhodování o konfliktech), `outbox` (čekající zápisy), `local_history` (audit s UUID),
+`sync_state` (`last_rev`, `last_sync_at`, `clock_offset_ms`). Data v app support adresáři
+(`units-local.db`).
+
+**Pravidla, na která se naráží:**
+- **`sqlite3` MUSÍ zůstat na 2.x.** Řada 3.x staví native lib přes Dart build hooks, které
+  na Windows profilu s mezerou (`C:\Users\Radek Brym`) spadnou
+  (`'C:\Users\Radek' is not recognized…`) — stejná past jako `path_provider_foundation` 2.6+.
+  Piny v `pubspec.yaml`: `sqlite3` 2.9.x, `sqlite3_flutter_libs` 0.5.x a
+  `sqflite_common_ffi` **`>=2.3.0 <2.4.0`** (caret `^2.3.3` by pustil 2.4, která na
+  sqlite3 3.x trvá).
+- **Testy potřebují FFI backend** — `sqfliteFfiInit()` + `databaseFactory = databaseFactoryFfi`
+  v `setUpAll` ([test/local_db_test.dart](test/local_db_test.dart)). Na zařízení jde sqflite
+  platform kanálem, na desktopu FFI (init dělá `LocalUnitDb.init`).
+- **Merge fragmentů musí kopírovat serverovou logiku** (`_mergeIntoCard` vs `db/units.js`):
+  observed = partial update, desired = hloubkový merge o úroveň (jinak `{broker:{address}}`
+  smaže port a heslo), meta = jen dodaná pole. Jinak by lokál a server po syncu ukazovaly jiné
+  hodnoty.
+- **Časy zápisů jdou přes `LocalUnitDb.now()`**, tedy opravené o `clock_offset_ms` proti
+  serveru. Rozjeté hodiny klienta by jinak přebíjely novější serverové změny.
+- **Observed operace se v outboxu slučují** (jedna na jednotku) — ALIVE by frontu po dni
+  offline naplnil tisíci položkami.
+- **`fetchUnits()` nejdřív pullne, pak čte lokál.** Bez pullu by čerstvá instalace neviděla
+  nic ze serveru. Chyby pullu se polykají (offline je normální stav).
+- **Editace offline uspěje** (`saveDesired`/`saveMeta`/bulk zapíšou lokálně a vrátí OK) —
+  odeslání řeší DB11. `change-id` a export/import zůstávají online-only.
+
 ## Lokální server pro databázi (portable Windows, v2.81+)
 
 Databáze jednotek žije v SQLite (nebo MariaDB, viz výše) obsluhované Node backendem v `server/`. Aby Windows EXE nepotřebovalo ruční `npm start`, appka si server spouští sama.
