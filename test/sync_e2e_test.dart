@@ -22,7 +22,7 @@ import 'package:p2l_tester/services/sync_engine.dart';
 import 'package:p2l_tester/services/unit_db_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-/// Port mimo dev rozsah (3001) i mimo local_server_test (3097).
+/// Port mimo dev rozsah (3001), ať test nekoliduje s běžícím `npm run dev`.
 const _port = 3098;
 const _base = 'http://127.0.0.1:$_port/api';
 const _admin = 'e2e-admin';

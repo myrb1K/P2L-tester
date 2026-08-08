@@ -321,9 +321,13 @@ Node service neběží. Pro produkční běh je `npm start` (`node server.js`); 
 Viz [db/schema.sql](db/schema.sql) (resp. [db/schema.mariadb.sql](db/schema.mariadb.sql)).
 Sloupec `is_admin` je od první migrace, aby M4.5 (Admin UI) nepotřebovala DB migraci.
 
-## Závislosti a portable dist
+## Závislosti
 
-`better-sqlite3` a `bcrypt` jsou **native** moduly — přiložený `node.exe` v portable
-distribuci musí být té major verze, kterou se dělal `npm install` (viz
-[tools/pack-portable.ps1](../tools/pack-portable.ps1)). `mysql2` je naopak čistě
-JS, takže MariaDB podpora žádný build nekomplikuje.
+`better-sqlite3` a `bcrypt` jsou **native** moduly — po změně major verze Node je potřeba
+`npm rebuild` (v Dockeru to řeší build stage). `mysql2` je naopak čistě JS, takže MariaDB
+podpora žádný build nekomplikuje.
+
+**Pozn.:** do v2.84 se server přikládal k Windows distribuci appky a tahle vazba byla ostřejší —
+přiložený `node.exe` musel být té major verze, kterou se dělal `npm install`. Od R6
+([PRD-DB/03-PRD-sync.md](../PRD-DB/03-PRD-sync.md) §9.1) appka vlastní server nespouští,
+takže se server nasazuje výhradně sem (Docker / `npm start`).

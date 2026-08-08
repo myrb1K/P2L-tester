@@ -1,6 +1,9 @@
-﻿# Sestaví portable distribuci P2L Testeru — Windows EXE + přiložený Node
-# server, aby appka umožnila práci s databází jednotek bez ruční instalace
-# Node.js a bez `npm start`.
+﻿# Sestaví portable distribuci P2L Testeru — Windows EXE (+ APK vedle něj).
+#
+# Od R6 (odstranění lokálního Node serveru) je to jen přejmenování exe a zip:
+# appka nosí evidenci ve vlastní SQLite a na server chodí přes HTTPS, takže
+# se nic dalšího nepřikládá. Dřív se sem kopírovala složka server\ s Node
+# runtime (~100 MB) — proto ten propad velikosti zipu ze 128 na ~30 MB.
 #
 # Předpoklad: hotové buildy
 #   flutter build windows --release
@@ -11,13 +14,6 @@
 #   powershell -ExecutionPolicy Bypass -File tools\pack-portable.ps1 -SkipZip
 #
 # Výsledek: dist\P2L-Tester-v<VER>\ + dist\P2L-Tester-v<VER>.zip
-#
-# Co se do server\ NEKOPÍRUJE a proč:
-#   .env      — obsahuje JWT secret a admin heslo; portable režim si secret
-#               generuje sám (SharedPreferences) a předává procesu jako env
-#   data\     — databáze; portable ji drží v %APPDATA%\P2L-Tester\server-data,
-#               aby rozbalení nové verze nepřepsalo units.db
-#   test\     — testy nejsou k běhu potřeba
 
 param(
     # Kam se distribuce sestaví. Default dist\ v repu (je v .gitignore).
@@ -29,7 +25,6 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $releaseDir = Join-Path $repoRoot 'build\windows\x64\runner\Release'
-$serverSrc = Join-Path $repoRoot 'server'
 if ($OutRoot) { $distRoot = $OutRoot } else { $distRoot = Join-Path $repoRoot 'dist' }
 New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
 
@@ -44,18 +39,6 @@ Write-Host "Verze: $ver" -ForegroundColor Cyan
 if (-not (Test-Path (Join-Path $releaseDir 'p2l_tester.exe'))) {
     throw "Chybí Windows release build. Spusť: flutter build windows --release"
 }
-if (-not (Test-Path (Join-Path $serverSrc 'node_modules'))) {
-    throw "Chybí server\node_modules. Spusť: cd server; npm install"
-}
-
-$nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
-if (-not $nodeExe) {
-    throw "Node.js nenalezen v PATH — je potřeba pro přiložení runtime do distribuce."
-}
-$nodeVer = (& $nodeExe -v)
-Write-Host "Node runtime: $nodeExe ($nodeVer)" -ForegroundColor Cyan
-Write-Host "  POZOR: node_modules obsahuje native moduly (better-sqlite3, bcrypt)" -ForegroundColor DarkGray
-Write-Host "  zkompilované pro tuto major verzi Node — přikládá se proto tento runtime." -ForegroundColor DarkGray
 
 # ── cílová složka ──────────────────────────────────────────────────────
 $outDir = Join-Path $distRoot "P2L-Tester-v$ver"
@@ -71,26 +54,6 @@ Copy-Item -Path (Join-Path $releaseDir '*') -Destination $outDir -Recurse -Force
 $exeSrc = Join-Path $outDir 'p2l_tester.exe'
 $exeDst = Join-Path $outDir "p2l_tester v$ver.exe"
 Move-Item -Path $exeSrc -Destination $exeDst -Force
-
-# ── server ─────────────────────────────────────────────────────────────
-Write-Host "Kopíruji server + Node runtime…"
-$serverDst = Join-Path $outDir 'server'
-New-Item -ItemType Directory -Force -Path $serverDst | Out-Null
-
-foreach ($item in @('server.js', 'package.json')) {
-    Copy-Item -Path (Join-Path $serverSrc $item) -Destination $serverDst -Force
-}
-foreach ($dir in @('db', 'routes', 'node_modules')) {
-    Copy-Item -Path (Join-Path $serverSrc $dir) -Destination $serverDst -Recurse -Force
-}
-Copy-Item -Path $nodeExe -Destination (Join-Path $serverDst 'node.exe') -Force
-
-# Pojistka: kdyby se do node_modules nebo db\ někdy dostal .env / DB soubor.
-Get-ChildItem -Path $serverDst -Recurse -Force -Include '.env', '*.db', '*.db-shm', '*.db-wal' |
-    ForEach-Object {
-        Write-Host "  vyřazuji $($_.FullName.Substring($outDir.Length + 1))" -ForegroundColor Yellow
-        Remove-Item -Force $_.FullName
-    }
 
 # ── APK vedle Windows složky (arm64-v8a, viz CLAUDE.md) ────────────────
 $apkSrc = Join-Path $repoRoot 'build\app\outputs\flutter-apk\app-arm64-v8a-release.apk'

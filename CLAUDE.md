@@ -187,9 +187,9 @@ Default `flutter build apk --release` (bez `--split-per-abi`) vytvoří fat APK 
 
 **Pozn.:** Od commitu `e8fdc84` je `dist/` v `.gitignore` (build outputy nepatří do gitu). Adresář se používá lokálně pro packaging release artefaktů; pokud je potřeba je sdílet, jdou přes GitHub Releases, ne přes commit.
 
-#### Portable distribuce s vlastním serverem (v2.81+)
+#### Portable distribuce (v2.81+, zjednodušená po R6)
 
-`tools\pack-portable.ps1` sestaví Windows distribuci, která **nosí Node server s sebou** — appka si ho spustí při startu a ukončí při zavření, takže databáze jednotek funguje bez instalace Node a bez ručního `npm start`.
+`tools\pack-portable.ps1` sestaví Windows distribuci: nakopíruje celý Release, přejmenuje exe a přibalí APK.
 
 ```bash
 flutter build windows --release
@@ -197,16 +197,9 @@ flutter build apk --release --split-per-abi         # volitelné (APK do zipu)
 powershell -ExecutionPolicy Bypass -File tools\pack-portable.ps1
 ```
 
-Skript čte verzi z `appVersion` v `main.dart`, do `dist\P2L-Tester-v<VER>\` nakopíruje celý Release, přejmenuje exe a přiloží `server\` + `node.exe` z PATH. Parametry: `-OutRoot <cesta>` (jiná cílová složka, pro testy), `-SkipZip`.
+Skript čte verzi z `appVersion` v `main.dart` a staví do `dist\P2L-Tester-v<VER>\`. Parametry: `-OutRoot <cesta>` (jiná cílová složka, pro testy), `-SkipZip`.
 
-**Co se do `server\` NEKOPÍRUJE a proč:**
-- `.env` — obsahuje JWT secret a admin heslo; portable režim si secret generuje sám (`SharedPreferences` klíč `local_server_jwt_secret`) a předává procesu jako env proměnnou. Skript navíc dělá pojistný sweep na `.env` / `*.db*`.
-- `data\` — DB se drží v `%APPDATA%\P2L-Tester\server-data`, aby rozbalení novější verze nepřepsalo `units.db`.
-- `test\`, `scripts\` — k běhu nejsou potřeba.
-
-**Přiložený `node.exe` musí být té major verze, pro kterou jsou zkompilované native moduly** v `node_modules` (`better-sqlite3`, `bcrypt`). Skript proto přikládá ten samý runtime, kterým se dělal `npm install` (bere `(Get-Command node).Source`). Po `npm install` s jinou major verzí Node je potřeba distribuci sestavit znovu.
-
-Velikost: `server\` ≈ 100 MB rozbaleno (node.exe ~80 MB + node_modules ~19 MB), celá složka ≈ 128 MB.
+**Do v2.84 distribuce nosila složku `server\` s Node runtime** (`node.exe` ~80 MB + `node_modules` ~19 MB), protože si appka spouštěla vlastní backend. Po R6 to odpadlo — evidence jede z in-app SQLite a na server se chodí přes HTTPS. Zip tím spadl ze ≈ 128 MB na ≈ 30 MB a zmizela vazba na major verzi Node (native moduly `better-sqlite3`/`bcrypt` musely sedět s přiloženým runtime).
 
 **PowerShell skripty ukládat jako UTF-8 s BOM** — Windows PowerShell 5.1 čte UTF-8 bez BOM jako ANSI a české texty rozhodí parser (em-dash uvnitř stringu → syntaktická chyba).
 
@@ -391,7 +384,8 @@ Opraveno v DB9 (`split(/\r?\n/)`) + regresní test v `adapter.test.js`.
   `units-schema.sql`/`units-schema.mariadb.sql`. MariaDB nezná `CREATE INDEX IF NOT EXISTS`
   → indexy inline v `CREATE TABLE`.
 - `GET /api/health` vrací `{ok, ts, db}` — `db` je typ driveru (bez údajů o spojení).
-  Appka podle něj pozná, že adoptovala server nad jinou databází (`LocalServer.dbMismatch`).
+  Slouží k detekci dostupnosti serveru: `SyncEngine` trvá na JSON s `ok: true` a `db`, aby
+  captive portál (200 OK s přihlašovací stránkou) neprošel jako živý server.
 - **Past při přechodu na MariaDB:** nad prázdnou DB si první start serveru (i `db-check`)
   naseeduje admina z `INITIAL_ADMIN_*`. `migrate-users` pak to jméno **přeskočí** a účet má
   heslo z `.env`, ne původní → login starým heslem selže. Poznat to jde po `created_at`
@@ -460,6 +454,13 @@ rozhodování o konfliktech), `outbox` (čekající zápisy), `local_history` (a
   nic ze serveru. Chyby pullu se polykají (offline je normální stav).
 - **Editace offline uspěje** (`saveDesired`/`saveMeta`/bulk zapíšou lokálně a vrátí OK) —
   odeslání řeší DB11. `change-id` a export/import zůstávají online-only.
+- **ID jednotky má v evidenci tvar BEZ vodicích nul** (`1114`, ne `001114`) — shodně se
+  serverem (`normalizeUnitId` v [db/units.js](server/db/units.js) je strhává). Každý vstup
+  `unitId` proto v `LocalUnitDb` prochází přes `_key()` → [`plainUnitId`](lib/services/unit_ids_io.dart).
+  **Bez toho se karta po prvním pullu zdvojí:** appka posílá kanonické `001114`
+  (klíč `AppState._units`, viz `canonicalUnitId`), server odpoví `1114` a `_putServerCard` by
+  založil druhý řádek. Pozor, ID je i **uvnitř `card_json`** — migrace v3 přepisuje obojí.
+  Kanonický tvar s nulami zůstává jen pro `AppState._units` a MQTT topicy.
 
 ## Audit napříč jednotkami — obrazovka Změny (DB12)
 
@@ -513,40 +514,21 @@ a ručně (ikona v AppBaru obrazovky Databáze).
 - **Cyklu importů se předchází callbackem**: `UnitDbService.onLocalChange` si zapojí
   `SyncEngine` v `main.dart`, service o engine neví.
 
-## Lokální server pro databázi (portable Windows, v2.81+)
+## Lokální Node server v appce — ODSTRANĚNO (R6)
 
-Databáze jednotek žije v SQLite (nebo MariaDB, viz výše) obsluhované Node backendem v `server/`. Aby Windows EXE nepotřebovalo ruční `npm start`, appka si server spouští sama.
+Do v2.84 si Windows EXE spouštělo vlastní Node backend (`lib/services/local_server*.dart`,
+sekce *Lokální server* v Nastavení, PID file, adopce cizího procesu, bootstrap správce,
+`AuthSession.preferLocalBase`). Existoval z jediného důvodu: appka neměla vlastní datovou
+vrstvu, takže lokální evidence šla jen přes lokální server nad SQLite.
 
-**Kód:** [lib/services/local_server.dart](lib/services/local_server.dart) (conditional export jako `mqtt_client_factory`) → [local_server_io.dart](lib/services/local_server_io.dart) (nativ) / [local_server_stub.dart](lib/services/local_server_stub.dart) (web, no-op). UI: [lib/widgets/local_server_section.dart](lib/widgets/local_server_section.dart) v Nastavení pod sekcí Účet. Start/stop zapojený v [main.dart](lib/main.dart) (`_bootstrapNative`, `AppLifecycleListener.onExitRequested`).
+**Po DB10 ta příčina zmizela** — evidence žije v in-app SQLite (`units-local.db`) a na server
+se chodí přes HTTPS. Odstraněno podle [PRD-DB/03-PRD-sync.md](PRD-DB/03-PRD-sync.md) §9.1 (R6).
 
-**Detekce:** `server/server.js` se hledá vedle EXE (portable dist), pak v `cwd/server` (dev z repa). Node: přiložený `server/node.exe`, jinak `node` z PATH. Když nic → `LocalServerStatus.unavailable` a **sekce v UI se vůbec nezobrazí** (appka pro terén vypadá jako dřív).
+Pozor na záměnu, kterou PRD výslovně varuje: **nezanikl offline režim, jen jeho tehdejší
+nosič.** Offline práce funguje dál (a poprvé i na Androidu) — viz sekce *Lokální DB jednotek
+v appce* výše.
 
-**Volba databáze v UI:** sekce *Lokální server* → řádek **Databáze** → dialog `_DatabaseDialog`
-([local_server_section.dart](lib/widgets/local_server_section.dart)) přepne SQLite/MariaDB a
-uloží `LocalServerDbConfig` do `SharedPreferences` (`local_server_db_*`). Server čte konfiguraci
-jen při startu → dialog po uložení **restartuje** instanci, kterou spustila appka (cizí
-adoptovanou ne, jen upozorní). Heslo k MariaDB leží v prefs otevřeně jako hesla brokerů → DB
-účet ať má práva jen na tu jednu databázi.
-
-**Konfigurace se předává jako env proměnné procesu, ne přes `.env`:**
-- `P2L_DATA_DIR` = `%APPDATA%\P2L-Tester\server-data` — DB **mimo aplikační složku**, jinak by ji přepsalo rozbalení nové verze. Server: [server/db/paths.js](server/db/paths.js), používají `db/index.js` (users.db) a `db/units.js` (units.db) — cesty se čtou **lazy**, ne do konstanty při `require`.
-- `JWT_SECRET` — generovaný jednou (`Random.secure()`, 32 B hex), držený v `SharedPreferences` (`local_server_jwt_secret`). Musí být stabilní, jinak by restart appky zneplatnil vydané tokeny.
-- `PORT` (`local_server_port`, default 3001), `NODE_ENV=production`.
-- `DB_DRIVER` + při MariaDB `DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`
-  (z `LocalServerDbConfig`). `P2L_DATA_DIR` platí i při MariaDB — server si tam pořád
-  píše PID file.
-- `INITIAL_ADMIN_USER`/`_PASSWORD` jen při bootstrapu správce — **nikdy se neukládají**, žijí jen v dialogu.
-
-**Pozor na `.env` v devu:** při spuštění serveru z repa dotenv `.env` načte (naše env proměnné mají prioritu, protože dotenv existující `process.env` nepřepisuje). Proto se v devu naseeduje admin z `.env` a `needsAdminBootstrap` je false — v portable distu `.env` chybí, takže nabídka „Založit správce" naskočí.
-
-**Klíčová pravidla:**
-- **Cizí server se nikdy nezabíjí.** Když `/api/health` odpoví před startem, proces se jen adoptuje (`ownsProcess = false`) a při zavření appky zůstane běžet. Chrání `npm run dev` v terminálu.
-- **Sirotci přes PID file.** PID si píše **sám server** ([server.js](server/server.js) → `<dataDir>/server.pid`), protože jen on zná svůj skutečný PID. Hard kill appky (Správce úloh) graceful hook nespustí → při dalším startu appka PID přečte, ověří přes `tasklist`, že je to `node.exe` (PID se recyklují), a zabije. Úklid běží **jen když health neodpovídá**, takže nemůže sestřelit funkční instanci. Na Windows je `Process.kill()` TerminateProcess → SIGTERM handler v serveru neproběhne, PID file maže appka.
-- **`needsAdminBootstrap` se ptá serveru**, ne filesystému — `GET /api/bootstrap-status` (bez auth, vrací jen `{hasUsers: bool}`). Existence `users.db` nestačí: soubor vznikne i při startu nad prázdnou DB, takže by nabídka zmizela dřív, než by uživatel účet vytvořil.
-- **`AuthSession.preferLocalBase`** nasměruje session na lokální port před `restore()`. Uložený **vzdálený** base (firemní server) má přednost a zůstane; uložený **loopback s jiným portem** se přepíše.
-- **Pořadí startu:** `LocalServer.init()` → `maybeAutostart()` → `AuthSession.restore()`. Kdyby restore běželo hned, narazilo by na ještě nenaběhnutý server a skončilo ve stavu `offline` (uživatel by musel klikat „Zkusit znovu").
-
-**Testy:** [test/local_server_test.dart](test/local_server_test.dart) reálně spouští Node na portu 3097 (start/health/stop, adopce cizího procesu, úklid sirotka). Vyžadují `HttpOverrides.global = null` — `TestWidgetsFlutterBinding` jinak na každý HTTP request vrací 400 a health probe nikdy neprojde. Skipují se, když chybí Node nebo `server/node_modules`. Server: [server/test/paths.test.js](server/test/paths.test.js), [server/test/bootstrap.test.js](server/test/bootstrap.test.js).
+Server v `server/` zůstává beze změny — běží nasazený v Dockeru (viz *Deployment topology*).
 
 ---
 

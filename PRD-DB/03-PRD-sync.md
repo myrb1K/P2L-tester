@@ -62,7 +62,7 @@ kritičtější pro EXE, přestože ho mají oba klienti stejný.
 | R3 | Konflikt v `desired`/`meta` řeší **automaticky novější změna**; přehlasovaná verze jde do historie. Uživatel se dozví jen tehdy, když prohrála **jeho vlastní neodeslaná** změna. | **potvrzeno** |
 | R4 | Granularita rozhodování = **vrstva karty** (`observed` / `desired` / `meta`), ne celá karta a ne jednotlivá pole. | **potvrzeno** |
 | R5 | Web zůstává **čistě online** (bez lokální DB) — appka žije na serveru, offline režim tam nemá smysl. | **potvrzeno** |
-| R6 | Lokální Node server na desktopu (Nastavení → *Lokální server*) se **po DB10 odstraní** — in-app SQLite ho nahradí. Do té doby zůstává jako funkční záložní cesta. | **potvrzeno 2026-08-07** |
+| R6 | Lokální Node server na desktopu (Nastavení → *Lokální server*) se **po DB10 odstraní** — in-app SQLite ho nahradí. Do té doby zůstává jako funkční záložní cesta. | **provedeno 2026-08-07** |
 | R7 | **Šifrování lokální DB** (nese hesla brokerů z `desired`) — odloženo, řeší se později jako DB8. | **odloženo** |
 
 ---
@@ -245,10 +245,11 @@ Web se v žádném milníku nemění (R5).
 
 ---
 
-## 9.1 K R6 — proč lokální Node server skončí
+## 9.1 K R6 — proč lokální Node server skončil
 
 Rozhodnuto **2026-08-07**, po nasazení serveru na `p2ltester.smartbox.smartci4.com`
-(Docker + Traefik, HTTPS na 443, MariaDB `P2Lunits`).
+(Docker + Traefik, HTTPS na 443, MariaDB `P2Lunits`). **Provedeno 2026-08-07** — po dokončení
+DB10–DB12, tedy až byla podmínka „in-app SQLite hotová" splněná.
 
 **Pozor na záměnu: nezaniká offline režim, zaniká jen jeho dnešní nosič.** Lokální DB zůstává —
 přesune se z Node serveru do samotné appky (in-app SQLite, DB10), takže referenční scénář §1.1
@@ -260,21 +261,22 @@ Jediný scénář, který by ho udržel — *místo bez internetu i bez firemní
 evidenci potřebuje víc lidí zároveň* — neexistuje: firemní server je dostupný přes HTTPS
 z internetu a mobil se na internet dostane všude.
 
-Co odstranění přinese:
+Co odstranění přineslo:
 
-| | dnes | po DB10 |
+| | do v2.84 | po R6 |
 |---|---|---|
 | portable zip | ≈ 128 MB (`server\` ≈ 100 MB: `node.exe` ~80 MB + `node_modules` ~19 MB) | ≈ 30 MB |
-| závislost na major verzi Node | native moduly (`better-sqlite3`, `bcrypt`) musí sedět s přiloženým `node.exe` | žádná |
-| kód, který zmizí | `local_server_io.dart`, `local_server_section.dart`, PID file + úklid sirotků, adopce cizího serveru, bootstrap správce, `dbMismatch` | — |
-| `tools\pack-portable.ps1` | kopíruje `server\`, hlídá `.env` a `data\` | jen přejmenování exe + zip |
+| závislost na major verzi Node | native moduly (`better-sqlite3`, `bcrypt`) musely sedět s přiloženým `node.exe` | žádná |
+| kód, který zmizel | `local_server.dart` + `_io` + `_stub`, `local_server_section.dart`, `test/local_server_test.dart`, PID file + úklid sirotků, adopce cizího serveru, bootstrap správce, `dbMismatch`, `AuthSession.preferLocalBase` | — |
+| `tools\pack-portable.ps1` | kopíroval `server\`, hlídal `.env` a `data\` | jen přejmenování exe + zip |
 
-**Timing je podmínka, ne detail:** odstranit **až** bude in-app SQLite hotová, jinak by EXE
-mezitím přišlo o offline režim úplně. Provést jako samostatný commit, ne jako součást DB10.
+**Timing byl podmínka, ne detail:** odstranit **až** bude in-app SQLite hotová, jinak by EXE
+mezitím přišlo o offline režim úplně. Splněno — provedeno po DB12, samostatným commitem.
 
-Poznámka: přepínač *Nastavení → Lokální server → Databáze* (SQLite/MariaDB) je fakticky mrtvý
-už teď — na MariaDB se appka dostane přihlášením ke vzdálenému serveru, lokálním serverem si
-ji nastavovat nemusí.
+Zároveň padl přepínač *Nastavení → Lokální server → Databáze* (SQLite/MariaDB), který byl
+fakticky mrtvý — na MariaDB se appka dostane přihlášením ke vzdálenému serveru.
+
+Serverový kód v `server/` zůstal beze změny; běží nasazený v Dockeru a obsluhuje web, EXE i APK.
 
 ---
 
