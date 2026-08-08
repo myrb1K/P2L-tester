@@ -48,3 +48,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Gradle si sem odkládá reporty z `flutter build apk` (/build/ výš pokrývá
+# jen kořen repa, tenhle adresář ne).
+/android/build/
