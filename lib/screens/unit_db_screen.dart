@@ -2108,6 +2108,10 @@ class _SyncStatusButton extends StatelessWidget {
               : (Icons.cloud_done_outlined, Colors.green),
           SyncStatus.offline => (Icons.cloud_off_outlined, Colors.orange),
           SyncStatus.idle => (Icons.cloud_queue, null),
+          // Červeně a jinou ikonou, ať se to neplete s offline: tohle samo
+          // neodejde, musí zasáhnout člověk (aktualizovat server / přihlásit se).
+          SyncStatus.unsupported => (Icons.sync_problem, Colors.red),
+          SyncStatus.unauthorized => (Icons.lock_outline, Colors.red),
         };
         final button = IconButton(
           icon: Icon(icon, color: color),

@@ -29,6 +29,15 @@ enum SyncStatus {
 
   /// Server nedostupný — normální stav u zákazníka, ne chyba.
   offline,
+
+  /// Server odpovídá, ale synchronizaci neumí (starší než DB9 → `/units/sync`
+  /// a `/units/changes` vrací 404). Fronta se nikam nepohne, dokud se server
+  /// neaktualizuje — a uživatel to musí vědět, jinak vypadá „N čeká" jako
+  /// běžná fronta.
+  unsupported,
+
+  /// Přihlášení vypršelo nebo účet nemá práva (401/403).
+  unauthorized,
 }
 
 class SyncEngine extends ChangeNotifier {
@@ -150,8 +159,26 @@ class SyncEngine extends ChangeNotifier {
       }
       _retryTimer?.cancel();
       // 2) Push fronty, 3) pull změn (v tomhle pořadí — viz hlavička).
-      await _service.pushOutbox();
-      await _service.pullFromServer();
+      //
+      // Trvalé selhání (404 = server sync neumí, 401 = vypršelé přihlášení)
+      // se propíše do stavu a kolo končí. Opakovat nemá smysl — pomůže až
+      // aktualizace serveru, resp. nové přihlášení.
+      final pushFailure = await _service.pushOutbox();
+      if (_isPermanent(pushFailure)) {
+        _setStatus(_statusOf(pushFailure!));
+        return false;
+      }
+      final pullFailure = await _service.pullFromServer();
+      if (_isPermanent(pullFailure)) {
+        _setStatus(_statusOf(pullFailure!));
+        return false;
+      }
+      // Přechodné selhání = offline; fronta počká a zkusí se za minutu.
+      if (pushFailure != null || pullFailure != null) {
+        _setStatus(SyncStatus.offline);
+        _scheduleRetryIfPending();
+        return false;
+      }
 
       final st = await _local.syncState();
       _lastSyncAt = st.lastSyncAt ?? DateTime.now();
@@ -165,6 +192,16 @@ class SyncEngine extends ChangeNotifier {
       await refreshCounts();
     }
   }
+
+  /// Selhání, které se opakováním nespraví — nemá cenu plánovat retry.
+  static bool _isPermanent(SyncFailure? f) =>
+      f == SyncFailure.unsupported || f == SyncFailure.unauthorized;
+
+  static SyncStatus _statusOf(SyncFailure f) => switch (f) {
+    SyncFailure.unsupported => SyncStatus.unsupported,
+    SyncFailure.unauthorized => SyncStatus.unauthorized,
+    SyncFailure.transient => SyncStatus.offline,
+  };
 
   /// Když je offline a něco čeká, zkoušet po minutě znovu — po návratu do
   /// signálu se změny odešlou samy, bez čekání na desetiminutový cyklus nebo
@@ -205,7 +242,18 @@ class SyncEngine extends ChangeNotifier {
     SyncStatus.idle => _pending > 0
         ? '$_pending ${_changesWord(_pending)} čeká'
         : 'Nesynchronizováno',
+    SyncStatus.unsupported =>
+      'Server neumí synchronizaci (je potřeba ho aktualizovat)'
+          '${_pending > 0 ? ' · $_pending ${_changesWord(_pending)} čeká' : ''}',
+    SyncStatus.unauthorized =>
+      'Přihlášení vypršelo — přihlas se znovu v Nastavení → Účet'
+          '${_pending > 0 ? ' · $_pending ${_changesWord(_pending)} čeká' : ''}',
   };
+
+  /// Je stav chyba, kterou musí řešit člověk? (UI to odliší barvou i ikonou —
+  /// „offline" je normální provozní stav, tohle ne.)
+  bool get needsAttention =>
+      _status == SyncStatus.unsupported || _status == SyncStatus.unauthorized;
 
   static String _changesWord(int n) => n == 1 ? 'změna' : (n < 5 ? 'změny' : 'změn');
 

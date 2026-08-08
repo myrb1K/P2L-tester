@@ -505,6 +505,12 @@ a ručně (ikona v AppBaru obrazovky Databáze).
   `conflict` s uložením prohrané verze do lokální tabulky `conflicts`, `rejected` s poznámkou —
   vadná operace by se jinak posílala donekonečna. Operace **bez odpovědi** ve frontě zůstane se
   stejným `opId` (idempotence na serveru zajistí, že se nic nezdvojí).
+- **Ne-200 odpověď se NESMÍ spolknout mlčky.** `pushOutbox`/`pullFromServer` vrací `SyncFailure`
+  (`unsupported` 404 / `unauthorized` 401,403 / `transient` zbytek) a `SyncEngine` z toho dělá
+  stavy `SyncStatus.unsupported` a `unauthorized` — červená ikona, ne oranžová „offline".
+  Trvalé selhání kolo ukončí a **neplánuje retry** (opakování nepomůže). Narazili jsme na to
+  naživo 2026-08-08: nasazený server byl starší než DB9, `/units/sync` vracel 404, fronta
+  tiše narostla na 130 operací a v UI to vypadalo jako běžné „N čeká".
 - **`_running` guard je nutný** — jinak debounce + periodický timer + ruční klik pošlou tři
   pushe zároveň.
 - **Konflikty se nemažou, jen `dismissed`** — dohledatelnost je smysl celé věci. UI (banner na

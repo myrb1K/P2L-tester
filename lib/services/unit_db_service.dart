@@ -38,6 +38,34 @@ class UnitDbException implements Exception {
   String toString() => message;
 }
 
+/// Proč se kolo synchronizace nepovedlo (`null` = povedlo).
+///
+/// Rozlišovat je nutné, protože každý případ chce jinou reakci — a hlavně
+/// proto, že uživatel musí poznat rozdíl mezi „ještě se to neodeslalo" a
+/// „tenhle server to nikdy nepřijme". Do teď se každá ne-200 odpověď mlčky
+/// spolkla a fronta jen rostla.
+enum SyncFailure {
+  /// Endpoint neexistuje (404) — server je starší než DB9 a synchronizaci
+  /// neumí. Opakování nepomůže, musí se aktualizovat server.
+  unsupported,
+
+  /// 401/403 — přihlášení vypršelo nebo účet nemá práva. Opakování nepomůže,
+  /// dokud se uživatel nepřihlásí znovu.
+  unauthorized,
+
+  /// Síť, timeout, 5xx — přechodné. Fronta počká a zkusí se znovu; tohle je
+  /// u zákazníka bez internetu normální stav, ne chyba.
+  transient,
+}
+
+/// Mapuje HTTP status na [SyncFailure]. 2xx → `null`.
+SyncFailure? _failureOf(int status) {
+  if (status >= 200 && status < 300) return null;
+  if (status == 404) return SyncFailure.unsupported;
+  if (status == 401 || status == 403) return SyncFailure.unauthorized;
+  return SyncFailure.transient;
+}
+
 class UnitDbService {
   static const _timeout = Duration(seconds: 5);
 
@@ -299,18 +327,19 @@ class UnitDbService {
   static const _pullTimeout = Duration(seconds: 6);
   static const _maxPullPages = 50; // strop proti nekonečné smyčce
 
-  /// Dorovná lokální DB ze serveru. Vrací počet stažených karet; chyby
-  /// **polyká** (offline je normální stav, ne selhání).
-  Future<int> pullFromServer() async {
-    if (!_useLocal || !_enabled) return 0;
-    var applied = 0;
+  /// Dorovná lokální DB ze serveru. Nikdy nevyhodí — vrací důvod selhání
+  /// (`null` = v pořádku), aby volající poznal, že server `/units/changes`
+  /// vůbec neumí, a neopakoval to donekonečna.
+  Future<SyncFailure?> pullFromServer() async {
+    if (!_useLocal || !_enabled) return null;
     try {
       var since = (await _local.syncState()).lastRev;
       for (var page = 0; page < _maxPullPages; page++) {
         final res = await _client
             .get(Uri.parse('$_base/units/changes?since=$since&limit=500'))
             .timeout(_pullTimeout);
-        if (res.statusCode != 200) break;
+        final failure = _failureOf(res.statusCode);
+        if (failure != null) return failure;
         final json = jsonDecode(res.body) as Map<String, dynamic>;
         final units = (json['units'] as List? ?? const [])
             .cast<Map<String, dynamic>>();
@@ -330,14 +359,14 @@ class UnitDbService {
           final offset = serverTs.difference(DateTime.now().toUtc()).inMilliseconds;
           await _local.saveSyncState(clockOffsetMs: offset);
         }
-        applied += units.length;
         if (json['more'] != true) break;
         since = maxRev;
       }
     } catch (_) {
-      // offline / server nedostupný → zůstane poslední známý stav
+      // offline / timeout → zůstane poslední známý stav, zkusí se příště
+      return SyncFailure.transient;
     }
-    return applied;
+    return null;
   }
 
   /// Kolik lokálních změn čeká na odeslání (indikátor v UI).
@@ -377,12 +406,13 @@ class UnitDbService {
   ///     přeposílala donekonečna), zapíše se chyba
   /// Operace, ke které odpověď nepřišla, zůstává ve frontě.
   ///
-  /// Vrací počet úspěšně doručených operací; `null` když server nebyl
-  /// dostupný (odlišení „nic k odeslání" od „nepovedlo se").
-  Future<int?> pushOutbox({int batch = 100}) async {
-    if (!_useLocal || !_enabled) return 0;
+  /// Vrací důvod selhání (`null` = v pořádku). Rozlišení je podstatné: proti
+  /// serveru bez DB9 vrací `/units/sync` 404 a fronta by jinak tiše rostla do
+  /// nekonečna, aniž by měl uživatel jak poznat, že se nic neděje.
+  Future<SyncFailure?> pushOutbox({int batch = 100}) async {
+    if (!_useLocal || !_enabled) return null;
     final ops = await _local.pendingOps(limit: batch);
-    if (ops.isEmpty) return 0;
+    if (ops.isEmpty) return null;
 
     final http.Response res;
     try {
@@ -397,16 +427,16 @@ class UnitDbService {
           )
           .timeout(_bulkTimeout);
     } catch (_) {
-      return null; // offline → fronta zůstává
+      return SyncFailure.transient; // offline → fronta zůstává
     }
-    if (res.statusCode != 200) return null;
+    final failure = _failureOf(res.statusCode);
+    if (failure != null) return failure;
 
     final json = jsonDecode(res.body) as Map<String, dynamic>;
     final results = (json['results'] as List? ?? const [])
         .cast<Map<String, dynamic>>();
     final byId = {for (final r in results) r['opId'] as String: r};
 
-    var delivered = 0;
     for (final op in ops) {
       final r = byId[op.opId];
       if (r == null) continue; // bez odpovědi → nechat ve frontě
@@ -426,9 +456,8 @@ class UnitDbService {
         );
       }
       await _local.dropOp(op.opId);
-      if (status == 'applied') delivered++;
     }
-    return delivered;
+    return null;
   }
 
   /// Popis klienta pro audit na serveru (`source_device`) — z něj je v historii
