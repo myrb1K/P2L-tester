@@ -7,8 +7,12 @@
 // knihovnu přes Dart build hooks, které na Windows profilu s mezerou v cestě
 // spadnou (viz komentář v pubspec.yaml).
 
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:p2l_tester/services/local_unit_db.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -266,6 +270,176 @@ void main() {
       final st = await db.syncState();
       expect(st.lastRev, 7);
       expect(st.lastSyncAt!.toUtc(), ts);
+    });
+  });
+
+  // Appka drží ID kanonicky s nulami (`001114`, klíč v AppState._units a
+  // MQTT topicy), server ale ukládá `1114`. Kdyby lokální DB nechala tvar
+  // s nulami, první pull by kartu zdvojil — tohle to hlídá.
+  group('tvar ID (bez vodicích nul, shodně se serverem)', () {
+    test('zápis s nulami se uloží pod plain ID', () async {
+      await db.writeObserved('001114', {'ip': '10.0.0.5'});
+
+      final list = await db.listUnits();
+      expect(list.single.id, '1114');
+
+      // Číst jde oběma tvary — volající (AppState) zná jen ten kanonický.
+      expect((await db.getCard('001114'))!.ip, '10.0.0.5');
+      expect((await db.getCard('1114'))!.ip, '10.0.0.5');
+      expect((await db.getCard('1114'))!.id, '1114');
+    });
+
+    test('pull po lokálním zápisu kartu NEzdvojí', () async {
+      await db.writeMeta('001114', {'name': 'lokální'});
+      expect((await db.listUnits()).length, 1);
+
+      // Server vrací ID bez nul — dřív vznikla druhá karta.
+      await db.applyServerChanges(
+        units: [
+          {'id': '1114', 'rev': 5, 'name': 'serverová', 'status': 'active'},
+        ],
+        deleted: const [],
+        maxRev: 5,
+      );
+
+      final list = await db.listUnits();
+      expect(list.length, 1, reason: 'karta se nesmí zdvojit');
+      expect(list.single.id, '1114');
+      expect(list.single.name, 'serverová');
+    });
+
+    test('outbox, historie i konflikty nesou plain ID', () async {
+      await db.writeMeta('001114', {'name': 'X'}, username: 'radek');
+      expect((await db.pendingOps()).single.unitId, '1114');
+      expect((await db.history('001114')).length, 1);
+
+      await db.recordConflict(
+        unitId: '001114',
+        layer: UnitLayer.meta,
+        payload: const {'name': 'moje'},
+        at: DateTime.utc(2026, 8, 8),
+      );
+      // Dotaz kanonickým tvarem musí konflikt najít.
+      expect((await db.conflicts(unitId: '001114')).single.unitId, '1114');
+      expect((await db.conflicts(unitId: '1114')).length, 1);
+    });
+
+    test('stará jednotka (< 1000) taky ztratí nuly', () async {
+      await db.writeObserved('0472', {'ip': '10.0.0.9'});
+      final list = await db.listUnits();
+      expect(list.single.id, '472');
+      expect(list.single.generation, 'old');
+    });
+  });
+
+  // Migrace schématu v2 → v3 nad reálným souborem. Existující instalace mají
+  // v lokální DB stovky karet s ID ve tvaru `001114`; upgrade appky je musí
+  // převést, jinak by je první pull zdvojil.
+  group('migrace v2 → v3 (ID bez vodicích nul)', () {
+    late Directory tmp;
+    late String file;
+
+    setUp(() async {
+      await db.close();
+      tmp = await Directory.systemTemp.createTemp('p2l-mig-test');
+      file = p.join(tmp.path, 'units-local.db');
+    });
+
+    tearDown(() async {
+      await db.close();
+      try {
+        await tmp.delete(recursive: true);
+      } catch (_) {
+        // Windows drží handle chvíli po close — na úklidu testu nezáleží.
+      }
+    });
+
+    /// Vyrobí DB, která vypadá jako od staré verze appky: aktuální schéma,
+    /// ale data s vodicími nulami a `user_version = 2`.
+    Future<void> seedV2(List<Map<String, Object?>> cards) async {
+      await db.init(path: file); // vytvoří tabulky
+      await db.close();
+
+      final raw = await databaseFactory.openDatabase(file);
+      for (final c in cards) {
+        final id = c['id'] as String;
+        await raw.insert('units_cache', {
+          'id': id,
+          'rev': c['rev'] ?? 0,
+          'generation': 'new',
+          'name': c['name'],
+          'status': 'active',
+          'card_json': jsonEncode({'id': id, 'name': c['name']}),
+          'updated_at': c['updated_at'] ?? '2026-08-08T09:00:00.000Z',
+        });
+        await raw.insert('outbox', {
+          'op_id': 'op-$id',
+          'unit_id': id,
+          'layer': 'meta',
+          'payload_json': '{}',
+          'at': '2026-08-08T09:00:00.000Z',
+          'created_at': '2026-08-08T09:00:00.000Z',
+        });
+        await raw.insert('local_history', {
+          'uuid': 'uuid-$id',
+          'unit_id': id,
+          'at': '2026-08-08T09:00:00.000Z',
+          'action': 'meta',
+        });
+      }
+      await raw.execute('PRAGMA user_version = 2');
+      await raw.close();
+    }
+
+    test('karty, outbox i historie se převedou na plain ID', () async {
+      await seedV2([
+        {'id': '001114', 'name': 'A'},
+        {'id': '001180', 'name': 'B'},
+        {'id': '0472', 'name': 'stará'},
+      ]);
+
+      await db.init(path: file); // spustí onUpgrade 2 → 3
+      expect(db.isAvailable, isTrue);
+
+      final ids = (await db.listUnits()).map((u) => u.id).toList()..sort();
+      expect(ids, ['1114', '1180', '472']);
+
+      // ID uvnitř card_json se musí přepsat taky — jinak by karta v UI
+      // hlásila starý tvar a `saveDesired(card.id, …)` psal vedle.
+      expect((await db.getCard('1114'))!.id, '1114');
+      expect((await db.getCard('1114'))!.name, 'A');
+
+      final ops = await db.pendingOps();
+      expect(ops.map((o) => o.unitId).toList()..sort(), ['1114', '1180', '472']);
+      expect((await db.history('1114')).length, 1);
+    });
+
+    test('kolize starého a nového tvaru: vyhraje karta se serverovou revizí',
+        () async {
+      await seedV2([
+        {'id': '001114', 'name': 'lokální', 'rev': 0},
+        {'id': '1114', 'name': 'serverová', 'rev': 9},
+      ]);
+
+      await db.init(path: file);
+
+      final list = await db.listUnits();
+      expect(list.length, 1, reason: 'kolize se musí sloučit na jednu kartu');
+      expect(list.single.id, '1114');
+      expect(list.single.name, 'serverová');
+    });
+
+    test('opakované otevření už nic nemění (idempotence)', () async {
+      await seedV2([
+        {'id': '001114', 'name': 'A'},
+      ]);
+      await db.init(path: file);
+      await db.close();
+
+      await db.init(path: file);
+      final list = await db.listUnits();
+      expect(list.single.id, '1114');
+      expect(list.single.name, 'A');
     });
   });
 }
