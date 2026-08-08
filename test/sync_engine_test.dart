@@ -365,6 +365,43 @@ void main() {
       engine.stop(); // zruší naplánovaný retry, ať nezasahuje do dalších testů
     });
 
+    test('fronta delší než dávka odejde celá, ne po stovkách', () async {
+      // Push posílá po 100. Dokud se neposílalo ve smyčce, zbytek čekal na
+      // další trigger (10 min) — v provozu to vypadalo jako zaseknutá fronta.
+      for (var i = 0; i < 120; i++) {
+        await local.writeMeta('${2000 + i}', {'name': 'U$i'});
+      }
+      expect(await local.outboxCount(), 120);
+
+      final ok = await engine.syncNow();
+
+      expect(ok, isTrue);
+      expect(engine.pendingCount, 0, reason: 'fronta musí odejít celá');
+      expect(
+        server.calls.where((c) => c.contains('units/sync')).length,
+        2,
+        reason: '120 operací = dvě dávky po 100',
+      );
+    });
+
+    test('operace bez odpovědi kolo nezacyklí', () async {
+      // Server na nic neodpoví → fronta se nezmenší. Smyčka to musí poznat
+      // a skončit, ne posílat donekonečna.
+      server.pushStatuses = List.filled(10, 'no-answer');
+      for (var i = 0; i < 3; i++) {
+        await local.writeMeta('${3000 + i}', {'name': 'X'});
+      }
+
+      await engine.syncNow().timeout(const Duration(seconds: 10));
+
+      expect(engine.pendingCount, 3, reason: 'nic se nesmí zahodit');
+      expect(
+        server.calls.where((c) => c.contains('units/sync')).length,
+        1,
+        reason: 'druhé kolo nemá smysl, fronta se nezmenšila',
+      );
+    });
+
     test('po aktualizaci serveru se fronta odešle', () async {
       server.syncHttpStatus = 404;
       await local.writeMeta('1209', {'name': 'X'});

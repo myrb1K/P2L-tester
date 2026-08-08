@@ -61,6 +61,10 @@ class SyncEngine extends ChangeNotifier {
   /// [_period] — technik po návratu do signálu nemá čekat 10 minut.
   static const _retryWhenOffline = Duration(minutes: 1);
 
+  /// Strop kol pushe v jednom cyklu. Dávka je 100 operací, takže tohle je
+  /// pojistka proti zacyklení (2000 operací na cyklus), ne reálný limit.
+  static const _maxPushRounds = 20;
+
   SyncStatus _status = SyncStatus.idle;
   DateTime? _lastSyncAt;
   int _pending = 0;
@@ -163,7 +167,22 @@ class SyncEngine extends ChangeNotifier {
       // Trvalé selhání (404 = server sync neumí, 401 = vypršelé přihlášení)
       // se propíše do stavu a kolo končí. Opakovat nemá smysl — pomůže až
       // aktualizace serveru, resp. nové přihlášení.
-      final pushFailure = await _service.pushOutbox();
+      // Push jde po dávkách (100 operací), takže delší fronta potřebuje víc
+      // kol. Bez smyčky by zbytek čekal na další trigger — v praxi 10 minut,
+      // protože po ÚSPĚŠNÉM kole se retry neplánuje. Narazili jsme na to
+      // naživo: ze 130 čekajících odešlo 100 a zbylých 30 stálo.
+      //
+      // Kolo končí, když je fronta prázdná nebo se přestala zmenšovat
+      // (operace bez odpovědi v ní zůstávají — opakovat je nemá smysl).
+      SyncFailure? pushFailure;
+      var remaining = await _local.outboxCount();
+      for (var round = 0; remaining > 0 && round < _maxPushRounds; round++) {
+        pushFailure = await _service.pushOutbox();
+        if (pushFailure != null) break;
+        final after = await _local.outboxCount();
+        if (after >= remaining) break;
+        remaining = after;
+      }
       if (_isPermanent(pushFailure)) {
         _setStatus(_statusOf(pushFailure!));
         return false;
