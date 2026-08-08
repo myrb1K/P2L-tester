@@ -127,10 +127,10 @@ function makeRouter(db) {
   // Má databáze vůbec nějakého uživatele? Bez auth — odpověď je jediný bool
   // a klient ho potřebuje PŘED přihlášením.
   //
-  // Používá portable Windows EXE (lib/services/local_server_io.dart): při
-  // první instalaci je DB prázdná a appka musí nabídnout založení správce.
-  // Existence souboru users.db na to nestačí — vznikne i při startu serveru
-  // nad prázdnou DB, takže by nabídka zmizela a nebylo by se čím přihlásit.
+  // Pozná prázdnou instalaci: existence souboru users.db na to nestačí —
+  // vznikne i při startu serveru nad prázdnou DB. Volal to portable Windows
+  // EXE, které si server spouštělo samo (zaniklo s R6); endpoint zůstává pro
+  // první nasazení serveru, kde je potřeba založit správce.
   router.get('/bootstrap-status', wrap(async (req, res) => {
     const { n } = await db.get('SELECT COUNT(*) AS n FROM users');
     res.json({ hasUsers: n > 0 });

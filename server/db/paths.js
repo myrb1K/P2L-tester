@@ -5,10 +5,10 @@
 // Default je `server/data/` vedle kódu — tak to jelo od začátku a pro dev
 // (`npm start` v repu) to zůstává.
 //
-// Override přes `P2L_DATA_DIR` je kvůli portable režimu: Windows EXE si
-// spouští Node server přiložený vedle sebe (viz lib/services/local_server_io.dart)
-// a data musí ležet MIMO aplikační složku — v `%APPDATA%\P2L-Tester\server-data`.
-// Jinak by rozbalení novější verze dist zipu přepsalo/smazalo units.db.
+// Override přes `P2L_DATA_DIR` drží data mimo adresář s kódem — dnes ho
+// používá Docker (volume `/data`), dřív portable Windows dist appky
+// (`%APPDATA%\P2L-Tester\server-data`), aby rozbalení novější verze
+// nepřepsalo units.db. Ta cesta zanikla s R6, override zůstává.
 
 const path = require('path');
 const fs = require('fs');
