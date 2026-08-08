@@ -29,6 +29,11 @@ class _FakeServer {
   bool down = false;
   List<Map<String, dynamic>> changeUnits = const [];
 
+  /// HTTP status pro sync/changes endpointy. 404 simuluje server starší než
+  /// DB9 (endpointy tam ještě nejsou), 401 vypršelé přihlášení.
+  int syncHttpStatus = 200;
+  int changesHttpStatus = 200;
+
   MockClient get client => MockClient((req) async {
     calls.add('${req.method} ${req.url.path}');
     if (down) throw Exception('offline');
@@ -47,6 +52,9 @@ class _FakeServer {
     }
 
     if (req.url.path.endsWith('/units/sync')) {
+      if (syncHttpStatus != 200) {
+        return http.Response('{"error":"nope"}', syncHttpStatus);
+      }
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       final ops = (body['ops'] as List).cast<Map<String, dynamic>>();
       final results = <Map<String, dynamic>>[];
@@ -71,6 +79,9 @@ class _FakeServer {
     }
 
     if (req.url.path.endsWith('/units/changes')) {
+      if (changesHttpStatus != 200) {
+        return http.Response('{"error":"nope"}', changesHttpStatus);
+      }
       return http.Response(
         jsonEncode({
           'serverTs': DateTime.now().toUtc().toIso8601String(),
@@ -296,6 +307,77 @@ void main() {
       final results = await Future.wait([a, b]);
       expect(results.where((r) => r).length, 1);
       expect(server.calls.where((c) => c.contains('sync')).length, 1);
+    });
+  });
+
+  // Server žije (health OK), ale sync endpointy nemá nebo je odmítá. Do teď
+  // se každá ne-200 odpověď mlčky spolkla: fronta rostla a uživatel viděl jen
+  // „N čeká", což vypadá jako normální fronta. Narazili jsme na to naživo —
+  // 130 operací se nikdy neodeslalo, protože nasazený server byl starší
+  // než DB9 a `/units/sync` vracel 404.
+  group('server odpovídá, ale synchronizaci nepřijme', () {
+    test('404 na push → stav unsupported, fronta zůstane, pull se nezkouší',
+        () async {
+      server.syncHttpStatus = 404;
+      await local.writeMeta('1209', {'name': 'X'});
+
+      final ok = await engine.syncNow();
+
+      expect(ok, isFalse);
+      expect(engine.status, SyncStatus.unsupported);
+      expect(engine.needsAttention, isTrue);
+      expect(engine.pendingCount, 1, reason: 'nic se nesmí zahodit');
+      // Nemá smysl pokračovat pullem, když server endpointy nemá.
+      expect(server.calls.where((c) => c.contains('changes')), isEmpty);
+      expect(engine.label, contains('Server neumí synchronizaci'));
+    });
+
+    test('404 na pull (push prošel) → taky unsupported', () async {
+      server.changesHttpStatus = 404;
+      final ok = await engine.syncNow();
+
+      expect(ok, isFalse);
+      expect(engine.status, SyncStatus.unsupported);
+    });
+
+    test('401 → unauthorized, ne offline', () async {
+      server.syncHttpStatus = 401;
+      await local.writeMeta('1209', {'name': 'X'});
+
+      await engine.syncNow();
+
+      expect(engine.status, SyncStatus.unauthorized);
+      expect(engine.needsAttention, isTrue);
+      expect(engine.pendingCount, 1);
+      expect(engine.label, contains('Přihlášení vypršelo'));
+    });
+
+    test('500 je přechodné → offline (zkusí se znovu), ne chyba k řešení',
+        () async {
+      server.syncHttpStatus = 500;
+      await local.writeMeta('1209', {'name': 'X'});
+
+      await engine.syncNow();
+
+      expect(engine.status, SyncStatus.offline);
+      expect(engine.needsAttention, isFalse);
+      expect(engine.pendingCount, 1);
+      engine.stop(); // zruší naplánovaný retry, ať nezasahuje do dalších testů
+    });
+
+    test('po aktualizaci serveru se fronta odešle', () async {
+      server.syncHttpStatus = 404;
+      await local.writeMeta('1209', {'name': 'X'});
+      await engine.syncNow();
+      expect(engine.status, SyncStatus.unsupported);
+
+      // Server se nasadil znovu, už s DB9.
+      server.syncHttpStatus = 200;
+      final ok = await engine.syncNow();
+
+      expect(ok, isTrue);
+      expect(engine.status, SyncStatus.ok);
+      expect(engine.pendingCount, 0);
     });
   });
 }

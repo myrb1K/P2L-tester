@@ -257,10 +257,19 @@ V liště obrazovky *Databáze P2L modulů* je **ikona mraku** se stavem:
 | ☁ oranžový mrak se šipkou + číslo | tolik změn čeká na odeslání |
 | ☁ oranžový přeškrtnutý mrak | server je nedostupný (offline) |
 | ⟳ | právě synchronizuje |
+| 🔴 **červená ikona s vykřičníkem** | **synchronizace nepůjde sama od sebe** — viz níže |
+| 🔴 **červený zámek** | **přihlášení vypršelo** — přihlas se znovu v *Nastavení → Účet* |
 
 Klepnutím na ikonu se synchronizace spustí ručně; jinak běží sama — po každé změně, po návratu
 signálu a průběžně na pozadí. Číslo u ikony je počet **neodeslaných** změn: dokud tam svítí, data
 jsou jen v tomhle zařízení. Po přihlášení se stáhne i to, co mezitím změnili ostatní.
+
+**Oranžová vs. červená.** Oranžová (offline) je normální provozní stav — jsi mimo dosah serveru
+a jakmile se objeví signál, změny odejdou samy. **Červená znamená, že čekáním se nic nespraví:**
+buď je server starší verze, která synchronizaci ještě neumí (musí se aktualizovat — řekni to
+správci), nebo vypršelo přihlášení. Najeď na ikonu myší, tooltip napíše co se děje. Data jsou
+v obou případech v bezpečí v tomhle zařízení, jen se nikam neodešlou; zálohu si můžeš udělat
+přes ☰ → *Exportovat databázi*.
 
 **Když se dvě změny potkají.** Uprav něco offline a mezitím tutéž věc změní kolega na serveru —
 platí **novější změna**, a protože kolegova je novější, tvoje se neuloží. Aby se neztratila,
