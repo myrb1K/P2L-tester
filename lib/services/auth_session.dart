@@ -63,36 +63,10 @@ class AuthSession extends ChangeNotifier {
 
   bool get isLoggedIn => status == AuthSessionStatus.loggedIn;
 
-  /// Nasměruje session na lokální server spuštěný appkou (portable EXE, viz
-  /// [LocalServer]). Volá se ze startu PŘED [restore].
-  ///
-  /// Pravidla, aby to nerozbilo přihlášení na vzdálený server:
-  /// - Uložený base na vzdálený host (firemní server) má přednost a zůstává.
-  /// - Uložený base na localhost s jiným portem se přepíše — uživatel si port
-  ///   lokálního serveru změnil v Nastavení, session má jít tam.
-  /// - Nic uloženého → lokální base se stane výchozím (i pro login dialog).
-  Future<void> preferLocalBase(String localBase) async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_baseKey);
-    if (saved == null || saved.isEmpty) {
-      apiBase = localBase;
-      // Uložit hned, jinak by [restore] apiBase přepsal defaultem z
-      // --dart-define (který nemusí mít port lokálního serveru).
-      await prefs.setString(_baseKey, localBase);
-      notifyListeners();
-      return;
-    }
-    if (_isLoopback(saved) && saved != localBase) {
-      apiBase = localBase;
-      await prefs.setString(_baseKey, localBase);
-    } else {
-      // Vzdálený (nebo shodný lokální) server — respektujeme uložený.
-      apiBase = saved;
-    }
-    notifyListeners();
-  }
-
-  static bool _isLoopback(String base) {
+  /// Uložený base na loopback pochází z doby, kdy si EXE spouštělo vlastní
+  /// Node server (R6, do v2.84). Ten už neexistuje, takže by se appka po
+  /// updatu marně hlásila na mrtvý port — přepíšeme ho na firemní server.
+  static bool _isDeadLocalBase(String base) {
     final host = Uri.tryParse(base)?.host.toLowerCase();
     return host == 'localhost' || host == '127.0.0.1' || host == '::1';
   }
@@ -102,7 +76,14 @@ class AuthSession extends ChangeNotifier {
   /// server nedostupný → [AuthSessionStatus.offline] (token zůstává).
   Future<void> restore() async {
     final prefs = await SharedPreferences.getInstance();
-    apiBase = prefs.getString(_baseKey) ?? authApiBase;
+    final saved = prefs.getString(_baseKey);
+    if (saved != null && saved.isNotEmpty && _isDeadLocalBase(saved)) {
+      // Migrace po R6 — jednorázová, přepíše se i v prefs.
+      apiBase = authApiBase;
+      await prefs.setString(_baseKey, apiBase);
+    } else {
+      apiBase = saved ?? authApiBase;
+    }
     savedUsername = prefs.getString(_userKey);
     final token = prefs.getString(_tokenKey);
     if (token == null || token.isEmpty) {

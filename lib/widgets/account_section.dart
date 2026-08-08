@@ -137,33 +137,26 @@ class _LoginDialog extends StatefulWidget {
 }
 
 class _LoginDialogState extends State<_LoginDialog> {
-  late final TextEditingController _serverController;
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _busy = false;
   String? _error;
 
   @override
-  void initState() {
-    super.initState();
-    _serverController =
-        TextEditingController(text: AuthSession.instance.apiBase);
-  }
-
-  @override
   void dispose() {
-    _serverController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    final server = _serverController.text.trim();
+    // Server se nezadává — evidence je jedna, firemní (viz authApiBase).
+    // Adresu smí za běhu změnit jen admin v sekci Účet.
+    final server = AuthSession.instance.apiBase;
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
-    if (server.isEmpty || username.isEmpty || password.isEmpty) {
-      setState(() => _error = 'Vyplň server, jméno i heslo.');
+    if (username.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Vyplň jméno i heslo.');
       return;
     }
 
@@ -198,17 +191,6 @@ class _LoginDialogState extends State<_LoginDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: _serverController,
-              enabled: !_busy,
-              decoration: const InputDecoration(
-                labelText: 'Server',
-                hintText: 'např. 192.168.1.10:3001',
-                prefixIcon: Icon(Icons.dns_outlined),
-              ),
-              keyboardType: TextInputType.url,
-            ),
-            const SizedBox(height: 8),
             TextField(
               controller: _usernameController,
               enabled: !_busy,

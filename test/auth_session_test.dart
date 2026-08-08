@@ -165,47 +165,48 @@ void main() {
     });
   });
 
-  // Portable EXE si spouští vlastní server (viz local_server_io.dart) a musí
-  // na něj nasměrovat session — ale nesmí přebít přihlášení na firemní server.
-  group('AuthSession.preferLocalBase', () {
-    test('bez uloženého base → lokální se stane výchozím a uloží se', () async {
+  // R6: EXE si dřív spouštělo vlastní Node server na loopbacku a uložilo si
+  // jeho adresu. Server zmizel, takže uložený base musí ustoupit firemnímu —
+  // jinak by se appka po updatu marně hlásila na mrtvý port.
+  group('migrace uloženého loopback base (R6)', () {
+    test('uložený localhost se přepíše na firemní server a uloží', () async {
+      SharedPreferences.setMockInitialValues({
+        'auth_api_base': 'http://127.0.0.1:3001/api',
+      });
       final s = _session((request) async => http.Response('{}', 401));
-      await s.preferLocalBase('http://127.0.0.1:3001/api');
-      expect(s.apiBase, 'http://127.0.0.1:3001/api');
+      await s.restore();
+      expect(s.apiBase, authApiBase);
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('auth_api_base'), 'http://127.0.0.1:3001/api');
+      expect(prefs.getString('auth_api_base'), authApiBase);
     });
 
-    test('uložený vzdálený server má přednost a zůstane', () async {
+    test('uložený vzdálený server zůstane nedotčený', () async {
       SharedPreferences.setMockInitialValues({
         'auth_api_base': 'https://db.firma.cz/api',
       });
       final s = _session((request) async => http.Response('{}', 401));
-      await s.preferLocalBase('http://127.0.0.1:3001/api');
+      await s.restore();
       expect(s.apiBase, 'https://db.firma.cz/api');
     });
 
-    test('uložený loopback s jiným portem se přepíše na aktuální', () async {
-      SharedPreferences.setMockInitialValues({
-        'auth_api_base': 'http://localhost:3001/api',
-      });
+    test('bez uloženého base se použije firemní default', () async {
       final s = _session((request) async => http.Response('{}', 401));
-      await s.preferLocalBase('http://127.0.0.1:3999/api');
-      expect(s.apiBase, 'http://127.0.0.1:3999/api');
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('auth_api_base'), 'http://127.0.0.1:3999/api');
+      await s.restore();
+      expect(s.apiBase, authApiBase);
     });
 
-    test('restore po preferLocalBase jde na lokální port', () async {
+    test('restore po migraci volá /me už na firemním serveru', () async {
       final seen = <String>[];
       final s = _session((request) async {
         seen.add(request.url.toString());
         return http.Response(_meOkBody, 200);
       });
-      SharedPreferences.setMockInitialValues({'auth_session_token': 'tok123'});
-      await s.preferLocalBase('http://127.0.0.1:3999/api');
+      SharedPreferences.setMockInitialValues({
+        'auth_api_base': 'http://localhost:3001/api',
+        'auth_session_token': 'tok123',
+      });
       await s.restore();
-      expect(seen.single, 'http://127.0.0.1:3999/api/me');
+      expect(seen.single, '$authApiBase/me');
       expect(s.status, AuthSessionStatus.loggedIn);
     });
   });
