@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../models/unit_db.dart';
 import '../services/unit_db_service.dart';
+import '../services/unit_ids_io.dart';
 
 class ChangesScreen extends StatefulWidget {
   const ChangesScreen({super.key, this.unitId});
@@ -350,7 +351,8 @@ class _EventTile extends StatelessWidget {
       dense: true,
       leading: Icon(_icon, size: 20, color: _color),
       title: Text(
-        '${event.unitId != null ? '${event.unitId} · ' : ''}${event.actionLabel}',
+        '${event.unitId != null ? '${plainUnitId(event.unitId!)} · ' : ''}'
+        '${event.actionLabel}',
         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
       ),
       subtitle: Column(

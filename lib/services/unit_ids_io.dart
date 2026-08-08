@@ -117,6 +117,17 @@ String? canonicalUnitId(String raw) {
   return n.toString().padLeft(6, '0');
 }
 
+/// ID bez vodicích nul: `001114` → `1114`, `0472` → `472`.
+///
+/// Shodné s tím, co dělá server (`normalizeUnitId` v [server/db/units.js]) —
+/// proto je to tvar pro **evidenci**: klíč v lokální DB, ID karty na serveru
+/// i to, co se ukazuje uživateli. Kdyby lokální DB držela kanonický tvar
+/// s nulami, první pull ze serveru by kartu zdvojil.
+///
+/// Naopak `AppState._units` a MQTT topicy jedou na [canonicalUnitId] (padding
+/// podle generace) — tam se tahle funkce nesmí použít jako klíč.
+String plainUnitId(String id) => int.tryParse(id)?.toString() ?? id;
+
 /// Filename pro export seznamu ID. Sanitizuje název brokeru — povoluje
 /// alfanumeriku, diakritiku, mezery a `_.()-`; ostatní znaky nahradí `_`.
 /// Výstup: `{broker}_{N}ids_{YYYY-MM-DDTHH-MM}.json`.

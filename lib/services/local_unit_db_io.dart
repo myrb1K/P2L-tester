@@ -31,6 +31,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../models/unit_db.dart';
 import 'local_unit_db_types.dart';
+import 'unit_ids_io.dart';
 
 export 'local_unit_db_types.dart';
 
@@ -40,7 +41,8 @@ class LocalUnitDb {
 
   // v2 (DB11): tabulka `conflicts` — přehlasované lokální změny, které musí
   // uživatel vidět (PRD-DB/03 §5).
-  static const _schemaVersion = 2;
+  // v3: ID jednotek bez vodicích nul, tedy shodně se serverem (viz [_key]).
+  static const _schemaVersion = 3;
 
   Database? _db;
   bool _unavailable = false;
@@ -73,6 +75,7 @@ class LocalUnitDb {
           onUpgrade: (db, from, to) async {
             // Přírůstkově, ať existující lokální data přežijí update appky.
             if (from < 2) await _createConflictsTable(db);
+            if (from < 3) await _migrateIdsToPlain(db);
           },
         ),
       );
@@ -104,6 +107,16 @@ class LocalUnitDb {
     if (db == null) throw StateError('LocalUnitDb není otevřená');
     return db;
   }
+
+  /// Klíč jednotky v lokální DB — **stejný tvar jako na serveru** (bez
+  /// vodicích nul, viz [plainUnitId]).
+  ///
+  /// Volající sem posílají kanonické ID z `AppState._units` (`001114`), server
+  /// ale ukládá `1114`. Bez tohohle převodu by první pull uložil serverovou
+  /// verzi jako druhou kartu vedle lokální a evidence by se zdvojila.
+  /// Proto tudy musí projít **každý** vstup unitId, včetně dat z pullu
+  /// (tam je převod no-op, ID už přišlo v serverovém tvaru).
+  static String _key(String id) => plainUnitId(id);
 
   static Future<void> _createSchema(Database db) async {
     // `card_json` = celá karta (tvar UnitDbCard.fromJson, tedy shodný se
@@ -168,6 +181,99 @@ class LocalUnitDb {
 
     await db.execute('CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT)');
     await _createConflictsTable(db);
+  }
+
+  /// Migrace na schéma v3: ID jednotek na tvar bez vodicích nul.
+  ///
+  /// Do v2.84 se do lokální DB ukládal kanonický tvar z `AppState._units`
+  /// (`001114`), zatímco server drží `1114`. Kdyby to tak zůstalo, první
+  /// úspěšný pull by serverovou verzi uložil jako **druhou** kartu vedle
+  /// lokální a evidence by se zdvojila (viz [_key]).
+  ///
+  /// `card_json` se přepisuje taky — ID je i uvnitř blobu, a z něj se skládá
+  /// [UnitDbCard], takže by karta v UI dál hlásila starý tvar.
+  ///
+  /// Kolize (existuje `001114` i `1114`) se řeší ve prospěch **serverové**
+  /// verze, tedy toho řádku, který už má `rev > 0`; při shodě vyhrává novější
+  /// `updated_at`. Poražený řádek se zahodí — jeho neodeslané změny zůstávají
+  /// v outboxu, takže se o ně nepřijde.
+  static Future<void> _migrateIdsToPlain(Database db) async {
+    // Tabulky, kde je unit_id jen sloupec (bez PK) — prostý přepis.
+    for (final t in ['outbox', 'local_history', 'conflicts']) {
+      await db.execute(
+        "UPDATE $t SET unit_id = CAST(CAST(unit_id AS INTEGER) AS TEXT) "
+        "WHERE unit_id GLOB '0*' AND CAST(unit_id AS INTEGER) > 0",
+      );
+    }
+
+    // units_cache má id jako PRIMARY KEY → kolize se musí vyřešit ručně.
+    final rows = await db.query(
+      'units_cache',
+      columns: ['id', 'rev', 'updated_at'],
+    );
+    final byPlain = <String, List<Map<String, Object?>>>{};
+    for (final r in rows) {
+      final id = r['id'] as String;
+      byPlain.putIfAbsent(plainUnitId(id), () => []).add(r);
+    }
+
+    for (final entry in byPlain.entries) {
+      final plain = entry.key;
+      final group = entry.value;
+      if (group.length == 1) {
+        final id = group.first['id'] as String;
+        if (id == plain) continue; // už v cílovém tvaru
+        await _renameCard(db, from: id, to: plain);
+        continue;
+      }
+      // Kolize: vybrat vítěze a ostatní zahodit.
+      group.sort((a, b) {
+        final revA = (a['rev'] as num?)?.toInt() ?? 0;
+        final revB = (b['rev'] as num?)?.toInt() ?? 0;
+        if (revA != revB) return revB.compareTo(revA);
+        return ((b['updated_at'] as String?) ?? '')
+            .compareTo((a['updated_at'] as String?) ?? '');
+      });
+      final winner = group.first['id'] as String;
+      for (final loser in group.skip(1)) {
+        await db.delete(
+          'units_cache',
+          where: 'id = ?',
+          whereArgs: [loser['id']],
+        );
+      }
+      if (winner != plain) await _renameCard(db, from: winner, to: plain);
+    }
+  }
+
+  /// Přejmenuje kartu v `units_cache` včetně `id` uvnitř `card_json`.
+  static Future<void> _renameCard(
+    Database db, {
+    required String from,
+    required String to,
+  }) async {
+    final rows = await db.query(
+      'units_cache',
+      columns: ['card_json'],
+      where: 'id = ?',
+      whereArgs: [from],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    var cardJson = rows.first['card_json'] as String;
+    try {
+      final card = (jsonDecode(cardJson) as Map).cast<String, dynamic>();
+      card['id'] = to;
+      cardJson = jsonEncode(card);
+    } catch (_) {
+      // Poškozený blob — ať migrace neshodí start, ponecháme původní.
+    }
+    await db.update(
+      'units_cache',
+      {'id': to, 'card_json': cardJson},
+      where: 'id = ?',
+      whereArgs: [from],
+    );
   }
 
   /// Přehlasované lokální změny (DB11). Server při pushi vrátí `conflict`, když
@@ -255,7 +361,7 @@ class LocalUnitDb {
     final rows = await _require.query(
       'units_cache',
       where: 'id = ? AND deleted_at IS NULL',
-      whereArgs: [id],
+      whereArgs: [_key(id)],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -269,7 +375,7 @@ class LocalUnitDb {
     final rows = await _require.query(
       'local_history',
       where: 'unit_id = ?',
-      whereArgs: [id],
+      whereArgs: [_key(id)],
       orderBy: 'at DESC',
       limit: 200,
     );
@@ -356,8 +462,11 @@ class LocalUnitDb {
   }
 
   Future<void> _putServerCard(DatabaseExecutor tx, Map<String, dynamic> u) async {
-    final id = u['id']?.toString();
-    if (id == null) return;
+    final rawId = u['id']?.toString();
+    if (rawId == null) return;
+    // Server posílá ID už bez nul, takže je to no-op — ale projít tudy musí
+    // i tahle cesta, ať se klíč nikdy nerozejde podle toho, odkud data přišla.
+    final id = _key(rawId);
     final desired = (u['desired'] as Map?)?.cast<String, dynamic>();
     final cfg = (u['unit_config'] as Map?)?.cast<String, dynamic>();
     // Broker pro řádek seznamu stejnou logikou jako server (listUnits):
@@ -438,11 +547,12 @@ class LocalUnitDb {
   /// Smazání karty. Lokálně řádek zmizí hned, do outboxu jde `delete` op
   /// (server ho promění na tombstone a rozešle ostatním klientům).
   Future<void> writeDelete(String unitId, {String? username}) async {
+    final id = _key(unitId);
     final at = _nowIso();
     await _require.transaction((tx) async {
-      await tx.delete('units_cache', where: 'id = ?', whereArgs: [unitId]);
-      await _enqueue(tx, unitId, UnitLayer.delete, const {}, at);
-      await _addHistory(tx, unitId, 'delete', null, username, 'delete', at);
+      await tx.delete('units_cache', where: 'id = ?', whereArgs: [id]);
+      await _enqueue(tx, id, UnitLayer.delete, const {}, at);
+      await _addHistory(tx, id, 'delete', null, username, 'delete', at);
     });
   }
 
@@ -454,19 +564,20 @@ class LocalUnitDb {
     bool queue = true,
     bool history = true,
   }) async {
+    final id = _key(unitId);
     final at = _nowIso();
     await _require.transaction((tx) async {
       final rows = await tx.query(
         'units_cache',
         where: 'id = ?',
-        whereArgs: [unitId],
+        whereArgs: [id],
         limit: 1,
       );
       final card = rows.isEmpty
           ? <String, dynamic>{
-              'id': unitId,
+              'id': id,
               // Stejná heuristika jako server i appka: ID ≥ 1000 = nová gen.
-              'generation': (int.tryParse(unitId) ?? 0) >= 1000 ? 'new' : 'old',
+              'generation': (int.tryParse(id) ?? 0) >= 1000 ? 'new' : 'old',
               'status': 'active',
             }
           : (jsonDecode(rows.first['card_json'] as String) as Map)
@@ -482,7 +593,7 @@ class LocalUnitDb {
       card[touched] = at;
 
       await tx.insert('units_cache', {
-        'id': unitId,
+        'id': id,
         // Lokální změna revizi nemá — tu přiděluje server. Zůstává původní,
         // aby pull nepřeskočil serverovou verzi téže karty.
         'rev': rows.isEmpty ? 0 : (rows.first['rev'] as num).toInt(),
@@ -503,10 +614,10 @@ class LocalUnitDb {
         'updated_at': at,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
 
-      if (queue) await _enqueue(tx, unitId, layer, fragment, at);
+      if (queue) await _enqueue(tx, id, layer, fragment, at);
       if (history) {
         await _addHistory(
-          tx, unitId, layer.wire, fragment, username, layer.wire, at,
+          tx, id, layer.wire, fragment, username, layer.wire, at,
         );
       }
     });
@@ -703,7 +814,7 @@ class LocalUnitDb {
     int? serverRev,
   }) async {
     await _require.insert('conflicts', {
-      'unit_id': unitId,
+      'unit_id': _key(unitId),
       'layer': layer.wire,
       'payload_json': jsonEncode(payload),
       'at': at.toUtc().toIso8601String(),
@@ -718,7 +829,7 @@ class LocalUnitDb {
     final rows = await _require.query(
       'conflicts',
       where: unitId == null ? 'dismissed = 0' : 'dismissed = 0 AND unit_id = ?',
-      whereArgs: unitId == null ? null : [unitId],
+      whereArgs: unitId == null ? null : [_key(unitId)],
       orderBy: 'detected_at DESC',
     );
     return rows

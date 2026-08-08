@@ -19,6 +19,7 @@ import '../services/file_export.dart';
 import '../services/local_unit_db.dart';
 import '../services/sync_engine.dart';
 import '../services/unit_db_service.dart';
+import '../services/unit_ids_io.dart';
 import 'changes_screen.dart';
 
 // ─── Seznam ────────────────────────────────────────────────────────────
@@ -735,7 +736,7 @@ class _UnitRow extends StatelessWidget {
                           Row(
                             children: [
                               Text(
-                                unit.id,
+                                plainUnitId(unit.id),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 15,
@@ -969,7 +970,7 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
         .toIso8601String()
         .substring(0, 16)
         .replaceAll(':', '-');
-    final defaultName = 'p2l_modul_${widget.unitId}_$stamp.json';
+    final defaultName = 'p2l_modul_${plainUnitId(widget.unitId)}_$stamp.json';
     try {
       final res = await saveTextFile(
         fileName: defaultName,
@@ -1001,7 +1002,7 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
       context: context,
       builder: (_) => _ConfigEvidenceDialog(
         initial: card.desired,
-        title: 'P2L modul ${card.id} — evidence',
+        title: 'P2L modul ${plainUnitId(card.id)} — evidence',
       ),
     );
     if (fragment == null || !mounted) return;
@@ -1020,7 +1021,7 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
     final card = _card;
     return Scaffold(
       appBar: AppBar(
-        title: Text('P2L modul ${widget.unitId}'),
+        title: Text('P2L modul ${plainUnitId(widget.unitId)}'),
         actions: [
           if (card != null)
             IconButton(
@@ -1519,7 +1520,7 @@ class _MetaDialogState extends State<_MetaDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('P2L modul ${widget.card.id} — údaje'),
+      title: Text('P2L modul ${plainUnitId(widget.card.id)} — údaje'),
       content: SizedBox(
         width: 360,
         child: Column(
