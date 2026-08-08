@@ -4,12 +4,21 @@
 // Nativ (DB1, PRD-DB): opt-in login přes AuthSession — session drží bearer
 // token (viz [lastLoginToken] a auth_http_client_io.dart).
 //
-// Base URL je konfigurovatelná přes --dart-define=AUTH_API_BASE=...
-// - Dev (default): http://localhost:3001/api (backend na jiném portu)
-// - Prod: /api (Nginx proxyuje same-origin)
+// Base URL je pevně daná — serverová evidence je jedna, firemní (PRD-DB
+// 03-PRD-sync.md: „Web, EXE i APK míří na jeden server"). Uživatel ji v běžném
+// toku nezadává; login dialog chce jen jméno a heslo.
 //
-// Build prod buildu:
-//   flutter build web --dart-define=AUTH_API_BASE=/api
+// Změnit ji lze VÝHRADNĚ při buildu přes --dart-define=AUTH_API_BASE=...
+// - Dev proti lokálnímu backendu:
+//     flutter run --dart-define=AUTH_API_BASE=http://localhost:3001/api
+// - Web (same-origin za Nginx/Traefik):
+//     flutter build web --dart-define=AUTH_API_BASE=/api
+//
+// Za běhu ji nejde přenastavit ani adminovi — zvažovaná admin-only pojistka
+// v Nastavení by byla k ničemu: `isAdmin` chodí z /api/me, takže by se
+// zobrazila jen když server odpovídá, a zmizela by přesně v situaci
+// (přestěhovaný/nedostupný server), pro kterou by existovala.
+// Přestěhování serveru se řeší novým buildem.
 
 import 'dart:convert';
 
@@ -19,7 +28,7 @@ import 'auth_http_client.dart';
 
 const String authApiBase = String.fromEnvironment(
   'AUTH_API_BASE',
-  defaultValue: 'http://localhost:3001/api',
+  defaultValue: 'https://p2ltester.smartbox.smartci4.com/api',
 );
 
 class AuthUser {
