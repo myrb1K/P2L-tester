@@ -19,20 +19,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   flutter::DartProject project(L"data");
 
-  // Vynutit skutečné GPU, ne adaptér přiřazený k displeji.
-  //
-  // Na headless serveru (bez monitoru) kreslí Windows do virtuálního displeje
-  // — u zákazníka „USB Mobile Monitor Virtual Display“ (usbmmidd, instaluje
-  // ho RustDesk). Bez preference si engine vezme adaptér toho displeje, na
-  // kterém okno leží, a ten virtuální plnohodnotný Direct3D 11 device
-  // nenabídne. ANGLE pak nevytvoří renderovací plochu a okno zůstane prázdné
-  // (bílá plocha v původní velikosti, po maximalizaci zbytek černý).
-  //
-  // HighPerformancePreference řekne DXGI, ať vybere výkonný adaptér; virtuální
-  // displej-only adaptéry jdou dolů, takže se použije fyzická grafika i když
-  // na ní není zapojený monitor. Na strojích s jedinou grafikou se nic nemění.
-  project.set_gpu_preference(flutter::GpuPreference::HighPerformancePreference);
-
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
 

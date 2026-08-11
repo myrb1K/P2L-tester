@@ -511,6 +511,34 @@ void main() {
       expect(find.text('128'), findsOneWidget);
       expect(find.text('1209'), findsOneWidget);
     });
+
+    testWidgets('počet nad seznamem: celkem, po filtraci „X z Y"',
+        (tester) async {
+      final service = _service((r) async => http.Response(_listBody, 200));
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      // Bez filtru jen celkový počet (2 → skloňování „moduly").
+      expect(find.text('2 moduly'), findsOneWidget);
+
+      // Filtr stavu na Vadná → jen 128, ale celek zůstane vidět.
+      await tester.tap(find.ancestor(
+        of: find.text('Stav'),
+        matching: find.byType(DropdownButtonFormField<String?>),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Vadná').last);
+      await tester.pumpAndSettle();
+      expect(find.text('1 z 2 modulů'), findsOneWidget);
+
+      // Hledání se počítá stejně jako dropdown filtry.
+      await tester.tap(find.byTooltip('Zrušit filtry'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'regál');
+      await tester.pumpAndSettle();
+      expect(find.text('1 z 2 modulů'), findsOneWidget);
+    });
   });
 
   group('UnitDbDetailScreen', () {
