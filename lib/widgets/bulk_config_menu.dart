@@ -9,6 +9,7 @@ import 'apply_template_sheet.dart';
 enum _BulkAction {
   broker,
   wifi,
+  network,
   dispBrightness,
   unitBrightness,
   applyTemplate,
@@ -37,6 +38,8 @@ class BulkConfigMenu extends StatelessWidget {
                 await _showBrokerDialog(context, state);
               case _BulkAction.wifi:
                 await _showWifiDialog(context, state);
+              case _BulkAction.network:
+                await _showNetworkDialog(context, state);
               case _BulkAction.dispBrightness:
                 await _showDispBrightnessDialog(context, state);
               case _BulkAction.unitBrightness:
@@ -67,6 +70,16 @@ class BulkConfigMenu extends StatelessWidget {
                 title: const Text('Změnit WiFi'),
                 subtitle: hasSelection
                     ? Text('${state.selectedCount} vybraných')
+                    : const Text('Nejprve vyberte P2L moduly'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BulkAction.network,
+              child: ListTile(
+                leading: const Icon(Icons.router),
+                title: const Text('Změnit WiFi + broker'),
+                subtitle: hasSelection
+                    ? Text('${state.selectedCount} vybraných · jedním příkazem')
                     : const Text('Nejprve vyberte P2L moduly'),
               ),
             ),
@@ -143,6 +156,31 @@ class BulkConfigMenu extends StatelessWidget {
     );
     if (result != null && context.mounted) {
       await state.sendBulkBroker(result);
+    }
+  }
+
+  /// WiFi + broker jedním příkazem (`set_Config` / UNIT `SET-CONFIG`).
+  Future<void> _showNetworkDialog(BuildContext context, AppState state) async {
+    final selectable = <BrokerProfile>[
+      for (var i = 0; i < state.profiles.length; i++)
+        if (i != state.activeProfileIndex) state.profiles[i],
+    ];
+    final result =
+        await showDialog<({String ssid, String password, BrokerProfile profile})>(
+      context: context,
+      builder: (ctx) => _BulkNetworkDialog(
+        selectableProfiles: selectable,
+        initialSsid: state.lastWifiSsid,
+        initialPassword: state.lastWifiPassword,
+        selectedCount: state.selectedCount,
+      ),
+    );
+    if (result != null && context.mounted) {
+      await state.sendBulkNetworkConfig(
+        ssid: result.ssid,
+        wifiPassword: result.password,
+        profile: result.profile,
+      );
     }
   }
 
@@ -268,73 +306,25 @@ class _BulkBrokerDialog extends StatefulWidget {
 }
 
 class _BulkBrokerDialogState extends State<_BulkBrokerDialog> {
-  late _BrokerMode _mode;
-  BrokerProfile? _selected;
-
-  final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
-  final _brokerCtrl = TextEditingController();
-  final _portCtrl = TextEditingController(text: '1883');
-  final _userCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
-  bool _useSsl = false;
-  bool _obscurePassword = true;
+  final _chooserKey = GlobalKey<_BrokerChooserState>();
+  late bool _newProfileMode;
 
   @override
   void initState() {
     super.initState();
-    // Pokud nemáme žádné použitelné profily (kromě aktuálního), rovnou
-    // otevřeme dialog v režimu "zadat nový".
-    if (widget.selectableProfiles.isEmpty) {
-      _mode = _BrokerMode.newProfile;
-    } else {
-      _mode = _BrokerMode.existing;
-      _selected = widget.selectableProfiles.first;
-    }
-  }
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    _brokerCtrl.dispose();
-    _portCtrl.dispose();
-    _userCtrl.dispose();
-    _passwordCtrl.dispose();
-    super.dispose();
+    // Bez použitelného profilu (kromě aktuálního) startuje chooser rovnou
+    // v režimu „zadat nový" — label tlačítka tomu musí odpovídat.
+    _newProfileMode = widget.selectableProfiles.isEmpty;
   }
 
   Future<void> _submit() async {
-    if (_mode == _BrokerMode.existing) {
-      if (_selected == null) return;
-      Navigator.pop(context, _selected);
-      return;
-    }
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    final profile = BrokerProfile(
-      name: _nameCtrl.text.trim(),
-      broker: _brokerCtrl.text.trim(),
-      port: int.parse(_portCtrl.text.trim()),
-      username: _userCtrl.text,
-      password: _passwordCtrl.text,
-      useSsl: _useSsl,
-    );
-    // Uložíme jako nový profil, ale nepřepínáme aktivní připojení.
-    final state = context.read<AppState>();
-    final messenger = ScaffoldMessenger.of(context);
-    final error = await state.addProfileWithoutActivating(profile);
-    if (!mounted) return;
-    if (error != null) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: Colors.red),
-      );
-      return;
-    }
+    final profile = await _chooserKey.currentState?.resolve();
+    if (profile == null || !mounted) return;
     Navigator.pop(context, profile);
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasSelectable = widget.selectableProfiles.isNotEmpty;
     return AlertDialog(
       title: const Text('Hromadná změna brokera'),
       content: SingleChildScrollView(
@@ -344,28 +334,12 @@ class _BulkBrokerDialogState extends State<_BulkBrokerDialog> {
           children: [
             Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
             const SizedBox(height: 12),
-            if (hasSelectable)
-              SegmentedButton<_BrokerMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: _BrokerMode.existing,
-                    label: Text('Uložený'),
-                    icon: Icon(Icons.list),
-                  ),
-                  ButtonSegment(
-                    value: _BrokerMode.newProfile,
-                    label: Text('Nový'),
-                    icon: Icon(Icons.add),
-                  ),
-                ],
-                selected: {_mode},
-                onSelectionChanged: (s) => setState(() => _mode = s.first),
-              ),
-            const SizedBox(height: 12),
-            if (_mode == _BrokerMode.existing && hasSelectable)
-              _buildExistingPicker()
-            else
-              _buildNewForm(),
+            _BrokerChooser(
+              key: _chooserKey,
+              selectableProfiles: widget.selectableProfiles,
+              autofocusNewForm: true,
+              onModeChanged: (isNew) => setState(() => _newProfileMode = isNew),
+            ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(8),
@@ -396,8 +370,136 @@ class _BulkBrokerDialogState extends State<_BulkBrokerDialog> {
         ),
         FilledButton(
           onPressed: _submit,
-          child: Text(_mode == _BrokerMode.newProfile ? 'Uložit a odeslat' : 'Odeslat'),
+          child: Text(_newProfileMode ? 'Uložit a odeslat' : 'Odeslat'),
         ),
+      ],
+    );
+  }
+}
+
+/// Volba brokera pro hromadné příkazy: buď uložený profil (bez aktuálního),
+/// nebo nový, který se při odeslání zároveň uloží — bez přepnutí aktivního
+/// připojení.
+///
+/// Sdílí ho dialog „Změnit broker" i „Změnit WiFi + broker". Volající si drží
+/// `GlobalKey` a při potvrzení zavolá [_BrokerChooserState.resolve].
+class _BrokerChooser extends StatefulWidget {
+  final List<BrokerProfile> selectableProfiles;
+
+  /// Autofocus na první pole formuláře nového profilu. V dialogu, kde je nad
+  /// brokerem ještě něco jiného (WiFi), se nechává vypnutý.
+  final bool autofocusNewForm;
+
+  /// Přepnutí uložený ↔ nový — volající podle toho mění label tlačítka.
+  final ValueChanged<bool>? onModeChanged;
+
+  const _BrokerChooser({
+    super.key,
+    required this.selectableProfiles,
+    this.autofocusNewForm = false,
+    this.onModeChanged,
+  });
+
+  @override
+  State<_BrokerChooser> createState() => _BrokerChooserState();
+}
+
+class _BrokerChooserState extends State<_BrokerChooser> {
+  late _BrokerMode _mode;
+  BrokerProfile? _selected;
+
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _brokerCtrl = TextEditingController();
+  final _portCtrl = TextEditingController(text: '1883');
+  final _userCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  bool _useSsl = false;
+  bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pokud nemáme žádné použitelné profily (kromě aktuálního), rovnou
+    // otevřeme v režimu "zadat nový".
+    if (widget.selectableProfiles.isEmpty) {
+      _mode = _BrokerMode.newProfile;
+    } else {
+      _mode = _BrokerMode.existing;
+      _selected = widget.selectableProfiles.first;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _brokerCtrl.dispose();
+    _portCtrl.dispose();
+    _userCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Profil k odeslání. V režimu „nový" nejdřív zvaliduje formulář a profil
+  /// uloží (bez aktivace připojení); `null` = nevalidní vstup, nevybraný
+  /// profil nebo chyba uložení (uživatel už vidí důvod).
+  Future<BrokerProfile?> resolve() async {
+    if (_mode == _BrokerMode.existing) return _selected;
+    if (!(_formKey.currentState?.validate() ?? false)) return null;
+    final profile = BrokerProfile(
+      name: _nameCtrl.text.trim(),
+      broker: _brokerCtrl.text.trim(),
+      port: int.parse(_portCtrl.text.trim()),
+      username: _userCtrl.text,
+      password: _passwordCtrl.text,
+      useSsl: _useSsl,
+    );
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final error = await state.addProfileWithoutActivating(profile);
+    if (!mounted) return null;
+    if (error != null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: Colors.red),
+      );
+      return null;
+    }
+    return profile;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasSelectable = widget.selectableProfiles.isNotEmpty;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasSelectable) ...[
+          SegmentedButton<_BrokerMode>(
+            segments: const [
+              ButtonSegment(
+                value: _BrokerMode.existing,
+                label: Text('Uložený'),
+                icon: Icon(Icons.list),
+              ),
+              ButtonSegment(
+                value: _BrokerMode.newProfile,
+                label: Text('Nový'),
+                icon: Icon(Icons.add),
+              ),
+            ],
+            selected: {_mode},
+            onSelectionChanged: (s) {
+              setState(() => _mode = s.first);
+              widget.onModeChanged?.call(_mode == _BrokerMode.newProfile);
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (_mode == _BrokerMode.existing && hasSelectable)
+          _buildExistingPicker()
+        else
+          _buildNewForm(),
       ],
     );
   }
@@ -432,7 +534,7 @@ class _BulkBrokerDialogState extends State<_BulkBrokerDialog> {
               labelText: 'Název profilu',
               border: OutlineInputBorder(),
             ),
-            autofocus: true,
+            autofocus: widget.autofocusNewForm,
             validator: (v) {
               if (v == null || v.trim().isEmpty) return 'Zadejte název';
               if (context.read<AppState>().isProfileNameTaken(v)) {
@@ -497,6 +599,145 @@ class _BulkBrokerDialogState extends State<_BulkBrokerDialog> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// WiFi + broker v jednom příkazu (`set_Config` / UNIT `SET-CONFIG`).
+/// Vrací obojí najednou — odeslání řeší `AppState.sendBulkNetworkConfig`.
+class _BulkNetworkDialog extends StatefulWidget {
+  final List<BrokerProfile> selectableProfiles;
+  final String initialSsid;
+  final String initialPassword;
+  final int selectedCount;
+
+  const _BulkNetworkDialog({
+    required this.selectableProfiles,
+    required this.initialSsid,
+    required this.initialPassword,
+    required this.selectedCount,
+  });
+
+  @override
+  State<_BulkNetworkDialog> createState() => _BulkNetworkDialogState();
+}
+
+class _BulkNetworkDialogState extends State<_BulkNetworkDialog> {
+  final _chooserKey = GlobalKey<_BrokerChooserState>();
+  late final TextEditingController _ssidCtrl;
+  late final TextEditingController _pwdCtrl;
+  bool _obscurePassword = true;
+  late bool _newProfileMode;
+
+  @override
+  void initState() {
+    super.initState();
+    _ssidCtrl = TextEditingController(text: widget.initialSsid);
+    _pwdCtrl = TextEditingController(text: widget.initialPassword);
+    _newProfileMode = widget.selectableProfiles.isEmpty;
+  }
+
+  @override
+  void dispose() {
+    _ssidCtrl.dispose();
+    _pwdCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final ssid = _ssidCtrl.text.trim();
+    if (ssid.isEmpty) return;
+    final profile = await _chooserKey.currentState?.resolve();
+    if (profile == null || !mounted) return;
+    Navigator.pop(
+        context, (ssid: ssid, password: _pwdCtrl.text, profile: profile));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('Hromadná změna WiFi + brokera'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bude odesláno na ${widget.selectedCount} P2L modulech.'),
+            const SizedBox(height: 4),
+            const Text(
+              'Obojí odejde jedním příkazem — jednotka se restartuje až s oběma změnami.',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            Text('WiFi', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _ssidCtrl,
+              decoration: const InputDecoration(
+                labelText: 'SSID',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _pwdCtrl,
+              obscureText: _obscurePassword,
+              decoration: InputDecoration(
+                labelText: 'Heslo',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(_obscurePassword
+                      ? Icons.visibility
+                      : Icons.visibility_off),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text('Broker', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 8),
+            _BrokerChooser(
+              key: _chooserKey,
+              selectableProfiles: widget.selectableProfiles,
+              onModeChanged: (isNew) => setState(() => _newProfileMode = isNew),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withAlpha(30),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'P2L moduly se restartují a odpojí z aktuální WiFi '
+                      'i brokera.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Zrušit'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(_newProfileMode ? 'Uložit a odeslat' : 'Odeslat'),
+        ),
+      ],
     );
   }
 }
