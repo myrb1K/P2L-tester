@@ -1,0 +1,31 @@
+# Konce řádků. Repo se checkoutuje na Windows (core.autocrlf=true), ale část
+# souborů putuje do Linuxového kontejneru, kde CRLF vadí.
+#
+# Konkrétně: Dockerfile má víceřádkové `RUN … \` a shell by z CRLF dostal `\r`
+# na konci každého řádku ("$'\r': command not found"). Stejně tak skripty, které
+# by se pouštěly uvnitř image. nginx sice CRLF snese, ale není důvod na to
+# spoléhat.
+
+# Default: git ať si typ souboru odvodí sám.
+* text=auto
+
+# Musí zůstat LF i v pracovní kopii na Windows.
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.conf          text eol=lf
+*.sh            text eol=lf
+.dockerignore   text eol=lf
+
+# Naopak vždy CRLF: Windows PowerShell 5.1 je na to zvyklý a skripty se
+# nespouští jinde.
+*.ps1           text eol=crlf
+
+# Binárky, ať do nich git nesahá.
+*.png           binary
+*.jpg           binary
+*.ico           binary
+*.ttf           binary
+*.otf           binary
+*.apk           binary
+*.zip           binary
+*.bin           binary

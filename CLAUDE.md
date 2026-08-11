@@ -614,15 +614,69 @@ Server v `server/` zůstává beze změny — běží nasazený v Dockeru (viz *
 
 ## Deployment topology
 
-Aplikace má 3 nasazovací scénáře:
+**Produkce:** backend běží v Dockeru na `p2ltester.smartbox.smartci4.com` (image přes registry
++ Portainer, MariaDB). Vnější reverzní proxy dělá TLS a posílá **celou doménu** na kontejner —
+`/api/health` odpovídá, `/` vrací 404 z Expressu, dokud se nenasadí web.
 
-1. **Cloud server + mobil na mobilních datech** — Nginx servíruje Flutter web build, `/ws` proxyuje na Mosquitto (TCP 1883 / WS 9001). Zákazník otevře `https://app.domena.cz`.
-2. **On-premise server + mobil na Wi-Fi** — identické řešení lokálně, HTTPS volitelné (self-signed).
-3. **Notebook jako dev server** — `flutter run -d web-server --web-port 8080 --web-hostname 0.0.0.0`, mobil i notebook na stejné Wi-Fi, firewall musí povolit port 8080.
+**Webová varianta jde jako druhý kontejner vedle API** ([Dockerfile.web](Dockerfile.web),
+[docker/nginx-web.conf](docker/nginx-web.conf), služba `web` v obou compose). Cílová
+topologie jsou **vlastní subdomény** (rozhodnuto 2026-08-11), routing dělá Traefik:
 
-**Pro web verzi:** broker musí mít povolený **WebSocket listener** (typicky port 9001 nebo 8083). Aplikace detekuje platformu a volí WS klienta místo TCP.
+```
+Browser ──HTTPS──> Traefik ──┬── p2lweb.domena.cz ──> web (nginx, statika + SPA fallback)
+                             └── p2lapi.domena.cz ──> api (Express :3001)
+Browser ──WSS───> mqtt.smartbox.smartci4.com:443/mqtt  (broker, mimo tuhle cestu)
+```
 
-Detail v [README.md §Typy nasazení](README.md).
+- **Je to cross-origin, ale same-site** — a na tom rozdílu stojí login. `sameSite=lax` se
+  počítá podle **registrovatelné domény**, takže mezi `p2lweb.…` a `p2lapi.…` cookie projde;
+  kdyby web dostal jinou registrovatelnou doménu, přestane login fungovat a cookie by musela
+  na `SameSite=None` (změna v [server/routes/auth.js](server/routes/auth.js)).
+- **`CORS_ORIGIN` je při subdoménách povinné** (`https://p2lweb.…`) — bez něj prohlížeč
+  zahodí každou odpověď a vypadá to jako rozbitá appka, ne jako chybějící konfigurace.
+- **`AUTH_API_BASE` se zadává jednou a plní dvě místa** — Dart konstantu (kam appka volá)
+  a `connect-src` v CSP (kam prohlížeč volat smí). Origin pro CSP odvozuje `Dockerfile.web`
+  ze stejného build-argu, aby se ta dvě místa nemohla rozejít.
+- **Nativní klienti mají adresu API zabudovanou v buildu** (`auth_api.dart`, dnes
+  `p2ltester.smartbox.smartci4.com`). Přestěhování API na `p2lapi.…` rozbije rozdané
+  EXE/APK — buď nechat starou adresu jako druhý router na `api`, nebo změnit konstantu
+  a rozdistribuovat nové buildy.
+- **`TRUST_PROXY` zůstává `1`**, protože Traefik jde na `api` přímo (jeden hop). Na `2`
+  se mění jen tehdy, kdyby `/api/` přeposílal nginx z web kontejneru.
+- Config nginxu je stejný pro všechny varianty routingu; blok `location /api/` se uplatní
+  jen při nasazení na jedné doméně.
+- **`/ws` proxy na Mosquitto nevzniká** (starší návrh v PRD ji měl) — broker má vlastní WSS na
+  443 s platným certem, appka jde přímo na něj.
+- **`TRUST_PROXY` musí sedět s routingem a měnit se ve stejném kroku.** `req.ip` z něj živí
+  rate limit na `/api/login`: příliš nízká hodnota sloučí všechny web klienty do jedné IP
+  (jeden uživatel s překlepy zamkne login všem), příliš vysoká jde obejít podvrženou hlavičkou
+  `X-Forwarded-For`. Čte se z env ([server/server.js](server/server.js), `trustProxyFromEnv`).
+- **API base se zabuduje do buildu** (`--build-arg AUTH_API_BASE`) — za běhu to nejde přepnout.
+  Podcesta místo rootu potřebuje `--build-arg BASE_HREF=/…/`.
+- **Statika jede na `Cache-Control: no-cache`** (revalidace, ne „nestahuj") — Flutter nedává do
+  názvů souborů hash, takže dlouhá cache by po nasazení servírovala starou appku.
+- **Bez HTTPS web nemá smysl:** `secure` cookie po plain HTTP prohlížeč zahodí (login neprojde)
+  a `wss://` broker by ze stránky na HTTP neprošel kvůli mixed contentu. Nativních klientů se to
+  netýká (Bearer token). Nová subdoména taky potřebuje **certifikát** (u wildcard certu netřeba).
+- **Broker musí mít WSS**, ne jen WS — `ws://` z HTTPS stránky prohlížeč zablokuje bez ohledu
+  na CSP.
+- **CanvasKit se přibaluje do buildu** (`--no-web-resources-cdn`), takže appka naběhne i na síti
+  bez internetu a CSP nemusí povolovat gstatic.com. Cena je ~25 MB v image.
+- **Web nemá lokální SQLite** (`local_unit_db_stub.dart`) → offline evidence ani frontu změn
+  nemá, čte a píše přímo na server. Offline práce zůstává výsadou EXE/APK.
+
+Postup nasazení a pasti: [server/README.md §Webová varianta](server/README.md).
+Topologie a akceptační kritéria M5: [PRD-WEB/05-deployment.md](PRD-WEB/05-deployment.md).
+
+**Dev scénáře:** `flutter run -d chrome --dart-define=AUTH_API_BASE=http://localhost:3001/api`;
+pro test z telefonu `flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8080` (firewall
+musí port povolit).
+
+**Past — `--dart-define` s hodnotou začínající `/` v Git Bashi:** MSYS ji přepíše na Windows
+cestu, a protože profil má mezeru, build spadne na `'C:\Users\Radek' is not recognized as an
+internal or external command`. Vypadá to jako rozbitý Flutter, ale stačí spustit build
+**v PowerShellu** (nebo předřadit `MSYS_NO_PATHCONV=1`). V Linuxovém build stage
+`Dockerfile.web` problém neexistuje.
 
 ---
 

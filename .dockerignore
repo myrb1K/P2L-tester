@@ -1,0 +1,45 @@
+# Co se nemá dostat do build kontextu pro Dockerfile.web (web varianta).
+#
+# Backend má vlastní kontext a vlastní ignore soubor (server/.dockerignore) —
+# tenhle platí pro build z rootu repa, tedy pro Flutter web image.
+#
+# Smysl je hlavně velikost: bez tohohle by se do daemonu posílalo i `build/`
+# (~37 MB web + Windows Release), `.git`, `server/node_modules` s native moduly
+# pro Windows a výstupy Gradle. Stage `build` v Dockerfile.web kopíruje jen
+# pubspec, lib, web, assets a docs.
+
+# Git a nástroje
+.git/
+.gitignore
+.claude/
+.cursorignore
+.vscode/
+.idea/
+
+# Build výstupy a cache
+build/
+dist/
+coverage/
+.dart_tool/
+.flutter-plugins-dependencies
+android/build/
+android/.gradle/
+**/ephemeral/
+
+# Nativní platformy — web build je nepotřebuje
+android/
+ios/
+linux/
+macos/
+windows/
+
+# Backend (vlastní image), testy, dev nástroje
+server/
+test/
+tools/
+.dev/
+
+# Lokální konfigurace a logy
+*.log
+.env
+.env.docker

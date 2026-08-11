@@ -1,6 +1,26 @@
 # 01 — PRD: P2L Tester Web
 
-> **Status:** Draft v0.8 · **Datum:** 2026-05-22 · **Autor:** Radek Brym · **Branch:** `WEB`
+> **Status:** Draft v0.9 · **Datum:** 2026-08-11 · **Autor:** Radek Brym · **Branch:** `WEB` (mergnuto do `main`)
+>
+> **Změny v v0.9:**
+> - **M5 připraveno v repu, čeká na nasazení.** Topologie se za tři měsíce změnila: backend
+>   mezitím dostal Docker (v2.82) a od v2.85 běží nasazený na `p2ltester.smartbox.smartci4.com`.
+>   Web se proto nasazuje jako **druhý kontejner** vedle API ([Dockerfile.web](../Dockerfile.web)
+>   + [docker/nginx-web.conf](../docker/nginx-web.conf)), ne jako statika v `/var/www` se
+>   systemd službou. Nginx v kontejneru servíruje statiku a `/api/*` přeposílá na `api:3001`,
+>   takže web má **stejný origin jako API** → cookie session i CORS bez konfigurace.
+>   `/ws` proxy z původního návrhu **nevzniká** — broker má vlastní WSS na 443 s platným
+>   certem. Přepsané [05-deployment.md](05-deployment.md) v0.4.
+> - **Doména (§9.3) rozhodnuta: oddělené subdomény 3. řádu** — web `p2lweb.<doména>`, API
+>   `p2lapi.<doména>`, routing dvěma routery v Traefiku. Tím je to **cross-origin**, což znamená
+>   tři věci navíc: absolutní `AUTH_API_BASE` v buildu, povinné `CORS_ORIGIN` na API, a API
+>   origin v CSP `connect-src` (odvozuje ho build ze stejného argumentu). Login přesto projde
+>   se stávající `sameSite=lax` cookie, protože subdomény jedné registrovatelné domény jsou
+>   **same-site**. Pozor na rozdané EXE/APK — ty mají adresu API zabudovanou v buildu.
+> - **Open question §9.4 (Mosquitto auth) dořešená** — viz níže.
+> - **Zbývá na serveru:** DNS + cert, dva routery v Traefiku, `CORS_ORIGIN`, build webu
+>   s adresou API. Postup a pasti v
+>   [server/README.md §Webová varianta](../server/README.md#webová-varianta-flutter-web).
 >
 > **Změny v v0.8:**
 > - **M4.5 ✅ dokončeno 2026-05-22** — Admin UI ve Flutter pro správu uživatelů z aplikace (místo SSH/CLI). Strukturální fix: `AuthGate` přesunut nad `MaterialApp.Navigator` přes `builder:` parametr — bez toho `_AuthScope` InheritedWidget nebyl viditelný pro routy pushnuté přes `Navigator.push` (Settings, AdminUsersScreen). Sdílená user-management knihovna `server/db/users.js` (DRY guardy mezi admin endpointy a CLI skripty). Skip splash na webu (LoginScreen už má branding). Rate limit zvolněn z 5 na 50/IP/15min. Všech 7 akceptačních kritérií [02-auth-bezpecnost.md §9.2](02-auth-bezpecnost.md#92-m45-admin-ui--dokon%C4%8Deno-2026-05-22) odškrtnutých.
@@ -230,11 +250,15 @@ Má `ci4gui.smartbox.smartci4.com` REST API / JWT endpoint, který by P2L Tester
 
 Produkční broker `mqtt.smartbox.smartci4.com:443` má WSS endpoint na path `/mqtt` s validním certem. Profil `SM-SMARTBOX-WSS` (SSL/TLS + WebSocket) připojení potvrdil, discovery jednotek funguje.
 
-### 9.3 Doména pro produkční nasazení
+### 9.3 Doména pro produkční nasazení — ✅ ROZHODNUTO (2026-08-11)
 
-- Subdoména `p2l.smartbox.smartci4.com`?
-- Path pod `ci4gui` (`ci4gui.../p2l-tester`)?
-- Jiné?
+**Oddělené subdomény 3. řádu:** web na `p2lweb.<doména>`, API na `p2lapi.<doména>`,
+každá vlastním routerem v Traefiku. Dopady cross-origin nasazení a checklist jsou
+v [05-deployment.md §1](05-deployment.md) a [server/README.md](../server/README.md).
+
+Otevřený zbytek: co se stávající `p2ltester.smartbox.smartci4.com`. Rozdané EXE/APK ji
+mají zabudovanou v buildu, takže buď zůstane jako druhý router na `api`, nebo se změní
+konstanta v `auth_api.dart` a rozdistribuují se nové buildy.
 
 ### 9.4 Mosquitto user/password vs. anonymous
 
@@ -256,7 +280,7 @@ Má broker zapnutý `allow_anonymous false`? Pokud ano, jsou MQTT credentials pe
 | M3 | Responzivita smoke test | ✅ | Pixel 7 + iPad Mini OK bez úprav; iPhone SE (375px) skipnuto (relevance) |
 | **M4** | Login (Varianta A) — Node backend + SQLite + LoginScreen + session + CLI správa uživatelů | ✅ | **Kód hotový a lokálně ověřený 2026-05-22** (commits `93874d0`, `6a14043`, `a747ea9`). Backend v `server/`, Flutter v `lib/services/auth_*` + `lib/screens/{auth_gate,login_screen}.dart`, kIsWeb guard v `main.dart`. Initial admin `radek` seed z env funguje, CLI skripty fungují vč. last-admin guardu. Smoke test: login → /api/me → logout → MQTT WSS discovery dál funguje. Detail v [02-auth-bezpecnost.md](02-auth-bezpecnost.md) |
 | **M4.5** | Admin UI ve Flutteru — `AdminUsersScreen` + admin endpointy v backendu | ✅ | **Dokončeno 2026-05-22.** Admin endpointy [server/routes/admin.js](../server/routes/admin.js), [lib/screens/admin_users_screen.dart](../lib/screens/admin_users_screen.dart), sdílená lib [server/db/users.js](../server/db/users.js). Strukturální fix: AuthGate přes MaterialApp.builder pro route-isolation InheritedWidgetu. |
-| **M5** | Produkční deploy na firemní server (Nginx, HTTPS, systemd) | čeká M4 | Včetně WS endpointu na brokeru ([§9.4](#9-open-questions)) |
+| **M5** | Produkční deploy na firemní server | **v repu, čeká nasazení** | Ne systemd ani `/var/www` — druhý **kontejner** vedle API: [Dockerfile.web](../Dockerfile.web) (Flutter build → nginx) + [docker/nginx-web.conf](../docker/nginx-web.conf) (statika + `/api/` proxy na `api:3001`), služba `web` v obou compose. Same-origin → cookie session bez CORS. `/ws` proxy netřeba (broker má vlastní WSS). Na serveru zbývá: přepnout vnější proxy z API na `web` + `TRUST_PROXY=2`. Detail [05-deployment.md](05-deployment.md) §1 a §8 |
 
 ---
 

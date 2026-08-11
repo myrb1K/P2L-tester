@@ -64,8 +64,18 @@ services:
       DB_USER: ${DB_USER:-p2l}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD musí být nastavené (viz .env.docker)}
       DB_CONNECTION_LIMIT: ${DB_CONNECTION_LIMIT:-10}
-      # Jen když Flutter web build servíruje někdo jiný než tenhle server.
+      # POVINNÉ, když web běží na jiné adrese než API (p2lweb.… vs p2lapi.…):
+      # bez toho prohlížeč zahodí každou odpověď a appka vypadá rozbitě.
+      # Prázdné jen při nasazení, kde web i API sdílí origin.
       CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # Počet reverzních proxy před API — určuje, jakou IP vidí rate limit na
+      # /api/login. Musí sedět s tím, jak routuje Traefik:
+      #   - Traefik jde na `api` přímo (vlastní subdoména / path routing) → 1
+      #   - Traefik posílá vše na `web` a /api/ přeposílá nginx → 2
+      # Špatná hodnota není kosmetika: nízká sloučí web klienty do jedné IP
+      # (jeden uživatel s překlepy zamkne login všem), vysoká jde obejít
+      # podvrženou hlavičkou X-Forwarded-For. Viz README §Zapojení do Traefiku.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       # Použije se jen při prvním startu nad prázdnou tabulkou users; potom se
       # ignoruje. Po prvním přihlášení heslo změnit.
       INITIAL_ADMIN_USER: ${INITIAL_ADMIN_USER:-}
@@ -78,6 +88,34 @@ services:
       # Při DB_DRIVER=mariadb je tu jen server.pid; volume se drží proto, aby
       # přepnutí na sqlite nebo přiložení dalších dat nic nepřepsalo.
       - api-data:/data
+
+  # Webová varianta appky: nginx se statikou z `flutter build web`, který
+  # všechno pod /api/ přeposílá na `api` výše (viz docker/nginx-web.conf).
+  # Web a API tak mají stejný origin → session cookie funguje a CORS_ORIGIN
+  # zůstává prázdné.
+  #
+  # Routing před kontejnery dělá Traefik. Cílový stav: vlastní subdomény
+  # (`p2lweb.…` sem, `p2lapi.…` na `api`) → appka musí být sestavená s
+  # absolutní adresou API a `api` musí mít vyplněné CORS_ORIGIN.
+  # Config nginxu je stejný pro všechny varianty routingu; blok `location /api/`
+  # se použije jen tehdy, když web a API sdílí adresu.
+  # Viz README §Dvě topologie a §Zapojení do Traefiku.
+  web:
+    build:
+      # Kontext je root repa (Flutter zdroje), ne server/.
+      context: ..
+      dockerfile: Dockerfile.web
+    image: ${WEB_IMAGE:-p2l-tester-web:latest}
+    restart: unless-stopped
+    # Jen pořadí startu. Na dostupnosti API nginx nezávisí — jméno `api` si
+    # přeloží až za běhu (resolver v configu), takže přežije i restart backendu.
+    depends_on:
+      - api
+    ports:
+      # Default loopback: navenek to vystavuje reverzní proxy s TLS. Pro přímý
+      # přístup z LAN (bez proxy) přepiš WEB_BIND na 0.0.0.0 — ale pak jde
+      # session cookie po HTTP, viz README.
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
 
 volumes:
   db-data:
