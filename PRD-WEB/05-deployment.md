@@ -1,171 +1,157 @@
 # 05 — Deployment topologie
 
-> **Status:** Draft v0.3 · **Datum:** 2026-05-22 · **Parent:** [01-PRD.md](01-PRD.md)
+> **Status:** v0.4 · **Datum:** 2026-08-11 · **Parent:** [01-PRD.md](01-PRD.md)
 >
-> **Update v0.3:** Vercel jako mezikrok vyřazen — nasazení rovnou na firemní server vedle [`ci4gui.smartbox.smartci4.com`](https://ci4gui.smartbox.smartci4.com). Důvody: jediný vývojář (Radek), lokální dev (`flutter run -d chrome` + lokální Mosquitto) pokrývá většinu iterací, mobilní testování přes `flutter run -d web-server --web-hostname 0.0.0.0`, Vercel build pipeline pro Flutter je netriviální, Hobby plán šedá zóna pro komerční use, auth backend by se psal dvakrát (Vercel Functions vs. Node).
-
-Jeden cíl: **firemní server vedle `ci4gui.smartbox.smartci4.com`**.
+> **Update v0.4 (M5):** Topologie z v0.3 (statika v `/var/www`, systemd, Nginx na hostu,
+> `/ws` proxy na Mosquitto) je **nahrazená skutečností** — backend od v2.82 běží v Dockeru
+> a od v2.85 je nasazený na `p2ltester.smartbox.smartci4.com` (image přes registry +
+> Portainer). Web se proto nasazuje jako **druhý kontejner** vedle API, ne jako soubory na
+> hostu; `/ws` proxy vůbec nevzniká, protože broker má vlastní WSS endpoint s platným
+> certem. Routing dělá **Traefik**, web a API dostanou **vlastní subdomény 3. řádu**
+> (`p2lweb.…` / `p2lapi.…`) — tedy cross-origin, viz §1. Mosquitto anonymní (§9.4).
+>
+> **Update v0.3:** Vercel jako mezikrok vyřazen — nasazení rovnou na firemní server. Důvody:
+> jediný vývojář, lokální dev pokrývá iterace, Vercel build pipeline pro Flutter je netriviální,
+> Hobby plán šedá zóna pro komerční use, auth backend by se psal dvakrát.
 
 ---
 
-## 1. Cílová topologie
+## 1. Cílová topologie (v0.4 — Docker)
+
+Zvolená varianta (2026-08-11): **web a API dostanou vlastní subdomény**, routing dělá
+Traefik dvěma nezávislými routery.
 
 ```
-Browser ──HTTPS──> Nginx na firemním serveru
-                    ├── /              → Flutter web static (/var/www/p2l-tester/)
-                    ├── /api/*         → Node auth backend (localhost:3001)
-                    │                       └── SQLite/Postgres
-                    └── /ws            → Mosquitto WS (localhost:9001)
-                                            (TLS terminace v Nginx)
+Browser ──HTTPS──> Traefik ──┬── p2lweb.domena.cz ──> `web`  (nginx + Flutter web build)
+                             │                          └── / statika, SPA fallback na index.html
+                             └── p2lapi.domena.cz ──> `api`  (Express :3001)
+                                                        └── MariaDB (kontejner / firemní)
+
+Browser ──WSS──> mqtt.smartbox.smartci4.com:443/mqtt   (broker, mimo tuhle topologii)
 ```
 
-### Varianty hostingu
+MQTT přes tuhle cestu neteče vůbec — appka jde na broker přímo.
 
-| Varianta | URL | Pro | Proti |
-|----------|-----|-----|-------|
-| Subdoména | `p2l.smartbox.smartci4.com` | Čistý oddělený scope, vlastní cert | Nutný DNS + cert per subdoména |
-| Path pod ci4gui | `ci4gui.smartbox.smartci4.com/p2l-tester` | Sdílí cert a doménu, jeden login (pokud auth integrace) | `--base-href` build, sdílený CSP |
-| Vlastní doména | `p2l-tester.smartbox.cz` | Nezávislé | Další doména k údržbě |
+### Co z oddělených domén plyne
 
-→ open question — viz [01-PRD.md §9.3](01-PRD.md#9-open-questions).
+| Oblast | Dopad |
+|---|---|
+| **Cookie** | Cross-origin, ale **same-site** (společná registrovatelná doména), takže `sameSite=lax` stačí a login projde. Jiná registrovatelná doména pro web by si vynutila `SameSite=None` — změna v [server/routes/auth.js](../server/routes/auth.js). |
+| **CORS** | `CORS_ORIGIN=https://p2lweb.domena.cz` na API je **povinné**. Server to umí od M4 (`cors({origin, credentials: true})`), jen se to musí vyplnit. |
+| **Build webu** | `--build-arg AUTH_API_BASE=https://p2lapi.domena.cz/api` — absolutní URL, ne `/api`. |
+| **CSP** | `connect-src` musí obsahovat API origin, jinak prohlížeč zabije každé volání. Odvozuje ho build ze stejného build-argu → jeden zdroj pravdy. |
+| **`TRUST_PROXY`** | Zůstává **1** — Traefik jde na `api` přímo, jeden hop. |
+| **Nativní klienti** | Mají adresu API v buildu (`auth_api.dart`). Přestěhování API rozbije rozdané EXE/APK, dokud stará adresa nezůstane jako druhý router na `api`, nebo se nerozdistribuují nové buildy. |
+| **Certifikát** | Nová subdoména ho potřebuje (u wildcardu netřeba). |
 
-### Nginx config skica
+Config nginxu je pro všechny varianty routingu stejný; blok `location /api/` se uplatní jen
+tehdy, kdyby web a API sdílely adresu (pak by ale platilo `TRUST_PROXY=2`, protože přibude hop).
 
-```nginx
-server {
-  listen 443 ssl http2;
-  server_name p2l.smartbox.smartci4.com;
+### Co se změnilo proti v0.3 a proč
 
-  ssl_certificate /etc/letsencrypt/live/p2l.smartbox.smartci4.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/p2l.smartbox.smartci4.com/privkey.pem;
+| v0.3 (návrh) | v0.4 (skutečnost) | Proč |
+|---|---|---|
+| Statika v `/var/www/p2l-tester` | `docker/nginx-web.conf` v image | Server je v Dockeru; nasazení = pull image, ne rsync |
+| Nginx na hostu routuje `/`, `/api`, `/ws` | Vnější proxy → `web`, ten sám routuje `/` a `/api/` | Do vnější proxy stačí jeden zásah (přepnout cíl), path pravidla jsou v repu |
+| systemd service pro backend | `restart: unless-stopped` v compose | Řeší Docker |
+| `/ws` proxy na Mosquitto :9001 | **nevzniká** | Broker má vlastní WSS na 443 s platným certem (ověřeno v M2) |
+| Let's Encrypt per subdoména | Řeší existující proxy | Doména už běží s HTTPS |
 
-  # Flutter web static
-  root /var/www/p2l-tester;
-  index index.html;
-  location / {
-    try_files $uri $uri/ /index.html;
-  }
+### Soubory
 
-  # Auth backend
-  location /api/ {
-    proxy_pass http://127.0.0.1:3001;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  }
-
-  # MQTT WebSocket proxy
-  location /ws {
-    proxy_pass http://127.0.0.1:9001;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "Upgrade";
-    proxy_set_header Host $host;
-    proxy_read_timeout 86400;
-  }
-
-  # CSP
-  add_header Content-Security-Policy "default-src 'self'; connect-src 'self' wss://p2l.smartbox.smartci4.com; img-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;
-}
-```
-
-### Backend (Node) jako systemd service
-
-```ini
-# /etc/systemd/system/p2l-tester-auth.service
-[Unit]
-Description=P2L Tester Auth Backend
-After=network.target
-
-[Service]
-Type=simple
-User=p2l-tester
-WorkingDirectory=/opt/p2l-tester-auth
-ExecStart=/usr/bin/node server.js
-Restart=on-failure
-Environment=NODE_ENV=production
-Environment=PORT=3001
-Environment=JWT_SECRET=<from /etc/p2l-tester/secrets.env>
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### MQTT broker (Mosquitto) na stejném serveru
-
-Pokud broker neběží zatím na tomto stroji, je k diskusi, jestli:
-- **A:** přesunout broker sem (jeden box, méně sítě),
-- **B:** nechat broker kde je a Nginx jen WS proxy přes internet → broker (overhead).
-
-→ otázka pro IT / kolegu.
+| Co | Kde |
+|---|---|
+| Build image (Flutter → nginx) | [Dockerfile.web](../Dockerfile.web) (kontext = root repa) |
+| nginx config (SPA fallback, `/api/` proxy, CSP, cache) | [docker/nginx-web.conf](../docker/nginx-web.conf) |
+| Služba `web` v compose | [server/docker-compose.yml](../server/docker-compose.yml), [server/docker-compose.external-db.yml](../server/docker-compose.external-db.yml) |
+| Postup nasazení a pasti | [server/README.md §Webová varianta](../server/README.md#webová-varianta-flutter-web) |
 
 ---
 
 ## 2. Lokální dev workflow
 
-Bez Vercel mezikroku zůstává pro vývoj **jen lokální prostředí**:
-
 | Účel | Příkaz |
 |------|--------|
-| Desktop iterace | `flutter run -d chrome` |
+| Desktop iterace | `flutter run -d chrome --dart-define=AUTH_API_BASE=http://localhost:3001/api` |
 | Mobilní real-device test (telefon na stejné WiFi) | `flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8080` → na telefonu `http://<IP-počítače>:8080` |
 | Lokální broker | `& "C:\Program Files\mosquitto\mosquitto.exe" -c .dev\mosquitto.conf -v` (viz [.dev/README.md](../.dev/README.md)) |
-| Build produkce | `flutter build web --release --base-href /` |
+| Produkční build ručně | `flutter build web --release --no-web-resources-cdn --dart-define=AUTH_API_BASE=/api` |
 
-Pro responzivita testing dostačuje **Chrome DevTools mobile emulation** (`Ctrl+Shift+M`).
+**Past (Git Bash):** `--dart-define=AUTH_API_BASE=/api` v Git Bashi selže na
+`'C:\Users\Radek' is not recognized` — MSYS přepíše hodnotu začínající `/` na Windows
+cestu (a ta má v profilu mezeru). Spouštět **v PowerShellu**, nebo předřadit
+`MSYS_NO_PATHCONV=1`. V Linuxovém build stage (`Dockerfile.web`) problém neexistuje.
+
+Pro responzivita testing dostačuje Chrome DevTools mobile emulation (`Ctrl+Shift+M`).
 
 ---
 
-## 3. CI/CD (M5)
+## 3. CI/CD
 
-GitHub Actions job:
-- Build `flutter build web` v container.
-- `rsync` výsledek na server přes SSH (deploy key v GH Secrets).
-- `systemctl reload nginx`.
-
-Pro MVP fáze 5 stačí ruční deploy přes SSH; CI/CD doladíme až později.
+Zatím ruční: `docker build -f Dockerfile.web` → push do registry → pull v Portaineru
+(stejný postup, jakým se nasazuje backend). GitHub Actions job by dělal totéž — build
+image a push; nasazení zůstane na Portaineru.
 
 ---
 
 ## 4. Versioning
 
 - Verze v UI: stále z `appVersion` v [main.dart](../lib/main.dart).
-- Web verze následuje stejné číslování jako native (žádné `2.65-web`, jen `2.65`).
-- Pravidlo "neměnit `appVersion` automaticky" zůstává platné.
+- Web verze následuje stejné číslování jako native (žádné `2.87-web`, jen `2.87`).
+- Tag image podle `appVersion` (`p2l-tester-web:2.87`), ať jde poznat, co na serveru běží.
+- Pravidlo „neměnit `appVersion` automaticky" zůstává platné.
 
 ---
 
-## 5. Rollback strategie
+## 5. Rollback
 
-- Před deploy: `cp -r /var/www/p2l-tester /var/www/p2l-tester.bak`.
-- Při potížích: `mv /var/www/p2l-tester.bak /var/www/p2l-tester && systemctl reload nginx`.
-- DB migrations (až budou): vždy backward-compatible.
-
----
-
-## 6. Monitoring (nice-to-have)
-
-- Nginx access log → standardní.
-- Backend (Node) → `pm2` logs nebo systemd journal.
-- MQTT broker → Mosquitto log.
-- Uptime: jednoduchý health endpoint `/api/health` + externí pinger.
+Předchozí tag image zůstává v registry → rollback je pull starého tagu a `up -d web`
+(proto tagovat verzí, ne jen `latest`). Databáze se rollbackem webu netýká — statika
+žádný stav nemá.
 
 ---
 
-## 7. Open questions
+## 6. Monitoring
 
-- [9.3 v 01-PRD.md — doména](01-PRD.md#9-open-questions)
-- [9.4 v 01-PRD.md — Mosquitto auth](01-PRD.md#9-open-questions)
-- Bude broker na stejném serveru jako web, nebo zůstane samostatně? (viz §1 výše)
+- `web` kontejner: `HEALTHCHECK` na `/healthz` (obsluhuje nginx sám, takže nezávisí na API).
+- `api` kontejner: `HEALTHCHECK` na `/api/health` (vrací i typ DB driveru).
+- Logy: `docker compose logs -f web` / `… api`.
 
 ---
 
-## 8. Akceptační kritéria M5 (firemní server)
+## 7. Open questions — dořešené
 
-- [ ] Nginx servíruje Flutter web static na zvolené doméně.
-- [ ] HTTPS s validním certifikátem (Let's Encrypt).
-- [ ] `/api/*` proxy na Node backend funguje.
-- [ ] `/ws` proxy na Mosquitto WS funguje.
-- [ ] CSP header je nastavený a aplikace neporušuje policy.
-- [ ] Systemd service auto-startuje backend po restartu serveru.
-- [ ] Rollback skript otestovaný.
+- **§9.3 doména** → **oddělené subdomény 3. řádu**: web na `p2lweb.<doména>`, API na
+  `p2lapi.<doména>`, obojí z rootu (`/`). Podcesta by šla přes `--build-arg BASE_HREF=…`,
+  ale není důvod. Otevřené zůstává, co se stávající `p2ltester.smartbox.smartci4.com`:
+  buď zůstane jako alias na `api` (rozdané EXE/APK pak jedou dál), nebo se musí změnit
+  konstanta v `auth_api.dart` a rozdistribuovat nové buildy.
+- **§9.4 Mosquitto auth** → broker jede anonymně, credentials se v profilu nevyplňují
+  (potvrzeno M2 proti produkčnímu brokeru).
+- **Broker na stejném serveru?** → ne, zůstává samostatně. WSS na 443 s platným certem,
+  takže proxy pro něj není potřeba.
+
+---
+
+## 8. Akceptační kritéria M5
+
+Odškrtnuté položky jsou ověřené lokálním buildem image a spuštěným kontejnerem
+(`docker build -f Dockerfile.web` + `docker run`), zbytek **čeká na nasazení**:
+
+- [x] Statiku servíruje nginx v `web` kontejneru, SPA fallback na `index.html`.
+- [x] `/api/*` proxy na `api:3001` pro případ nasazení na jedné doméně (přes `resolver`,
+      takže restart API nginx nepoloží).
+- [x] Bezpečnostní hlavičky: CSP, `nosniff`, `X-Frame-Options`, `Referrer-Policy`.
+- [x] CSP `connect-src` se plní z `AUTH_API_BASE`, takže cross-origin volání API projde.
+- [x] Cache: `no-cache` na statiku (Flutter nedává hash do názvů souborů).
+- [x] Restart po rebootu serveru: `restart: unless-stopped`.
+- [x] Rollback: předchozí tag image v registry.
+- [ ] DNS + certifikát pro `p2lweb.…` (a `p2lapi.…`, pokud je nová).
+- [ ] Routery v Traefiku: `p2lweb.…` → `web:80`, `p2lapi.…` → `api:3001`.
+- [ ] Web sestavený s `--build-arg AUTH_API_BASE=https://p2lapi.…/api`.
+- [ ] `CORS_ORIGIN=https://p2lweb.…` vyplněné na API a kontejner restartovaný.
+- [ ] `TRUST_PROXY` odpovídá routingu (při přímém routeru na API zůstává `1`).
+- [ ] Rozhodnuto, co se stávající adresou API kvůli rozdaným EXE/APK (alias vs. nové buildy).
+- [ ] Login v prohlížeči projde, refresh neodhlásí (tj. cookie prošla cross-origin).
+- [ ] Připojení k brokeru přes WSS a discovery jednotek funguje z webu.
+- [ ] Konzole prohlížeče bez CSP a CORS hlášek.

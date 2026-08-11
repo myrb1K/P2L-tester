@@ -110,6 +110,150 @@ Detaily buildu: `better-sqlite3` a `bcrypt` jsou native moduly a kompilují se
 v build stage ([Dockerfile](Dockerfile)), takže výsledný image nenese `python3`/`g++`.
 Obě stage stojí na `node:22-bookworm-slim`; při změně base image je nutný rebuild bez cache.
 
+## Webová varianta (Flutter web)
+
+Appka v prohlížeči je **stejný Flutter kód** jako EXE/APK, jen zabalený do druhého
+image: [Dockerfile.web](../Dockerfile.web) (build kontext = root repa) postaví
+`flutter build web` a výsledek předá nginxu s [docker/nginx-web.conf](../docker/nginx-web.conf).
+
+Broker se řeší mimo — appka jde na `wss://` adresu z profilu, přes tenhle nginx
+nic MQTT neteče.
+
+### Dvě topologie
+
+Podle toho, jestli web a API sdílí adresu, se liší tři nastavení. Image je stejná,
+mění se jen build-arg a env na serveru.
+
+**A — vlastní subdomény** (`p2lweb.domena.cz` + `p2lapi.domena.cz`) — zvolená varianta:
+
+```
+Browser ──HTTPS──> Traefik ──┬── p2lweb.domena.cz ──> web (nginx, statika)
+                             └── p2lapi.domena.cz ──> api (Express :3001)
+```
+
+| Co | Hodnota |
+|---|---|
+| Build webu | `--build-arg AUTH_API_BASE=https://p2lapi.domena.cz/api` (skript: `-ApiBase …`) |
+| `CORS_ORIGIN` na API | `https://p2lweb.domena.cz` — **povinné**, jinak prohlížeč odmítne každou odpověď |
+| `TRUST_PROXY` | `1` (Traefik → api přímo, beze změny) |
+| CSP `connect-src` | řeší build sám — origin se odvodí z `AUTH_API_BASE` |
+
+**B — jedna doména** (web na `/`, API na `/api`): `AUTH_API_BASE=/api`, `CORS_ORIGIN`
+prázdné, nginx přeposílá `/api/` na `api:3001`. Podrobnosti v [§Zapojení do Traefiku](#zapojení-do-traefiku).
+
+### Cross-origin: co na tom může uklouznout
+
+- **Cookie projde jen díky tomu, že jsou to subdomény jedné domény.** Session cookie má
+  `sameSite=lax`, což znamená „same-**site**", ne „same-origin" — a site se počítá podle
+  registrovatelné domény. `p2lweb.domena.cz` a `p2lapi.domena.cz` sdílí `domena.cz`, takže
+  se cookie k API dostane. **Kdyby web dostal jinou registrovatelnou doménu** (třeba
+  `p2l-tester.cz` proti `domena.cz`), přestane login fungovat a cookie by musela na
+  `SameSite=None` — to je změna v [routes/auth.js](routes/auth.js), ne jen v konfiguraci.
+- **`CORS_ORIGIN` musí sedět přesně** — schéma i host, bez lomítka na konci, víc originů
+  čárkou. Špatná hodnota se projeví jako „funguje to na serveru, ale v prohlížeči ne":
+  request odejde, odpověď dorazí, a prohlížeč ji zahodí.
+- **Nativní klienti (EXE/APK) mají adresu API zabudovanou v buildu** — dnes
+  `https://p2ltester.smartbox.smartci4.com/api` ([lib/services/auth_api.dart](../lib/services/auth_api.dart)).
+  Když se API přestěhuje na novou subdoménu, **rozbijí se všechny rozdané instalace**.
+  Buď nechat starou adresu v Traefiku jako druhý router na `api` (staré buildy pak jedou
+  dál), nebo změnit konstantu a rozdistribuovat nové EXE/APK. První varianta je bezpečnější
+  a jde udělat dopředu.
+
+### Build a nasazení
+
+```bash
+# 1) image (z rootu repa, ne ze server/) — tag podle appVersion
+docker build -f Dockerfile.web \
+  --build-arg AUTH_API_BASE=https://p2lapi.domena.cz/api \
+  -t registry.firma.cz/p2l-tester-web:2.87 .
+docker push registry.firma.cz/p2l-tester-web:2.87
+
+# 2) na serveru: WEB_IMAGE v .env.docker → pull → up
+docker compose --env-file .env.docker pull web
+docker compose --env-file .env.docker up -d web
+```
+
+Verzi z `main.dart` a oba tagy (`:<VER>` i `:latest`) obstará skript
+[tools/build-web-image.ps1](../tools/build-web-image.ps1) — stejná role, jakou má
+`pack-portable.ps1` pro Windows distribuci:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\build-web-image.ps1 `
+  -Registry registry.firma.cz -ApiBase https://p2lapi.domena.cz/api -Push
+```
+
+`AUTH_API_BASE` se propisuje na dvě místa najednou: do Dart konstanty (kam appka volá)
+a do `connect-src` v CSP (kam prohlížeč volat smí). Proto se zadává jen jednou — jinak
+by se ta dvě místa dřív nebo později rozešla a projevilo by se to jako „appka nic nenačítá,
+v konzoli CSP error".
+
+Lokální Flutter se nepoužívá: `flutter build web` běží uvnitř build stage, takže
+výsledek nezávisí na tom, co je na stroji nainstalované.
+
+### Zapojení do Traefiku
+
+Routing nastavuje kolega; pro topologii se subdoménami jde o **dva nezávislé routery**
+na existujícím Traefiku:
+
+| Router | Pravidlo | Služba |
+|---|---|---|
+| web | `Host('p2lweb.domena.cz')` | `web:80` |
+| api | `Host('p2lapi.domena.cz')` | `api:3001` |
+
+Před API je pak pořád jen jeden hop, takže **`TRUST_PROXY` zůstává `1`** (z něj plyne
+`req.ip` pro rate limit na `/api/login` — vyšší hodnota než skutečnost jde obejít
+podvrženou hlavičkou `X-Forwarded-For`, nižší sloučí všechny klienty do jedné IP).
+
+Kdyby se místo subdomén šlo cestou jedné domény, jsou možnosti dvě: buď jeden router na
+`web:80` a `/api/` přepošle nginx (pak `TRUST_PROXY=2`, protože přibude hop), nebo dva
+routery s `PathPrefix('/api')` → `api` a zbytkem na `web` (pak zůstává `1`). Priority se
+řešit nemusí, Traefik dává delšímu pravidlu přednost sám. Config nginxu je pro všechny
+varianty stejný.
+
+Dvě věci mimo naši konfiguraci: pokud Traefik objevuje služby přes Docker provider, musí
+být `web` ve stejné Docker síti jako on; a **certifikát potřebuje i nová subdoména** (u
+wildcard certu netřeba, u per-host se musí vydat).
+
+Ověření po nasazení:
+
+```bash
+curl -s  https://p2lapi.domena.cz/api/health   # {"ok":true,…,"db":"mariadb"}
+curl -sI https://p2lweb.domena.cz/             # 200 text/html
+
+# CORS preflight — musí vrátit hlavičky allow-origin a allow-credentials
+curl -si -X OPTIONS https://p2lapi.domena.cz/api/login \
+  -H 'Origin: https://p2lweb.domena.cz' \
+  -H 'Access-Control-Request-Method: POST' | grep -i access-control
+```
+
+…a v prohlížeči login → seznam jednotek. Konzoli (F12) je po prvním nasazení dobré
+zkontrolovat na hlášky o CSP a CORS — hlavička je psaná pro běžný (ne `--csp`) Flutter
+build a `connect-src` se plní z `AUTH_API_BASE`.
+
+### Na co si dát pozor
+
+- **Bez HTTPS to nemá smysl.** Cookie má v produkci `secure`, takže po plain HTTP
+  ji prohlížeč zahodí a login neprojde — a `wss://` broker by ze stránky na HTTP
+  neprošel kvůli mixed contentu. Nativní klienti tímhle omezení nejsou (jezdí na
+  Bearer token).
+- **Broker musí mít WSS.** Web se k `ws://` (nezabezpečeně) z HTTPS stránky
+  nepřipojí, ať CSP dovoluje cokoli. Produkční `wss://mqtt.smartbox.smartci4.com:443/mqtt`
+  to splňuje.
+- **API base se zabuduje do buildu.** Pro subdomény `--build-arg AUTH_API_BASE=https://p2lapi.domena.cz/api`,
+  pro jednu doménu `/api`. Za běhu se to přepnout nedá — přestěhování API znamená nový
+  build webu (a u EXE/APK novou konstantu v [lib/services/auth_api.dart](../lib/services/auth_api.dart)).
+- **Web nemá lokální SQLite** (`local_unit_db_stub.dart`), takže offline režim ani
+  frontu změn nemá — evidence se čte a píše přímo na server. Offline práce zůstává
+  výsadou EXE/APK.
+- **Podcesta místo rootu** (`…/p2l-tester/`) potřebuje `--build-arg BASE_HREF=/p2l-tester/`,
+  jinak si appka bude tahat assety z rootu domény.
+- **Cache**: statika jede na `Cache-Control: no-cache` (revalidace, ne „nestahuj").
+  Flutter nedává do názvů souborů hash, takže dlouhá cache by po nasazení servírovala
+  starou appku. Když se přesto zdá, že prohlížeč drží starou verzi, je to obvykle
+  service worker → hard reload (Ctrl+Shift+R).
+- **Verze image**: tag Flutter SDK v `Dockerfile.web` (`ghcr.io/cirruslabs/flutter:3.41.8`)
+  drž shodný s SDK na stroji, jinak se lokální a produkční build rozejdou.
+
 ## Volba databáze
 
 Driver se přepíná env proměnnou `DB_DRIVER`. Datová vrstva je jedna

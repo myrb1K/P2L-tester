@@ -32,6 +32,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD musí být nastavené (viz .env.docker)}
       DB_CONNECTION_LIMIT: ${DB_CONNECTION_LIMIT:-10}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # Počet reverzních proxy před API (ovlivňuje IP pro rate limit na
+      # /api/login). Se službou `web` níže jsou dva hopy → 2; bez ní 1.
+      # Podrobně v základním docker-compose.yml.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       # Použije se jen při prvním startu nad prázdnou tabulkou users.
       # POZOR: pokud se pak dělá `npm run migrate-users`, tenhle účet se
       # přeskočí a zůstane s heslem odsud — viz README §Docker.
@@ -50,6 +54,25 @@ services:
     # Windows/Macu to jméno zná sám, linuxový engine ne).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Webová varianta appky (nginx + Flutter web build). Při nasazení na vlastní
+  # subdoménu (`p2lweb.…`) volá appka API na absolutní adrese z buildu, takže
+  # `api` musí mít vyplněné CORS_ORIGIN. Detail v README §Dvě topologie.
+  #
+  # POZOR: web varianta má smysl jen za HTTPS. Session cookie má v produkci
+  # `secure`, takže po plain HTTP ji prohlížeč zahodí a login neprojde — a
+  # broker přes `wss://` by ze stránky na HTTP taky nešel. Nativní klienti
+  # (EXE/APK) tímhle omezené nejsou, ti jezdí na Bearer token.
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+    image: ${WEB_IMAGE:-p2l-tester-web:latest}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
 
 volumes:
   api-data:

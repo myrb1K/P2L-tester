@@ -31,9 +31,30 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 
 const PID_FILE = () => dataPath('server.pid');
 
+// Kolik reverzních proxy stojí před serverem. Propisuje se do `req.ip`, podle
+// kterého se počítá rate limit na /api/login — takže to není kosmetika:
+// - moc nízká hodnota sloučí klienty do IP poslední proxy (jeden uživatel
+//   s překlepy pak vyčerpá limit všem),
+// - moc vysoká nechá klienta podvrhnout si IP hlavičkou X-Forwarded-For.
+// Default 1 = jedna proxy s TLS. Po nasazení webové varianty jsou hopy dva
+// (vnější proxy → nginx s Flutter buildem → api), proto compose posílá 2.
+function trustProxyFromEnv() {
+  const raw = (process.env.TRUST_PROXY || '').trim();
+  if (raw === '') return 1;
+  if (raw === 'false') return false;
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n) || n < 0) {
+    console.error(`[warn] TRUST_PROXY='${raw}' není nezáporné číslo ani 'false' — používám 1`);
+    return 1;
+  }
+  return n;
+}
+
 function buildApp(usersDb, unitsDb) {
   const app = express();
-  app.set('trust proxy', 1); // pro správné req.ip za Nginxem
+  const trustProxy = trustProxyFromEnv();
+  app.set('trust proxy', trustProxy);
+  console.log(`[proxy] trust proxy = ${trustProxy}`);
 
   app.use(express.json({ limit: '64kb' }));
   app.use(cookieParser());

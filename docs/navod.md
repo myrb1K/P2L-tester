@@ -315,10 +315,19 @@ audit celé databáze žije na serveru.
 
 ## 11. Webová verze
 
+Stejná aplikace v prohlížeči — nic se neinstaluje, adresu firemního serveru dostaneš
+od správce. Funkce jsou stejné jako na Windows/Androidu, s těmito rozdíly:
+
 - Vyžaduje **přihlášení** (uživatel + heslo); *Zapamatovat (7 dní)* prodlouží platnost session.
 - **Odhlásit se** lze v *Nastavení → Účet* (dole).
 - Broker musí mít **WebSocket listener** a profil musí mít zapnutý přepínač **WebSocket**.
+  Navíc musí být **zabezpečený** (`wss://`, tedy zapnuté *SSL/TLS*) — prohlížeč z bezpečné
+  stránky nepřipojí nezabezpečené spojení. Nezabezpečený broker jde použít jen z Windows
+  nebo Android verze.
+- Databáze jednotek **nefunguje bez připojení k serveru** — web si lokální kopii nedrží
+  (viz §10). Offline práce je jen na Windows/Androidu.
 - Export souborů probíhá stažením přes prohlížeč.
+- Po nasazení nové verze může prohlížeč chvíli držet starou; pomůže **Ctrl+Shift+R**.
 
 ---
 

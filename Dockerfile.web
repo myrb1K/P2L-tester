@@ -1,0 +1,101 @@
+# syntax=docker/dockerfile:1
+
+# Docker image webové varianty P2L Testeru: Flutter web build + nginx.
+#
+#   docker build -f Dockerfile.web -t p2l-tester-web:latest .
+#
+# Build kontext je ROOT repa (ne server/) — stage `build` potřebuje Dart zdroje,
+# šablonu z web/ a registrované assety. Backend má vlastní image
+# (server/Dockerfile); tenhle nese jen statiku a nginx, který /api/ přeposílá
+# na kontejner s API (viz docker/nginx-web.conf).
+#
+# Proč se build dělá tady a ne lokálním `flutter build web`: verze SDK je
+# přišpendlená k tagu image, takže výsledek je stejný z každého stroje, a Linux
+# nemá mezeru v cestě k SDK, na které padá část Windows toolingu (CLAUDE.md →
+# Build Gotchas).
+
+# ── Build: Flutter web ─────────────────────────────────────────────────────
+#
+# Tag musí odpovídat SDK, se kterým se vyvíjí — pubspec žádá `sdk: ^3.11.4`,
+# což Flutter 3.41.8 (Dart 3.11.5) splňuje. Při zvednutí Flutteru na stroji
+# zvednout i tady, jinak se lokální a produkční build rozejdou.
+FROM ghcr.io/cirruslabs/flutter:3.41.8 AS build
+
+# Vypne animace progress barů a analytics → čitelný build log v CI/Portaineru.
+ENV CI=true
+
+# Kam appka posílá požadavky na backend a z jaké cesty je servírovaná.
+# Default `/api` + `/` znamená „web běží na stejném originu jako API" (to dělá
+# nginx v runtime stage), takže session cookie i CORS jsou bez konfigurace.
+# Hodnota se ZABUDUJE do buildu, za běhu už ji přenastavit nelze — viz komentář
+# v lib/services/auth_api.dart.
+ARG AUTH_API_BASE=/api
+ARG BASE_HREF=/
+
+WORKDIR /app
+
+# Flutter SDK je v image git repozitář; když ho vlastní jiný uživatel než ten,
+# pod kterým běží build, git ho odmítne ("dubious ownership") a flutter spadne
+# ještě před `pub get`. V izolovaném build stage je tohle bezpečné.
+RUN git config --global --add safe.directory '*'
+
+# Web SDK zvlášť, ať se ~stovky MB artefaktů nestahují znovu při každé změně
+# zdrojů. Ostatní platformy se v tomhle image nikdy nebudou stavět.
+RUN flutter precache --web \
+      --no-ios --no-linux --no-windows --no-macos --no-fuchsia
+
+# Manifesty první — layer s `pub get` se recykluje, dokud se nezmění pubspec.
+COPY pubspec.yaml pubspec.lock ./
+RUN flutter pub get
+
+# Zdroje. `assets/icons/Smartboxlogo.png` a `docs/navod.md` jsou registrované
+# assety (pubspec) — bez nich build spadne na chybějícím assetu.
+COPY analysis_options.yaml ./
+COPY lib ./lib
+COPY web ./web
+COPY assets ./assets
+COPY docs ./docs
+
+# `--no-web-resources-cdn` přibalí CanvasKit do buildu místo odkazu na
+# gstatic.com: appka naběhne i na síti bez internetu (zákazník s vlastním
+# serverem a brokerem) a CSP nemusí povolovat cizí origin.
+# `*.symbols` jsou debug symboly pro deobfuskaci WASM stack traců (~7 MB) —
+# do image nepatří.
+RUN flutter build web --release \
+      --no-web-resources-cdn \
+      --base-href "${BASE_HREF}" \
+      --dart-define=AUTH_API_BASE="${AUTH_API_BASE}" \
+ && find build/web -name '*.symbols' -delete
+
+# ── Runtime: nginx se statikou ─────────────────────────────────────────────
+FROM nginx:1.29-alpine AS runtime
+
+# ARG se mezi stage nedědí, proto znovu. Musí jít o TUTÉŽ hodnotu jako výš —
+# odvozuje se z ní `connect-src` v CSP, takže rozejít se nesmí.
+ARG AUTH_API_BASE=/api
+
+COPY docker/nginx-web.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/build/web /usr/share/nginx/html
+
+# Když API běží na vlastní doméně (`https://p2lapi.…/api`), musí ji CSP pustit
+# do `connect-src`, jinak prohlížeč zabije každé volání backendu. Origin se
+# odvodí ze zabudované API base (schéma + host + port), takže existuje jediný
+# zdroj pravdy. Při relativní base (same-origin) se placeholder jen smaže.
+#
+# `nginx -t` je pojistka: chyba v configu spadne tady při buildu, ne až na
+# serveru po `up -d`.
+RUN set -eu; \
+    case "${AUTH_API_BASE}" in \
+      http://*|https://*) api_origin="$(printf '%s' "${AUTH_API_BASE}" | cut -d/ -f1-3)" ;; \
+      *) api_origin="" ;; \
+    esac; \
+    sed -i "s|__API_ORIGIN__|${api_origin}|g" /etc/nginx/conf.d/default.conf; \
+    echo "[csp] connect-src API origin: '${api_origin:-<same-origin>}'"; \
+    nginx -t
+
+EXPOSE 80
+
+# busybox wget je v alpine image (curl ne). /healthz obsluhuje nginx sám,
+# takže health kontejneru nezávisí na dostupnosti API.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1
