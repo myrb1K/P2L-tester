@@ -380,4 +380,94 @@ void main() {
           'I/u0472/SERVER/CMD');
     });
   });
+
+  group('WiFi + broker jedním příkazem', () {
+    test('buildSetConfigCommand: starý formát set_Config s args', () {
+      final json = jsonDecode(CommandService.buildSetConfigCommand(
+        ssid: 'MANU',
+        wifiPassword: 'manu2020',
+        address: '172.16.101.192',
+        port: 1883,
+        user: 'smartbox_user',
+        password: 'smartbox2022',
+        requestId: 123,
+      )) as Map;
+      expect(json['request_id'], 123);
+      final cmds = json['cmds'] as List;
+      expect(cmds.length, 1);
+      expect(cmds.first['cmd'], 'set_Config');
+      expect(cmds.first['args'], {
+        'SSID': 'MANU',
+        'PSWD': 'manu2020',
+        'mqttAddress': '172.16.101.192',
+        'mqttPort': 1883,
+        'mqttUser': 'smartbox_user',
+        'mqttPassword': 'smartbox2022',
+        'mqttInsec': false,
+      });
+      // Default bez acku (stará generace potvrzení neumí).
+      final def = jsonDecode(CommandService.buildSetConfigCommand(
+        ssid: 's',
+        wifiPassword: 'p',
+        address: 'a',
+        port: 1883,
+        user: 'u',
+        password: 'x',
+      )) as Map;
+      expect(def['request_id'], -1);
+    });
+
+    test('buildUnitSetConfigCommand: UNIT topic a plochý payload', () {
+      final cmd = CommandService.buildUnitSetConfigCommand(
+        unitId: '1209',
+        ssid: 'MANU',
+        wifiPassword: 'manu2020',
+        address: 'mqtt.demo1.smartci4.com',
+        port: 8883,
+        user: 'smartbox_user',
+        password: 'smartbox2022',
+        insecure: true,
+      );
+      expect(cmd.topic, 'I/001209/UNIT/001209/SET-CONFIG');
+      // Plochý JSON bez request_id/cmds — potvrzení chodí jako Code/Message.
+      expect(jsonDecode(cmd.payload), {
+        'SSID': 'MANU',
+        'PSWD': 'manu2020',
+        'mqttAddress': 'mqtt.demo1.smartci4.com',
+        'mqttPort': 8883,
+        'mqttUser': 'smartbox_user',
+        'mqttPassword': 'smartbox2022',
+        'mqttInsec': true,
+      });
+    });
+
+    test('obě varianty nesou stejné hodnoty (jen jiná obálka)', () {
+      final oldArgs = (jsonDecode(CommandService.buildSetConfigCommand(
+        ssid: 'S',
+        wifiPassword: 'W',
+        address: 'A',
+        port: 1883,
+        user: 'U',
+        password: 'P',
+      ))['cmds'] as List)
+          .first['args'];
+      final newPayload = jsonDecode(CommandService.buildUnitSetConfigCommand(
+        unitId: '1209',
+        ssid: 'S',
+        wifiPassword: 'W',
+        address: 'A',
+        port: 1883,
+        user: 'U',
+        password: 'P',
+      ).payload);
+      expect(newPayload, oldArgs);
+    });
+
+    test('firmwareSupportsGetConfig rozhoduje, která varianta se pošle', () {
+      // Práh je P2L_26071501NT — teprve od něj FW zná UNIT SET-CONFIG.
+      expect(CommandService.firmwareSupportsGetConfig('P2L_26071501NT'), isTrue);
+      expect(CommandService.firmwareSupportsGetConfig('P2L_26070201NT'), isFalse);
+      expect(CommandService.firmwareSupportsGetConfig(null), isFalse);
+    });
+  });
 }

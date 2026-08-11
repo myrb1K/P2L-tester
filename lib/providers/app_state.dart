@@ -56,6 +56,13 @@ class AppState extends ChangeNotifier {
           ({String unitId, String label, Timer timer, VoidCallback onConfirmed})>
       _pendingCmdAcks = {};
 
+  /// Totéž pro UNIT-level příkazy, které ack přes `request_id` neumí a
+  /// odpovídají Code/Message na zrcadlovém topicu (`O/<unit>/UNIT/<unit>/<CMD>`)
+  /// — typicky `SET-CONFIG`. Klíč: `<unitId>/<CMD>`.
+  final Map<String,
+          ({String unitId, String label, Timer timer, VoidCallback onConfirmed})>
+      _pendingUnitAcks = {};
+
   /// True = jednotka má v DB nesoulad s evidencí. Jen orientační (osvěží se
   /// z DB s malým zpožděním). Prázdné u nepřihlášeného.
   bool unitHasDbDrift(String unitId) => _dbDriftIds.contains(_canonId(unitId));
@@ -515,6 +522,9 @@ class AppState extends ChangeNotifier {
       // Uložená konfigurace jednotky (GET-CONFIG, od FW P2L_26071501NT) —
       // observed vrstva pro centrální DB (DB5). Starší FW neodpoví.
       _mqttService.subscribe('O/+/UNIT/+/GET-CONFIG');
+      // Potvrzení UNIT SET-CONFIG (WiFi + broker jedním příkazem, FW
+      // ≥ P2L_26071501NT) — Code/Message, ne request_id ack jako u CMD.
+      _mqttService.subscribe('O/+/UNIT/+/SET-CONFIG');
       // Ack na config CMD příkazy s request_id != -1 (potvrzení příjmu, např.
       // set_WiFi/set_Mqtt/update) → `{"request_id":N,"status":"received"}`.
       // Config příkazy jdou vždy na nový P2L topic (viz _sendTrackedConfigCmd),
@@ -574,6 +584,10 @@ class AppState extends ChangeNotifier {
       p.timer.cancel();
     }
     _pendingCmdAcks.clear();
+    for (final p in _pendingUnitAcks.values) {
+      p.timer.cancel();
+    }
+    _pendingUnitAcks.clear();
     _dbDriftIds = {};
     _mqttService.disconnect();
     _units.clear();
@@ -767,6 +781,9 @@ class AppState extends ChangeNotifier {
       _handleGetDevicesResponse(unitId, json, message);
     } else if (cmd == 'GET-CONFIG') {
       _handleGetConfigResponse(unitId, json);
+    } else if (cmd == 'SET-CONFIG' && parts[2] == 'UNIT') {
+      // Typová kontrola je nutná: SET-CONFIG má i DISP a P2L (jiný význam).
+      _handleUnitCmdAck(unitId, cmd, code, msg);
     } else if (cmd == 'SCAN-DEVICES') {
       _handleScanDevicesResponse(unitId, json);
     } else if (cmd == 'DEVICE-REPLACE' ||
@@ -911,6 +928,59 @@ class AppState extends ChangeNotifier {
           isError: true);
     }
     notifyListeners();
+  }
+
+  /// Ack na UNIT-level příkaz odeslaný přes [_sendTrackedUnitCmd] — odpověď je
+  /// `{"Code":0,"Message":"OK"}` na zrcadlovém topicu, páruje se podle
+  /// jednotky a příkazu (UNIT topicy `request_id` nepoužívají).
+  void _handleUnitCmdAck(
+      String unitId, String command, Object? code, String? msg) {
+    final pending = _pendingUnitAcks.remove('$unitId/$command');
+    if (pending == null) return;
+    pending.timer.cancel();
+    final display = int.tryParse(unitId)?.toString() ?? unitId;
+    // Explicitní Code:0 — jako u ostatních O/ odpovědí. Odpověď bez Code
+    // (neznámý formát) potvrzením není: do evidence by se zapsalo něco,
+    // o čem nevíme, jestli proběhlo.
+    if (code == 0 || code == '0') {
+      _setStatus('$display: ${pending.label} — jednotka potvrdila příjem.');
+      pending.onConfirmed();
+    } else {
+      _setStatus(
+          '$display: ${pending.label} — jednotka odmítla${msg != null ? " — $msg" : ""}.',
+          isError: true);
+    }
+    notifyListeners();
+  }
+
+  /// Odešle UNIT-level příkaz a hlídá odpověď na zrcadlovém topicu
+  /// (`O/<unit>/UNIT/<unit>/<command>`). Obdoba [_sendTrackedConfigCmd] pro
+  /// příkazy bez `request_id` — [onConfirmed] se spustí až po `Code:0`, takže
+  /// se do evidence nezapíše změna, kterou jednotka nedostala.
+  void _sendTrackedUnitCmd({
+    required String unitId,
+    required String command,
+    required String payload,
+    required String label,
+    required VoidCallback onConfirmed,
+    Duration timeout = const Duration(seconds: 5),
+  }) {
+    final id = _normUnitId(unitId);
+    final key = '$id/$command';
+    // Starší čekání na tentýž příkaz zahodit — odpověď by se spárovala s ním.
+    _pendingUnitAcks.remove(key)?.timer.cancel();
+    final timer = Timer(timeout, () {
+      final p = _pendingUnitAcks.remove(key);
+      if (p == null) return;
+      final display = int.tryParse(p.unitId)?.toString() ?? p.unitId;
+      _setStatus(
+          '$display: ${p.label} — jednotka NEPOTVRDILA (offline?), do evidence se nezapsalo.',
+          isError: true);
+      notifyListeners();
+    });
+    _pendingUnitAcks[key] =
+        (unitId: id, label: label, timer: timer, onConfirmed: onConfirmed);
+    _mqttService.publish(CommandService.getUnitCommandTopic(id, command), payload);
   }
 
   /// Odešle potvrzovaný config příkaz a hlídá ack. Nová generace: request_id
@@ -1360,7 +1430,6 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Hromadná změna WiFi: pošle `set_WiFi` všem vybraným jednotkám s 100ms pauzou.
   /// Hromadná změna jasu jednotky (`set_brightness`, value 0–100)
   /// na všech vybraných jednotkách s 100 ms pauzou.
   Future<void> sendBulkUnitBrightness(int value) async {
@@ -1438,6 +1507,121 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Hromadná změna WiFi **i** brokera **jedním příkazem** na jednotku.
+  ///
+  /// Proč jedním: `set_WiFi` i `set_Mqtt` jednotku restartují, takže poslané
+  /// zvlášť se druhý příkaz nemusí doručit. Tady odejde jedna zpráva a
+  /// jednotka se restartuje až s oběma změnami.
+  ///
+  /// Varianta příkazu podle firmwaru:
+  /// - FW ≥ `P2L_26071501NT` → UNIT `SET-CONFIG` (potvrzení `Code`/`Message`
+  ///   na zrcadlovém topicu),
+  /// - starší nová generace → `set_Config` na CMD topicu (potvrzení přes
+  ///   `request_id`),
+  /// - stará generace → `set_Config` s `request_id: -1`, potvrzení optimistické.
+  ///
+  /// Desired se do evidence zapíše až po potvrzení (jako u ostatních config
+  /// příkazů) — offline jednotka příkaz nedostane a evidence by lhala.
+  Future<void> sendBulkNetworkConfig({
+    required String ssid,
+    required String wifiPassword,
+    required BrokerProfile profile,
+  }) async {
+    if (_selectedUnits.isEmpty) return;
+    final targets = _selectedUnits.toList();
+    var sent = 0;
+    var confirmed = 0;
+    final single = targets.length == 1
+        ? (int.tryParse(_normUnitId(targets.first))?.toString() ??
+            _normUnitId(targets.first))
+        : null;
+    String jed(int n) => n == 1 ? 'jednotky' : 'jednotek';
+
+    for (final unitId in targets) {
+      final id = _normUnitId(unitId);
+      final unit = _units[id];
+      void onConfirmed() {
+        unawaited(UnitDbService.instance.pushDesired(id, {
+          'wifi': {'ssid': ssid, 'password': wifiPassword},
+          'broker': {
+            'address': profile.broker,
+            'port': profile.port,
+            'user': profile.username,
+            'password': profile.password,
+            'insecure': !profile.useSsl,
+          },
+        }));
+        _scheduleDbDriftRefresh();
+        // Mění se i broker → jednotka opustí tenhle broker. Stejně jako
+        // u sendBulkBroker ji zapomeneme; až se někde ozve, přijde jako nová
+        // a auto-fetch observed se spustí přes cestu prvního ALIVE.
+        _forgetUnit(id);
+        confirmed++;
+        _statusMessage = single != null
+            ? 'U jednotky $single potvrzen příjem požadavku na změnu WiFi "$ssid" a brokera "${profile.name}"'
+            : 'U $confirmed ${jed(confirmed)} potvrzen příjem požadavku na změnu WiFi "$ssid" a brokera "${profile.name}"';
+      }
+
+      // UNIT SET-CONFIG umí jen nová generace s FW ≥ P2L_26071501NT; jinak
+      // starý set_Config přes CMD topic (ten zvládnou obě generace).
+      final isNew =
+          (unit?.isNewGen ?? false) || CommandService.isNewTopicFormat(id);
+      if (isNew && CommandService.firmwareSupportsGetConfig(unit?.firmware)) {
+        final cmd = CommandService.buildUnitSetConfigCommand(
+          unitId: id,
+          ssid: ssid,
+          wifiPassword: wifiPassword,
+          address: profile.broker,
+          port: profile.port,
+          user: profile.username,
+          password: profile.password,
+          insecure: !profile.useSsl,
+        );
+        _sendTrackedUnitCmd(
+          unitId: id,
+          command: 'SET-CONFIG',
+          payload: cmd.payload,
+          label: 'WiFi + broker',
+          onConfirmed: onConfirmed,
+        );
+      } else {
+        _sendTrackedConfigCmd(
+          unitId: unitId,
+          label: 'WiFi + broker',
+          build: (reqId) => CommandService.buildSetConfigCommand(
+            ssid: ssid,
+            wifiPassword: wifiPassword,
+            address: profile.broker,
+            port: profile.port,
+            user: profile.username,
+            password: profile.password,
+            insecure: !profile.useSsl,
+            requestId: reqId,
+          ),
+          onConfirmed: onConfirmed,
+        );
+      }
+      sent++;
+      if (sent < targets.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    _lastWifiSsid = ssid;
+    _lastWifiPassword = wifiPassword;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_wifi_ssid', ssid);
+    await prefs.setString('last_wifi_password', wifiPassword);
+
+    if (confirmed < sent) {
+      _statusMessage = single != null
+          ? 'WiFi "$ssid" + broker "${profile.name}" odeslány na jednotku $single, čekám na potvrzení…'
+          : 'WiFi "$ssid" + broker "${profile.name}" odeslány na $sent ${jed(sent)}, čekám na potvrzení…';
+    }
+    notifyListeners();
+  }
+
+  /// Hromadná změna WiFi: pošle `set_WiFi` všem vybraným jednotkám s 100ms pauzou.
   Future<void> sendBulkWifi({required String ssid, required String password}) async {
     if (_selectedUnits.isEmpty) return;
     final targets = _selectedUnits.toList();

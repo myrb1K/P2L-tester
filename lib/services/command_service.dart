@@ -218,6 +218,96 @@ class CommandService {
     });
   }
 
+  /// Args pro kombinovanou změnu WiFi **a** brokera. Klíče jsou stejné pro obě
+  /// varianty příkazu (starý `set_Config` i nový UNIT `SET-CONFIG`), liší se
+  /// jen obálka a topic — proto jeden zdroj.
+  static Map<String, dynamic> _networkConfigArgs({
+    required String ssid,
+    required String wifiPassword,
+    required String address,
+    required int port,
+    required String user,
+    required String password,
+    required bool insecure,
+  }) {
+    return {
+      'SSID': ssid,
+      'PSWD': wifiPassword,
+      'mqttAddress': address,
+      'mqttPort': port,
+      'mqttUser': user,
+      'mqttPassword': password,
+      'mqttInsec': insecure,
+    };
+  }
+
+  /// Příkaz `set_Config` – WiFi i broker **v jednom příkazu** pro firmware,
+  /// který ještě nezná UNIT `SET-CONFIG` (< `P2L_26071501NT`, a stará
+  /// generace). Jde přes běžný CMD topic, takže platí i ack přes
+  /// [requestId] != -1 (`status:"received"` na `O/.../P2L/.../CMD`).
+  ///
+  /// Pro novější firmware použij [buildUnitSetConfigCommand] — tam FW navíc
+  /// odpoví Code/Message a umí i další parametry (Id, statická IP).
+  static String buildSetConfigCommand({
+    required String ssid,
+    required String wifiPassword,
+    required String address,
+    required int port,
+    required String user,
+    required String password,
+    bool insecure = false,
+    int requestId = -1,
+  }) {
+    return jsonEncode({
+      'request_id': requestId,
+      'cmds': [
+        {
+          'cmd': 'set_Config',
+          'args': _networkConfigArgs(
+            ssid: ssid,
+            wifiPassword: wifiPassword,
+            address: address,
+            port: port,
+            user: user,
+            password: password,
+            insecure: insecure,
+          ),
+        },
+      ],
+    });
+  }
+
+  /// UNIT `SET-CONFIG` (FW ≥ `P2L_26071501NT`) – WiFi i broker v jednom
+  /// příkazu. Payload je plochý JSON, odpověď chodí na zrcadlový topic
+  /// `O/<unit>/UNIT/<unit>/SET-CONFIG` jako `{"Code":0,"Message":"OK"}`
+  /// (žádné `request_id`). Po změně sítě se jednotka restartuje.
+  ///
+  /// Posílají se jen WiFi + MQTT parametry; `Id` a statickou IP appka
+  /// tímhle příkazem nemění (na ID je `set_id`, IP se nekonfiguruje).
+  static ({String topic, String payload}) buildUnitSetConfigCommand({
+    required String unitId,
+    required String ssid,
+    required String wifiPassword,
+    required String address,
+    required int port,
+    required String user,
+    required String password,
+    bool insecure = false,
+  }) {
+    return (
+      topic: getUnitCommandTopic(unitId, 'SET-CONFIG'),
+      payload: jsonEncode(_networkConfigArgs(
+        ssid: ssid,
+        wifiPassword: wifiPassword,
+        address: address,
+        port: port,
+        user: user,
+        password: password,
+        insecure: insecure,
+      )),
+    );
+  }
+
   /// Zjistí, zda firmware podporuje BIN (>= 250925)
   static bool firmwareSupportsBin(String? firmware) {
     if (firmware == null || firmware.isEmpty) return false;
