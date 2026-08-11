@@ -14,7 +14,7 @@ import 'services/local_unit_db.dart';
 import 'services/sync_engine.dart';
 import 'services/unit_db_service.dart';
 
-const String appVersion = '2.86';
+const String appVersion = '2.87';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();

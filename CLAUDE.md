@@ -289,40 +289,46 @@ $s=New-Object Net.Security.SslStream($t.GetStream(),$false,({$true}))
 $s.AuthenticateAsClient('dl.google.com'); $s.RemoteCertificate.Issuer
 ```
 
-### Windows EXE: prázdné okno na headless serveru (virtuální displej)
+### Bílé okno EXE přes vzdálenou plochu — appka běží, jen ji nevidíme
 
 **Symptom:** EXE se u zákazníka spustí, okno s titulkem „P2L Tester" je, ale **obsah žádný**.
-Po maximalizaci zůstane bílá plocha v **původní** velikosti a nová plocha je černá — Flutter
-view se nepřekreslil ani nezvětšil. Na jiném stroji tatáž distribuce jede.
+Po maximalizaci zůstane bílá plocha v původní velikosti a nová plocha je černá. Na jiném stroji
+tatáž distribuce jede. **Pozorováno přes RustDesk na headless serveru** (2026-08-11).
 
-**Co to NENÍ** (ověřeno u zákazníka 2026-08-11, než se našla příčina): zablokovaný port ani
+**Why:** Appka **funguje bezchybně** — problém je v **zachytávání obrazu**, ne v appce. Server
+byl bez monitoru, takže aktivním displejem byl `USB Mobile Monitor Virtual Display` (usbmmidd,
+driver z 2021). Na takovém virtuálním displeji nemusí být podporované DXGI Desktop Duplication;
+RustDesk pak spadne na starší GDI zachytávání, které **hardwarově komponovaný obsah nevidí** a
+vrátí prázdnou plochu. Flutter kreslí přes ANGLE/Direct3D, takže padá přesně do téhle kategorie
+— stejně jako video přehrávače nebo prohlížeč s GPU akcelerací.
+
+**Jak to poznat, že jde o tohle:** otevřít přes tutéž vzdálenou plochu jinou hardwarově
+akcelerovanou aplikaci (video v prohlížeči, Fotky). Když je i tam prázdná plocha, není to naše
+appka.
+
+**Řešení** (všechno na straně zákazníka, v repu není co opravovat): vypnout v RustDesku
+hardwarový kodek; připojit monitor nebo HDMI/DP **dummy plug** (EDID emulator, ~100 Kč), pak se
+zachytává fyzický displej; odinstalovat usbmmidd; nebo desktop obejít a použít **APK**.
+
+**Co to NENÍ** — vylučovací kolečko, které stálo den, ať se neopakuje: zablokovaný port ani
 firewall (appka k zobrazení UI síť nepotřebuje vůbec — `runApp` je v `main()` první, bootstrap
-DB/auth/sync je `unawaited` a `LocalUnitDb.init` selhání polyká), chybějící soubory
-distribuce, chybějící VC++ Redistributable, antivirus nad `data\app.so`, AppLocker (přesun do
-`C:\Program Files` nepomohl), ani vzdálený přístup jako takový (RustDesk — přes něj jede i
-funkční stroj).
+DB/auth/sync je `unawaited` a `LocalUnitDb.init` selhání polyká), chybějící soubory distribuce,
+chybějící VC++ Redistributable, antivirus nad `data\app.so`, AppLocker/cesta (přesun do
+`C:\Program Files` nepomohl), WDAC (`UsermodeCodeIntegrityPolicyEnforcementStatus` = 0),
+Exploit Protection ACG/CIG (`Get-ProcessMitigation -System` vše `NOTSET`), výběr GPU adaptéru
+(`set_gpu_preference(HighPerformancePreference)` **nepomohlo** — zkoušeno a zase odebráno), ani
+chybějící vsync z virtuálního displeje (`refreshRate` hlásil normálních 60 Hz).
 
-**Why:** Server je **bez monitoru**. `Get-CimInstance Win32_VideoController` ukázal fyzickou
-grafiku (AMD Radeon) **bez aktivního výstupu** (`CurrentHorizontalResolution` prázdné) a jako
-aktivní displej **`USB Mobile Monitor Virtual Display`** (usbmmidd, driver z 2021, instaluje ho
-RustDesk). Windows k oknu přiřadí adaptér toho displeje, na kterém okno leží — a ten virtuální
-plnohodnotný Direct3D 11 device nenabídne. Flutter kreslí přes ANGLE (D3D11), nedostane
-renderovací plochu a nenakreslí nic.
+**Jak se to nakonec zjistilo — použij příště hned:** dočasný release build, který si zapisoval
+průběh startu do `%TEMP%` a v 5. sekundě si přes `RenderRepaintBoundary.toImage()` **uložil
+snímek vlastního UI do PNG**. Snímek vzniká uvnitř Flutteru, takže obchází kompozici okna i
+zachytávání obrazovky — a byl **bajt na bajt shodný** se snímkem z funkčního stroje (16 686 B).
+Tím bylo hotovo. Měřit uvnitř appky je rychlejší než vylučovat hypotézy zvenčí; log značek
+`main() → ensureInitialized → runApp → první frame → počet framů` rozdělí problém na „Dart
+nejede" / „engine nekreslí" / „kreslí, ale není to vidět" na jeden pokus.
 
-**Fix v repu:** [windows/runner/main.cpp](windows/runner/main.cpp) nastavuje
-`project.set_gpu_preference(flutter::GpuPreference::HighPerformancePreference)` → DXGI vybere
-výkonný adaptér a virtuální displej-only adaptéry jdou dolů, takže se použije fyzická grafika
-i bez zapojeného monitoru. Na strojích s jedinou grafikou se nic nemění. (API je
-`flutter::DartProject::set_gpu_preference`, propaguje se do `FlutterDesktopEngineProperties`.)
-
-**Když to nestačí** (na straně zákazníka): HDMI/DP **dummy plug** (EDID emulator, ~100 Kč) do
-fyzického výstupu — GPU dostane aktivní displej, u headless serverů standardní řešení; nebo
-aktualizovat RustDesk a přepnout na jeho vlastní (novější, IddCx) virtuální displej; nebo
-obejít desktop úplně a použít **APK** ze stejného zipu.
-
-**Pozn. k diagnostice:** `FLUTTER_ENGINE_SWITCHES` / `enable-software-rendering` **v release
-buildu nefunguje** — engine je čte jen v debug/profile. Prázdné okno tedy nejde takhle
-obejít; na test je potřeba profile build.
+**Pozn.:** `FLUTTER_ENGINE_SWITCHES` / `enable-software-rendering` **v release buildu
+nefunguje** — engine je čte jen v debug/profile.
 
 ### Cursor: `.cursorignore` rozbije Claude Code rozšíření
 
@@ -630,9 +636,10 @@ Detail v [README.md §Typy nasazení](README.md).
 
 ## Version and Recent Changes
 
-Current version: **2.86** (see `main.dart`)  
+Current version: **2.87** (see `main.dart`)  
 Recent themes:
-- v2.86: **WiFi + broker jedním příkazem; prázdné okno na headless serveru.** (1) **Hromadná akce „Změnit WiFi + broker"** (`BulkConfigMenu`, ikona `router`) — `set_WiFi` i `set_Mqtt` jednotku restartují, takže poslané zvlášť se druhý příkaz nemusí doručit; nová akce pošle obojí v jedné zprávě a jednotka se restartuje až s oběma změnami. Dvě varianty příkazu podle FW: **FW ≥ `P2L_26071501NT`** → UNIT `SET-CONFIG` (`buildUnitSetConfigCommand`, plochý payload na `I/<6>/UNIT/<6>/SET-CONFIG`, potvrzení `Code`/`Message` na zrcadle), **starší** → `set_Config` na CMD topicu (`buildSetConfigCommand`, potvrzení přes `request_id`). Args staví jedna privátní metoda, takže obě varianty nesou identické klíče. Nový `_sendTrackedUnitCmd` + `_handleUnitCmdAck` řeší ack pro UNIT příkazy — ty **`request_id` nemají**, takže se odpověď páruje podle `<unitId>/<CMD>` a vyžaduje **explicitní `Code:0`** (odpověď bez `Code` potvrzením není). Desired se do evidence zapíše až po potvrzení, jinak „NEPOTVRDILA (offline?)". Pozor na záměnu: starý `set_Config` má `mqttCert` (obsah PEM), nový `mqttCertUrl` (URL) — appka neposílá ani jeden. Volba brokera vytažena do sdíleného `_BrokerChooser` (používá ho i dialog „Změnit broker"). Stávající samostatné akce „Změnit broker" / „Změnit WiFi" zůstaly. **Neověřeno na reálné jednotce** — při nesouladu selže bezpečně (nepřijde ack, do evidence se nic nezapíše, červená hláška). (2) **Prázdné okno EXE na headless serveru** — viz sekce *Build Gotchas*: `windows/runner/main.cpp` nově nastavuje `set_gpu_preference(HighPerformancePreference)`. Testy: 259 Flutter.
+- v2.87: **Počet karet nad seznamem v Databázi jednotek.** [unit_db_screen.dart](lib/screens/unit_db_screen.dart): bez filtru celkový počet (`65 modulů`, skloňováno 1 modul / 2–4 moduly / 5+ modulů), při filtrování „kolik prošlo z celku" (`12 z 65 modulů` — po předložce „z" je genitiv, takže vždy „modulů"). Za filtrování se počítají **dropdowny i vyhledávací pole**, takže po filtru podle brokeru je hned vidět, kolik modulů na něm je. Text je vlevo ve stávající liště výběru v `Expanded` → tlačítka zůstanou zarovnaná vpravo i na úzkém displeji a dlouhý text se zkrátí ellipsis. **Lišta se vykreslí i když filtr nic nenajde** (dřív podmínka `_filtered.isNotEmpty`) — jinak by počet zmizel přesně ve chvíli, kdy zajímá nejvíc; „Vybrat vše" / „Zrušit" se v tom stavu skryjí. Při úplně prázdné DB se lišta nezobrazuje (to říká text uprostřed). Zároveň dokončeno vyšetřování **bílého okna EXE u zákazníka**: příčina není v appce (viz *Build Gotchas*), takže `set_gpu_preference` přidané ve v2.86 je **odebráno** — nepomohlo a jeho komentář uváděl nesprávnou příčinu. Testy: 260 Flutter (nový widget test na oba stavy počtu).
+- v2.86: **WiFi + broker jedním příkazem; prázdné okno na headless serveru.** (1) **Hromadná akce „Změnit WiFi + broker"** (`BulkConfigMenu`, ikona `router`) — `set_WiFi` i `set_Mqtt` jednotku restartují, takže poslané zvlášť se druhý příkaz nemusí doručit; nová akce pošle obojí v jedné zprávě a jednotka se restartuje až s oběma změnami. Dvě varianty příkazu podle FW: **FW ≥ `P2L_26071501NT`** → UNIT `SET-CONFIG` (`buildUnitSetConfigCommand`, plochý payload na `I/<6>/UNIT/<6>/SET-CONFIG`, potvrzení `Code`/`Message` na zrcadle), **starší** → `set_Config` na CMD topicu (`buildSetConfigCommand`, potvrzení přes `request_id`). Args staví jedna privátní metoda, takže obě varianty nesou identické klíče. Nový `_sendTrackedUnitCmd` + `_handleUnitCmdAck` řeší ack pro UNIT příkazy — ty **`request_id` nemají**, takže se odpověď páruje podle `<unitId>/<CMD>` a vyžaduje **explicitní `Code:0`** (odpověď bez `Code` potvrzením není). Desired se do evidence zapíše až po potvrzení, jinak „NEPOTVRDILA (offline?)". Pozor na záměnu: starý `set_Config` má `mqttCert` (obsah PEM), nový `mqttCertUrl` (URL) — appka neposílá ani jeden. Volba brokera vytažena do sdíleného `_BrokerChooser` (používá ho i dialog „Změnit broker"). Stávající samostatné akce „Změnit broker" / „Změnit WiFi" zůstaly. **Neověřeno na reálné jednotce** — při nesouladu selže bezpečně (nepřijde ack, do evidence se nic nezapíše, červená hláška). (2) **Bílé okno EXE přes vzdálenou plochu** — vyšetřeno u zákazníka, **v kódu nebylo co opravit**: appka běží správně, obraz jen neprojde zachytáváním RustDesku na headless serveru s virtuálním displejem. Diagnóza a řešení v sekci *Build Gotchas*. Testy: 259 Flutter.
 - v2.85: **R6 (konec lokálního Node serveru), login bez volby serveru, tvar ID v evidenci, hlášení chyb syncu.** Vlna, která uzavřela offline-first a poprvé ji protáhla ostrým nasazením. (1) **R6** — appka už nespouští vlastní Node backend ([PRD-DB/03-PRD-sync.md](PRD-DB/03-PRD-sync.md) §9.1): pryč `local_server*.dart`, `local_server_section.dart`, PID file, adopce cizího procesu, bootstrap správce, `dbMismatch`, `AuthSession.preferLocalBase` a sekce *Lokální server* v Nastavení včetně volby SQLite/MariaDB. Podmínka „až bude in-app SQLite hotová" splněna po DB12. `tools\pack-portable.ps1` je teď jen kopie Release + přejmenování + zip → **zip 128 → 30 MB** a konec vazby na major verzi Node. Detail v sekci *Lokální Node server v appce — ODSTRANĚNO (R6)*. (2) **Login bez volby serveru** — evidence je jedna, firemní, takže `authApiBase` je konstanta (`https://p2ltester.smartbox.smartci4.com/api`) přepsatelná **jen při buildu** přes `--dart-define`; dialog chce pouze jméno a heslo. Admin-only pojistka v Nastavení byla zvážena a **zamítnuta**: `isAdmin` chodí z `/me`, takže by se zobrazila jen když server odpovídá, a zmizela přesně tehdy, kdy by byla potřeba (důvod zapsaný v `auth_api.dart`). Uložený loopback base se při `restore()` jednorázově přepíše. (3) **Tvar ID v evidenci** — lokální DB držela kanonické `001114`, server ukládá `1114` (`normalizeUnitId` strhává nuly). Po prvním úspěšném pullu by vznikla **druhá karta** vedle lokální. Nový helper `plainUnitId`, `LocalUnitDb` převádí každý vstup přes `_key()` (včetně cesty z pullu), migrace schématu **v3** přepisuje `units_cache` + **`card_json`**, `outbox`, `local_history` a `conflicts`; kolize řeší ve prospěch serverové verze (vyšší `rev`). Ověřeno na reálných 65 kartách. (4) **Ne-200 odpověď se nesmí spolknout mlčky** — `pushOutbox`/`pullFromServer` vrací `SyncFailure` (`unsupported` 404 / `unauthorized` 401,403 / `transient`), `SyncEngine` z toho dělá stavy `unsupported`/`unauthorized` s **červenou** ikonou (oranžová = offline, samo se spraví; červená = musí zasáhnout člověk) a **neplánuje retry**. (5) **Dávkování pushe** — kolo končilo po první dávce (100 operací) a zbytek čekal na desetiminutový cyklus; `syncNow` teď posílá dávky ve smyčce, dokud se fronta zmenšuje, se stropem `_maxPushRounds`. **Obojí odhalilo až ostré nasazení:** server běžel ve verzi před DB9, `/units/sync` vracel 404 a fronta 130 operací tiše stála. Testy: 255 Flutter + 90 server. Ověřeno naživo — image nasazená přes registry + Portainer, 130 čekajících operací odešlo, `last_rev` 130.
 - v2.84: **DB12 — obrazovka „Změny v databázi" (audit napříč jednotkami).** Doplňuje historii jedné karty pohledem na celou evidenci: kdo · kdy · co · odkud (`online`/`sync`/`mqtt`) · z jakého zařízení (`exe@NB-RADEK`, `apk@Pixel7`). (1) **Server:** `listAudit` + `auditFilters` v [db/units.js](server/db/units.js), endpointy `GET /api/units/history` (filtry unitId/username/layer/origin/časový rozsah, stránkování, `limit` max 200) a `GET /api/units/history/filters`; obojí **před `/:id`**, jinak by spadlo do detailu karty. `hasMore` se pozná načtením o řádek víc, ne `COUNT` nad celou `unit_history`. (2) **Klient:** `UnitDbEvent` rozšířen o `unitId`/`layer`/`origin`/`sourceDevice`/`rev` + `actionLabel`/`originLabel`, nové `UnitDbAuditPage`/`UnitDbAuditFilters`, `UnitDbService.fetchAudit`/`fetchAuditFilters`/`fetchLocalAudit`. (3) **UI** [changes_screen.dart](lib/screens/changes_screen.dart): filtry (ID, uživatel, co, odkud) + „Načíst další" po 50; vstupy z ☰ na obrazovce Databáze a z karty jednotky (ikona `history` s předvyplněným filtrem). **Offline** ukáže změny z tohoto zařízení (`LocalUnitDb.recentHistory`) a napíše to — audit celé DB je serverová veličina. (4) **Opraven flaky test** (nikoli produkční chyba): drift testy zapisovaly observed před desired, takže `computeDrift` správně hlásil „čekající změna" a testy procházely jen při shodě na milisekundu — časy se teď zadávají explicitně (`hourAgo()`), ověřeno 8 běhy v řadě. Testy: 249 Flutter + 90 server, z toho 2 nové E2E proti reálnému serveru (filtry/stránkování/nabídky a „audit nevrací hesla" i na surové odpovědi). Návod §10.
 - v2.83: **Offline-first synchronizace evidence (DB9–DB11).** Evidence jednotek funguje bez serveru a po návratu signálu se srovná sama; server zůstává zdrojem pravdy pro řešení konfliktů. Detail pravidel v sekcích *Synchronizační vrstva serveru*, *Lokální DB jednotek v appce* a *Synchronizace lokální ↔ serverové DB* výše; návrh v [PRD-DB/03-PRD-sync.md](PRD-DB/03-PRD-sync.md). (1) **DB9 — server:** `rev` z čítače `sync_counter` (inkrement v téže transakci jako zápis karty; čas nestačí, dva zápisy padnou do jedné milisekundy), per-vrstvové `observed/desired/meta_updated_at`, **tombstones** místo `DELETE` (bez nich by se karta vrátila z lokální DB klienta), rozšířený audit (`uuid`/`layer`/`origin`/`source_device`/`rev`), endpointy `GET /api/units/changes?since=<rev>` a `POST /api/units/sync` (idempotence přes `opId` v `sync_ops`). Retence historie z 5 na **200** (env `HISTORY_RETENTION`). (2) **DB10 — lokální DB v appce** ([local_unit_db.dart](lib/services/local_unit_db.dart), sqflite; web má stub): `units_cache` + `outbox` + `local_history` + `sync_state`; `UnitDbService` čte a píše lokálně, editace offline **uspěje**, observed operace se ve frontě slučují, časy jdou přes `clock_offset_ms` proti serveru. **`sqlite3` musí zůstat na 2.x** (build hooks vs. mezera v cestě k SDK — viz sekce výše). (3) **DB11 — sync engine** ([sync_engine.dart](lib/services/sync_engine.dart)): push→pull, triggery (start, přihlášení za běhu, debounce 2 s po zápisu, 10 min periodicky, 1 min retry při offline, ručně), `probeServer` s **validací obsahu odpovědi** (captive portál vrací 200 s přihlašovací stránkou), všechny čtyři výsledky pushe (`applied`/`superseded`/`conflict`/`rejected`) odebírají operaci z fronty, prohraná verze jde do lokální tabulky `conflicts`. UI: **ikona mraku s počtem čekajících změn** v AppBaru Databáze + **banner „Tvoje změna byla přehlasována"** s volbou *Poslat znovu* / *Rozumím*. Testy: 247 Flutter + 86 server. Kromě unit testů (`local_db_test.dart`, `sync_engine_test.dart` s fake HTTP) je tu **[test/sync_e2e_test.dart](test/sync_e2e_test.dart) — E2E proti reálnému Node serveru** (spustí `server/server.js` nad SQLite v temp, port 3098, login → JWT): push meta i desired s hesly, observed, pull změny od jiného klienta, **konflikt starší lokální vs. novější serverová + „poslat znovu"**, idempotence (`duplicate: true`), audit (`origin: sync`, `sourceDevice`), tombstone, offline → fronta → odeslání po návratu. Skipuje se bez Node / `server/node_modules`. Návod §10 (offline práce, ikony, konflikty). **Neověřeno:** proti vzdálenému serveru (`p2ltester.smartbox.smartci4.com` běží image z doby před DB9, endpointy `/changes` a `/sync` tam ještě nejsou) a MariaDB sada (chybí `P2Lunits_test`).

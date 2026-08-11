@@ -118,6 +118,22 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
   bool get _hasActiveFilter =>
       _customerFilter != null || _brokerFilter != null || _statusFilter != null;
 
+  /// Počet karet nad seznamem: bez filtru celkem, při filtrování (dropdowny
+  /// nebo hledání) „zobrazeno z celku" — ať je vidět, kolik filtr vyřadil.
+  String get _countLabel {
+    final total = _units?.length ?? 0;
+    final shown = _filtered.length;
+    final filtering =
+        _hasActiveFilter || _searchController.text.trim().isNotEmpty;
+    // Po předložce „z" je genitiv → vždy „modulů" (1 z 2 modulů).
+    if (filtering) return '$shown z $total modulů';
+    // Bez filtru nominativ: 1 modul / 2–4 moduly / 5+ modulů.
+    final word = total == 1
+        ? 'modul'
+        : (total >= 2 && total <= 4 ? 'moduly' : 'modulů');
+    return '$total $word';
+  }
+
   void _resetFilters() => setState(() {
     _customerFilter = null;
     _brokerFilter = null;
@@ -606,27 +622,42 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                 const Divider(height: 1, thickness: 1),
                 // Lišta výběru pro hromadné akce (stejný vzor jako hlavní
                 // obrazovka — „Vybrat vše" / „Zrušit").
-                if (_filtered.isNotEmpty)
+                if (_units!.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
                     child: Row(
                       children: [
-                        Text(
-                          'Vybráno: ${_selected.length}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
+                        // Počet karet vlevo (Expanded → tlačítka zůstanou
+                        // vpravo i na úzkém displeji).
+                        Expanded(
+                          child: Text(
+                            _countLabel,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
                           ),
                         ),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: _selectAllFiltered,
-                          child: const Text('Vybrat vše'),
-                        ),
-                        TextButton(
-                          onPressed: _selected.isEmpty ? null : _clearSelection,
-                          child: const Text('Zrušit'),
-                        ),
+                        if (_filtered.isNotEmpty) ...[
+                          Text(
+                            'Vybráno: ${_selected.length}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _selectAllFiltered,
+                            child: const Text('Vybrat vše'),
+                          ),
+                          TextButton(
+                            onPressed:
+                                _selected.isEmpty ? null : _clearSelection,
+                            child: const Text('Zrušit'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
