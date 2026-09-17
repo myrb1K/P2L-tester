@@ -11,6 +11,7 @@ import '../models/bus_scan.dart';
 import '../models/device.dart';
 import '../models/device_template.dart';
 import '../models/module.dart';
+import '../models/p2l_led_config.dart';
 import '../models/unit.dart';
 import '../services/auth_session.dart';
 import '../services/command_service.dart';
@@ -171,6 +172,10 @@ class AppState extends ChangeNotifier {
   // Nová adresa PUM-A displeje po přečíslování (DEVICE-SET-ID) — po potvrzení
   // se na displej pošle, aby se nová adresa fyzicky zobrazila.
   final Map<String, int> _pendingDispAddrAfterSetId = {};
+  // Konfigurace P2L LED (pásky na portech jednotky) z P2L GET-CONFIG.
+  // Chybí u staré generace a u nového FW < P2L_26071501NT — ty na povel
+  // neodpovědí a UI pracuje s výchozími hodnotami.
+  final Map<String, P2lLedConfig> _p2lConfigs = {};
   List<DeviceTemplate> _templates = [];
   String _deviceActionStatus = '';
   // true = poslední hláška je chybová (Code != 0) → v UI červeně.
@@ -226,6 +231,12 @@ class AppState extends ChangeNotifier {
   bool isModulesPending(String unitId) => _unitModulesPending.contains(_normUnitId(unitId));
   BusScanResult? busScanFor(String unitId) => _unitBusScan[_normUnitId(unitId)];
   bool isBusScanPending(String unitId) => _unitBusScanPending.contains(_normUnitId(unitId));
+
+  /// Konfigurace P2L LED jednotky (jas, počty LED na portech, barvy).
+  /// Nikdy `null` — dokud jednotka neodpoví, vrací prázdnou
+  /// ([P2lLedConfig.isLoaded] == false) a UI ukáže tovární hodnoty.
+  P2lLedConfig p2lConfigFor(String unitId) =>
+      _p2lConfigs[_normUnitId(unitId)] ?? P2lLedConfig.empty;
 
   /// Diagnostické porovnání posledního skenu sběrnice s konfigurací (OK /
   /// chybí / nezaregistrované). Prázdné, dokud sken neproběhl. Z toho se v UI
@@ -284,14 +295,22 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Odběry streamů MqttService. Držíme je, abychom je v `dispose()` stihli
+  // zrušit dřív, než se zavře samotná služba — `MqttService.dispose()` volá
+  // `disconnect()`, ten pošle do stateStreamu poslední událost a broadcast
+  // stream ji doručí až v mikroúloze, tedy po `super.dispose()`. Bez odhlášení
+  // by listener zavolal `notifyListeners()` na už zahozeném objektu.
+  StreamSubscription<AppMqttState>? _stateSub;
+  StreamSubscription<MqttReceivedMessage<MqttMessage>>? _messageSub;
+
   AppState() {
-    _mqttService.stateStream.listen((state) {
+    _stateSub = _mqttService.stateStream.listen((state) {
       _connectionState = state;
       _lastError = _mqttService.lastError;
       notifyListeners();
     });
 
-    _mqttService.messageStream.listen(_handleMessage);
+    _messageSub = _mqttService.messageStream.listen(_handleMessage);
   }
 
   Future<void> loadSettings() async {
@@ -530,6 +549,13 @@ class AppState extends ChangeNotifier {
       // Config příkazy jdou vždy na nový P2L topic (viz _sendTrackedConfigCmd),
       // takže ack chodí na jeho zrcadle O/<id>/P2L/01<id>/CMD.
       _mqttService.subscribe('O/+/P2L/+/CMD');
+      // P2L LED (device 01, FW ≥ P2L_26071501NT): konfigurace pásků na
+      // portech jednotky + potvrzení jejího nastavení a ovládání.
+      _mqttService.subscribe('O/+/P2L/+/GET-CONFIG');
+      _mqttService.subscribe('O/+/P2L/+/SET-CONFIG');
+      _mqttService.subscribe('O/+/P2L/+/SET-LEDS');
+      _mqttService.subscribe('O/+/P2L/+/CLR-LEDS');
+      _mqttService.subscribe('O/+/P2L/+/CLR-STRIPS');
       _mqttService.subscribe('O/+/UNIT/+/ADD-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/RECREATE-DEVICES');
       _mqttService.subscribe('O/+/UNIT/+/DELETE-DEVICES');
@@ -779,8 +805,16 @@ class AppState extends ChangeNotifier {
 
     if (cmd == 'GET-DEVICES') {
       _handleGetDevicesResponse(unitId, json, message);
-    } else if (cmd == 'GET-CONFIG') {
+    } else if (cmd == 'GET-CONFIG' && parts[2] == 'P2L') {
+      // P2L GET-CONFIG vrací LED konfiguraci (jas/počty/barvy), UNIT GET-CONFIG
+      // síťovou konfiguraci jednotky — stejný název povelu, jiný obsah.
+      _handleP2lGetConfigResponse(unitId, json);
+    } else if (cmd == 'GET-CONFIG' && parts[2] == 'UNIT') {
       _handleGetConfigResponse(unitId, json);
+    } else if (cmd == 'SET-CONFIG' && parts[2] == 'P2L') {
+      _handleP2lAck(unitId, cmd, code, msg);
+    } else if (cmd == 'SET-LEDS' || cmd == 'CLR-LEDS' || cmd == 'CLR-STRIPS') {
+      _handleP2lAck(unitId, cmd, code, msg);
     } else if (cmd == 'SET-CONFIG' && parts[2] == 'UNIT') {
       // Typová kontrola je nutná: SET-CONFIG má i DISP a P2L (jiný význam).
       _handleUnitCmdAck(unitId, cmd, code, msg);
@@ -907,6 +941,43 @@ class AppState extends ChangeNotifier {
         .pushObserved(unit, includeConfig: true, seenOnBroker: broker));
     _scheduleDbDriftRefresh();
     notifyListeners();
+  }
+
+  /// Odpověď na P2L `GET-CONFIG` — LED konfigurace jednotky (jas, počty LED na
+  /// portech, definice barev). Payload je plochý objekt
+  /// `{"brightness":50,"leds port0":60,"color0":"ff0000","color2_0":"00ff00",…}`;
+  /// chyba přijde jako Code/Message.
+  ///
+  /// Na rozdíl od UNIT `GET-CONFIG` se nikam do evidence nepromítá — jde
+  /// o ladicí hodnoty LED pásků, ne o konfiguraci jednotky.
+  void _handleP2lGetConfigResponse(String unitId, Map<String, dynamic> json) {
+    final code = json['Code'];
+    if (code != null && code != 0 && code != '0') {
+      final msg = json['Message'] as String?;
+      _setStatus('P2L GET-CONFIG $unitId: chyba${msg != null ? " — $msg" : ""}',
+          isError: true);
+      notifyListeners();
+      return;
+    }
+    _p2lConfigs[unitId] = P2lLedConfig.fromGetConfig(json);
+    notifyListeners();
+  }
+
+  /// Potvrzení P2L povelu (`SET-CONFIG` / `SET-LEDS` / `CLR-LEDS` /
+  /// `CLR-STRIPS`) — `{"Code":0,"Message":"OK"}`.
+  void _handleP2lAck(String unitId, String cmd, dynamic code, String? msg) {
+    final ok = code == null || code == 0 || code == '0';
+    final display = int.tryParse(unitId)?.toString() ?? unitId;
+    if (!ok) {
+      _setStatus('P2L $cmd na $display: chyba${msg != null ? " — $msg" : ""}',
+          isError: true);
+      notifyListeners();
+      return;
+    }
+    // Změna konfigurace → načti ji znovu, ať dialogy ukazují skutečný stav.
+    if (cmd == 'SET-CONFIG') {
+      fetchP2lConfig(unitId);
+    }
   }
 
   /// Ack na potvrzovaný config příkaz (`O/.../P2L/.../CMD`,
@@ -1755,6 +1826,9 @@ class AppState extends ChangeNotifier {
     _mqttService.publish(cmd.topic, cmd.payload);
     // Souběžně stáhni i uloženou konfiguraci (GET-CONFIG) — jen kde ji FW umí.
     fetchConfig(id);
+    // A konfiguraci LED pásků, ať jsou dialogy P2L předvyplněné skutečnými
+    // hodnotami hned po otevření seznamu devices.
+    fetchP2lConfig(id);
   }
 
   /// Kompletní obnova observed vrstvy po (znovu)objevení nebo restartu
@@ -1800,6 +1874,158 @@ class AppState extends ChangeNotifier {
     final cmd = CommandService.buildGetConfigCommand(id,
         user: _getConfigUser, password: _getConfigPassword);
     _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  /// Zda jednotka umí nový P2L protokol (povel v topicu, plochý payload).
+  /// Starší firmware všechno přijímá na `.../CMD` ve starém formátu, takže
+  /// ovládání i konfigurace LED fungují i tam — jen `GET-CONFIG` neexistuje.
+  bool _p2lUsesNewProtocol(P2LUnit? unit) =>
+      unit != null &&
+      (unit.isNewGen || CommandService.isNewTopicFormat(unit.id)) &&
+      CommandService.firmwareSupportsGetConfig(unit.firmware);
+
+  /// Vyžádá konfiguraci P2L LED (jas, počty LED na portech, barvy). No-op tam,
+  /// kde ji FW neumí — dialogy pak pracují s továrními hodnotami.
+  void fetchP2lConfig(String unitId) {
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    if (!_p2lUsesNewProtocol(unit)) return;
+    final cmd = CommandService.buildP2lGetConfigCommand(id);
+    _mqttService.publish(cmd.topic, cmd.payload);
+  }
+
+  /// Rozsvítí rozsah LED [x1]–[x2] na vybraných portech.
+  Future<void> sendP2lLeds({
+    required String unitId,
+    required List<int> ports,
+    required int x1,
+    required int x2,
+    required int styleId,
+    required int colorId,
+  }) async {
+    if (ports.isEmpty) return;
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    final cmd = CommandService.buildP2lSetLedsCommand(
+      unitId: id,
+      ports: ports,
+      x1: x1,
+      x2: x2,
+      styleId: styleId,
+      colorId: colorId,
+      newProtocol: _p2lUsesNewProtocol(unit),
+      isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    final portList = ports.map((p) => 'P$p').join(', ');
+    _setStatus('P2L LED $portList: $x1–$x2, barva $colorId, styl $styleId');
+    notifyListeners();
+  }
+
+  /// Zhasne celé porty. Prázdný [ports] = všechny.
+  Future<void> sendP2lClearStrips({
+    required String unitId,
+    List<int> ports = const [],
+  }) async {
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    final cmd = CommandService.buildP2lClearStripsCommand(
+      unitId: id,
+      ports: ports,
+      newProtocol: _p2lUsesNewProtocol(unit),
+      isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _setStatus(ports.isEmpty
+        ? 'P2L LED: zhasnuty všechny porty'
+        : 'P2L LED: zhasnuto ${ports.map((p) => 'P$p').join(', ')}');
+    notifyListeners();
+  }
+
+  /// Zhasne rozsah LED [x1]–[x2] na vybraných portech.
+  Future<void> sendP2lClearLeds({
+    required String unitId,
+    required List<int> ports,
+    required int x1,
+    required int x2,
+  }) async {
+    if (ports.isEmpty) return;
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    final cmd = CommandService.buildP2lClearLedsCommand(
+      unitId: id,
+      ports: ports,
+      x1: x1,
+      x2: x2,
+      newProtocol: _p2lUsesNewProtocol(unit),
+      isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _setStatus('P2L LED ${ports.map((p) => 'P$p').join(', ')}: zhasnuto $x1–$x2');
+    notifyListeners();
+  }
+
+  /// Jas P2L LED (1–100). Lokálně se projeví hned, po potvrzení se stejně
+  /// načte skutečný stav z jednotky ([_handleP2lAck]).
+  Future<void> setP2lBrightness({
+    required String unitId,
+    required int brightness,
+  }) async {
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    final value = brightness.clamp(1, 100);
+    final cmd = CommandService.buildP2lBrightnessCommand(
+      unitId: id,
+      brightness: value,
+      newProtocol: _p2lUsesNewProtocol(unit),
+      isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _p2lConfigs[id] = p2lConfigFor(id).copyWith(brightness: value);
+    _setStatus('P2L LED jas: $value %');
+    notifyListeners();
+  }
+
+  /// Počet LED na portech (port → počet).
+  Future<void> setP2lLedCounts({
+    required String unitId,
+    required Map<int, int> counts,
+  }) async {
+    if (counts.isEmpty) return;
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    final cmd = CommandService.buildP2lLedCountsCommand(
+      unitId: id,
+      counts: counts,
+      newProtocol: _p2lUsesNewProtocol(unit),
+      isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _p2lConfigs[id] = p2lConfigFor(id)
+        .copyWith(ledCounts: {...p2lConfigFor(id).ledCounts, ...counts});
+    _setStatus('P2L LED: počty nastaveny na ${counts.length} portech');
+    notifyListeners();
+  }
+
+  /// Definice barev (`color_id` → RGB + RGB2).
+  Future<void> setP2lColors({
+    required String unitId,
+    required Map<int, P2lColorSlot> colors,
+  }) async {
+    if (colors.isEmpty) return;
+    final id = _normUnitId(unitId);
+    final unit = _units[id];
+    final cmd = CommandService.buildP2lColorsCommand(
+      unitId: id,
+      colors: colors,
+      newProtocol: _p2lUsesNewProtocol(unit),
+      isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
+    );
+    _mqttService.publish(cmd.topic, cmd.payload);
+    _p2lConfigs[id] = p2lConfigFor(id)
+        .copyWith(colors: {...p2lConfigFor(id).colors, ...colors});
+    _setStatus('P2L LED: barvy nastaveny (${colors.length})');
+    notifyListeners();
   }
 
   /// Read-only sken RS485 sběrnice (SCAN-DEVICES) — zjistí fyzicky připojené
@@ -2418,6 +2644,8 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _tickTimer?.cancel();
+    _stateSub?.cancel();
+    _messageSub?.cancel();
     _mqttService.dispose();
     super.dispose();
   }

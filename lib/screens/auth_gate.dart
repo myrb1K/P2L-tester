@@ -78,48 +78,53 @@ class _AuthGateState extends State<AuthGate> {
   /// recykloval stejný State a `initialEntries` ignoroval → zůstal by viset
   /// první obsah (spinner). Rozdílný klíč per stav vynutí přemount s novým childem.
   Widget _overlayHost(Widget child) => Overlay(
-        key: ValueKey(_state),
-        initialEntries: [OverlayEntry(builder: (_) => child)],
-      );
+    key: ValueKey(_state),
+    initialEntries: [OverlayEntry(builder: (_) => child)],
+  );
 
   @override
   Widget build(BuildContext context) {
     switch (_state) {
       case _AuthState.checking:
-        return _overlayHost(const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        ));
+        return _overlayHost(
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
+        );
       case _AuthState.networkError:
-        return _overlayHost(Scaffold(
-          body: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Auth backend není dostupný',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$_lastError',
-                    style: const TextStyle(color: Colors.grey, fontSize: 12),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: _check,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Zkusit znovu'),
-                  ),
-                ],
+        return _overlayHost(
+          Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Auth backend není dostupný',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$_lastError',
+                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      onPressed: _check,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Zkusit znovu'),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ));
+        );
       case _AuthState.loggedOut:
         return _overlayHost(LoginScreen(api: _api, onLoggedIn: _onLoggedIn));
       case _AuthState.loggedIn:

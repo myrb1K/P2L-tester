@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../models/bus_scan.dart';
 import '../models/device.dart';
 import '../models/module.dart';
+import '../models/p2l_led_config.dart';
 
 class CommandService {
   /// Zjistí, zda jednotka používá nový formát topicu (ID >= 1000)
@@ -709,5 +710,218 @@ class CommandService {
       type == DeviceType.dist ||
       type == DeviceType.disp ||
       type == DeviceType.btn;
+
+  // ============================================================
+  // P2L LED — LED pásky na portech jednotky (kód device 01)
+  // ============================================================
+  //
+  // Dvojí protokol podle firmwaru:
+  //  * FW >= P2L_26071501NT — povel je v topicu
+  //    `I/<unit>/P2L/<p2l_id>/<POVEL>` a payload je plochý JSON bez obalu
+  //    `cmds` (viz README-P2L-32.md, sekce „P2L - ovládání LED").
+  //  * starší — všechno jde na `.../CMD` ve starém formátu
+  //    `{"request_id":-1,"cmds":[{"cmd":…,"args":…}]}` (README-P2L.md).
+  //
+  // Volající pozná generaci přes [firmwareSupportsGetConfig] a předá
+  // `newProtocol`. Payload obou variant nese stejné hodnoty, takže se nemůžou
+  // rozejít.
+
+  /// Topic pro P2L LED zařízení: `I/<unit6>/P2L/01<last4>/<CMD>`.
+  ///
+  /// P2L_ID = ID jednotky + 10000 (`001001` → `011001`), což je pro 4-ciferná
+  /// ID jednotek totéž co prefix `01` + poslední 4 číslice — stejně jako to
+  /// dělá [getCommandTopic].
+  static String getP2lCommandTopic(String unitId, String command) {
+    final id = _unitId6(unitId);
+    final last4 = id.substring(id.length - 4);
+    return 'I/$id/P2L/01$last4/$command';
+  }
+
+  /// Zabalí příkazy do starého `CMD` formátu.
+  static String _legacyCmds(List<Map<String, dynamic>> cmds) =>
+      jsonEncode({'request_id': -1, 'cmds': cmds});
+
+  /// P2L `GET-CONFIG`: vrátí počty LED na portech, barvy a jas. Umí ho jen
+  /// nový FW (>= P2L_26071501NT); starší neodpoví, proto se volá jen tam.
+  static ({String topic, String payload}) buildP2lGetConfigCommand(
+      String unitId) {
+    return (topic: getP2lCommandTopic(unitId, 'GET-CONFIG'), payload: '{}');
+  }
+
+  /// Rozsvícení rozsahu LED na vybraných portech.
+  ///
+  /// Nový protokol pošle pole bloků (jeden na port) na `SET-LEDS`, starý totéž
+  /// jako několik `set_leds` v jednom `cmds`.
+  static ({String topic, String payload}) buildP2lSetLedsCommand({
+    required String unitId,
+    required List<int> ports,
+    required int x1,
+    required int x2,
+    required int styleId,
+    required int colorId,
+    required bool newProtocol,
+    bool isNewGen = true,
+  }) {
+    final blocks = [
+      for (final port in ports)
+        {
+          'port': port,
+          'x1': x1,
+          'x2': x2,
+          'style_id': styleId,
+          'color_id': colorId,
+        },
+    ];
+    if (newProtocol) {
+      return (
+        topic: getP2lCommandTopic(unitId, 'SET-LEDS'),
+        payload: jsonEncode(blocks),
+      );
+    }
+    return (
+      topic: getCommandTopic(unitId, isNewGen: isNewGen),
+      payload: _legacyCmds([
+        for (final args in blocks) {'cmd': 'set_leds', 'args': args},
+      ]),
+    );
+  }
+
+  /// Zhasnutí celých portů. Prázdný [ports] = všechny porty (nový protokol to
+  /// řeší prázdným payloadem, starý vynechaným argumentem).
+  static ({String topic, String payload}) buildP2lClearStripsCommand({
+    required String unitId,
+    List<int> ports = const [],
+    required bool newProtocol,
+    bool isNewGen = true,
+  }) {
+    if (newProtocol) {
+      return (
+        topic: getP2lCommandTopic(unitId, 'CLR-STRIPS'),
+        payload: ports.isEmpty ? '{}' : jsonEncode({'ports': ports}),
+      );
+    }
+    return (
+      topic: getCommandTopic(unitId, isNewGen: isNewGen),
+      payload: _legacyCmds([
+        {
+          'cmd': 'clr_strips',
+          if (ports.isNotEmpty) 'args': {'ports': ports},
+        },
+      ]),
+    );
+  }
+
+  /// Zhasnutí rozsahu LED na vybraných portech (`CLR-LEDS` / `clr_leds`).
+  static ({String topic, String payload}) buildP2lClearLedsCommand({
+    required String unitId,
+    required List<int> ports,
+    required int x1,
+    required int x2,
+    required bool newProtocol,
+    bool isNewGen = true,
+  }) {
+    final blocks = [
+      for (final port in ports) {'port': port, 'x1': x1, 'x2': x2},
+    ];
+    if (newProtocol) {
+      return (
+        topic: getP2lCommandTopic(unitId, 'CLR-LEDS'),
+        payload: jsonEncode(blocks),
+      );
+    }
+    return (
+      topic: getCommandTopic(unitId, isNewGen: isNewGen),
+      payload: _legacyCmds([
+        for (final args in blocks) {'cmd': 'clr_leds', 'args': args},
+      ]),
+    );
+  }
+
+  /// Jas P2L LED (1–100). Nový protokol `SET-CONFIG {"brightness":N}`,
+  /// starý `set_brightness`.
+  static ({String topic, String payload}) buildP2lBrightnessCommand({
+    required String unitId,
+    required int brightness,
+    required bool newProtocol,
+    bool isNewGen = true,
+  }) {
+    final value = brightness.clamp(1, 100);
+    if (newProtocol) {
+      return (
+        topic: getP2lCommandTopic(unitId, 'SET-CONFIG'),
+        payload: jsonEncode({'brightness': value}),
+      );
+    }
+    return (
+      topic: getCommandTopic(unitId, isNewGen: isNewGen),
+      payload: _legacyCmds([
+        {
+          'cmd': 'set_brightness',
+          'args': {'value': value},
+        },
+      ]),
+    );
+  }
+
+  /// Počet LED na portech (port → počet). Nový protokol pošle všechny porty
+  /// v jednom `SET-CONFIG`, starý jako několik `set_led_count`.
+  static ({String topic, String payload}) buildP2lLedCountsCommand({
+    required String unitId,
+    required Map<int, int> counts,
+    required bool newProtocol,
+    bool isNewGen = true,
+  }) {
+    final ports = counts.keys.toList()..sort();
+    final entries = [
+      for (final port in ports) {'port': port, 'leds': counts[port]},
+    ];
+    if (newProtocol) {
+      return (
+        topic: getP2lCommandTopic(unitId, 'SET-CONFIG'),
+        payload: jsonEncode({'ledCounts': entries}),
+      );
+    }
+    return (
+      topic: getCommandTopic(unitId, isNewGen: isNewGen),
+      payload: _legacyCmds([
+        for (final args in entries) {'cmd': 'set_led_count', 'args': args},
+      ]),
+    );
+  }
+
+  /// Definice barev (`color_id` → RGB + RGB2). Nový protokol pošle všechny
+  /// sloty v jednom `SET-CONFIG`, starý jako několik `set_color`.
+  static ({String topic, String payload}) buildP2lColorsCommand({
+    required String unitId,
+    required Map<int, P2lColorSlot> colors,
+    required bool newProtocol,
+    bool isNewGen = true,
+  }) {
+    final ids = colors.keys.toList()..sort();
+    final entries = [
+      for (final id in ids)
+        {
+          'color_id': id,
+          'red': colors[id]!.red,
+          'green': colors[id]!.green,
+          'blue': colors[id]!.blue,
+          'red2': colors[id]!.red2,
+          'green2': colors[id]!.green2,
+          'blue2': colors[id]!.blue2,
+        },
+    ];
+    if (newProtocol) {
+      return (
+        topic: getP2lCommandTopic(unitId, 'SET-CONFIG'),
+        payload: jsonEncode({'colors': entries}),
+      );
+    }
+    return (
+      topic: getCommandTopic(unitId, isNewGen: isNewGen),
+      payload: _legacyCmds([
+        for (final args in entries) {'cmd': 'set_color', 'args': args},
+      ]),
+    );
+  }
 }
 

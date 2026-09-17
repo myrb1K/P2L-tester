@@ -70,6 +70,11 @@ Spodní lišta (viditelná, když jsi připojen a máš jednotky):
    - **ZHASNI** (červená) — zhasne LED na vybraných jednotkách a portech.
    - **SCAN** — obnoví všechny jednotky.
 
+Lišta je určená pro **rychlý test přes víc jednotek najednou**. Když potřebuješ
+pracovat s LED jedné jednotky podrobněji (konkrétní rozsah diod, styl svícení,
+jas, počty LED na portech, definice barev), otevři **Seznam devices** té
+jednotky a použij sekci **P2L** — viz §5.
+
 ---
 
 ## 4. Výběr jednotek a hromadná konfigurace
@@ -95,7 +100,35 @@ Menu **Hromadná konfigurace** (ikona `settings_remote`) je aktivní jen při v�
 
 ## 5. Detail jednotky a správa devices
 
-Otevřeš ikonou **Seznam devices** na kartě jednotky. Devices jsou seskupené podle typu (**PUM-A / PUM-B / PUM-C / SENZOR**).
+Otevřeš ikonou **Seznam devices** na kartě jednotky. Devices jsou seskupené podle typu (**PUM-A / PUM-B / PUM-C / SENZOR**). Úplně nahoře je navíc sekce **P2L** — LED pásky připojené přímo na porty jednotky.
+
+### P2L — LED pásky jednotky
+
+Sekce **P2L** má vždy právě jeden chip s **číslem jednotky** (např. `1209`). Nejde o čip na RS485 sběrnici, ale o LED výstupy jednotky samotné, takže se **nepočítá mezi devices**. Nepleť si ho s LED kroužky na PUM-A / PUM-B — ty se ovládají z menu příslušného modulu.
+
+Klepnutím na chip se otevře menu se čtyřmi položkami:
+
+| Položka | Co dělá |
+|---|---|
+| **Ovládání** | rozsvítí / zhasne zvolený rozsah LED na vybraných portech |
+| **Jas P2L LED** | jas pásků 1–100 % |
+| **Počet P2L LED** | kolik LED je na kterém portu |
+| **Barvy P2L LED** | skutečné RGB u barev `0`–`5` |
+
+#### Ovládání
+
+- **LED od / LED do** — rozsah diod, které se mají rozsvítit. Výchozí rozsah se vezme z počtu LED hlášeného jednotkou.
+- **Barva** — rozevírací seznam; každá položka je barevný obdélník s **číslem barvy** uvnitř. Barvy jsou ty **skutečné z jednotky**, ne tabulkové — když si je přenastavíš v *Barvy P2L LED*, projeví se to i tady.
+- **Styl svícení** — svítí, bliká, střídání barev, split svícení a další.
+- **Porty 0–7** — dvě řady tlačítek (`0`–`3` a `4`–`7`). **Klepnutí povel rovnou odešle**: zhasnutý port se rozsvítí podle nastaveného rozsahu, barvy a stylu, dalším klepnutím zhasne. Barevné tlačítko tedy znamená „tenhle port právě svítí", ne „vybráno k odeslání".
+- **Rozsvítit vše** (zelené, vlevo dole) — rozsvítí všech osm portů najednou. Jakmile něco svítí, tlačítko se změní na červené **Zhasnout vše** a jedním stiskem zhasne všechno. Totéž dělá přepínač **Vše / Zrušit** nad řadami portů.
+- Změna barvy, stylu nebo rozsahu se projeví až u **dalšího** rozsvícení — to, co už svítí, se sama nepřekreslí. Když chceš vidět novou barvu na svítícím portu, klepni na něj dvakrát (zhasnout, rozsvítit).
+
+#### Jas, počet LED, barvy
+
+Hodnoty se načítají přímo z jednotky, takže dialogy ukazují skutečný stav. U **počtu LED** platí, že prázdné pole port nezmění — vyplň jen ty, které chceš přenastavit (tlačítko *Port 0 na všechny* zkopíruje hodnotu do ostatních). U **barev** má každé číslo dvě barvy: hlavní a *color2*, kterou používají styly se střídáním barev. Klepnutím na vzorek zadáš RGB hex nebo vybereš ze základní palety; posílají se jen barvy, na které jsi opravdu sáhl.
+
+> Starší firmware jednotky konfiguraci LED nehlásí — dialogy pak ukazují tovární hodnoty a napíšou to. Nastavení i ovládání funguje i tam, jen appka nevidí, co v jednotce opravdu je.
 
 ### Akce v liště detailu
 
