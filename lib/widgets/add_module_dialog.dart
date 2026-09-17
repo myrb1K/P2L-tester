@@ -652,7 +652,8 @@ class _AddModuleDialogState extends State<AddModuleDialog> {
                   _buildSegmentsBox(context),
                 const SizedBox(height: 4),
                 Text(
-                  'Segmenty jsou jen ke čtení (režim „segments").',
+                  'Segmenty jsou jen ke čtení (režim „segments"). '
+                  'Nastavit je lze v CI4 / Swaggeru.',
                   style: TextStyle(
                     fontSize: 11,
                     fontStyle: FontStyle.italic,

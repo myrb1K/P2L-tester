@@ -180,7 +180,10 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     if (users.isEmpty) {
       return const Center(child: Text('Žádní uživatelé.'));
     }
-    final currentUsername = AuthScope.userOf(context)?.username ?? '';
+    // currentUser (ne userOf) — na nativu AuthGate neběží, takže by
+    // username zůstalo prázdné a zmizela by pojistka proti smazání
+    // vlastního účtu.
+    final currentUsername = AuthScope.currentUser(context)?.username ?? '';
     return ListView.separated(
       itemCount: users.length,
       separatorBuilder: (_, _) => const Divider(height: 1),
