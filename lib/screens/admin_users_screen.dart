@@ -192,8 +192,9 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         final isSelf = u.username == currentUsername;
         return ListTile(
           leading: CircleAvatar(
-            backgroundColor:
-                u.isAdmin ? Colors.blue.shade100 : Colors.grey.shade200,
+            backgroundColor: u.isAdmin
+                ? Colors.blue.shade100
+                : Colors.grey.shade200,
             child: Icon(
               u.isAdmin ? Icons.shield : Icons.person,
               color: u.isAdmin ? Colors.blue.shade800 : Colors.grey.shade700,
@@ -202,32 +203,42 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
           ),
           title: Row(
             children: [
-              Text(u.username,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                u.username,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
               if (u.isAdmin) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade100,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text('admin',
-                      style: TextStyle(fontSize: 10, color: Colors.blue)),
+                  child: const Text(
+                    'admin',
+                    style: TextStyle(fontSize: 10, color: Colors.blue),
+                  ),
                 ),
               ],
               if (isSelf) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green.shade100,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text('to jsi ty',
-                      style: TextStyle(fontSize: 10, color: Colors.green)),
+                  child: const Text(
+                    'to jsi ty',
+                    style: TextStyle(fontSize: 10, color: Colors.green),
+                  ),
                 ),
               ],
             ],
@@ -245,8 +256,10 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                 onPressed: () => _resetPassword(u),
               ),
               IconButton(
-                icon: Icon(Icons.delete_outline,
-                    color: isSelf ? Colors.grey.shade400 : Colors.red),
+                icon: Icon(
+                  Icons.delete_outline,
+                  color: isSelf ? Colors.grey.shade400 : Colors.red,
+                ),
                 tooltip: isSelf
                     ? 'Nelze smazat svůj vlastní účet'
                     : 'Smazat uživatele',
@@ -328,15 +341,16 @@ class _NewUserDialogState extends State<_NewUserDialog> {
                 labelText: 'Heslo',
                 prefixIcon: const Icon(Icons.lock_outline),
                 suffixIcon: IconButton(
-                  icon: Icon(_obscure
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined),
+                  icon: Icon(
+                    _obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
                 border: const OutlineInputBorder(),
               ),
-              validator: (v) =>
-                  (v == null || v.isEmpty) ? 'Zadej heslo' : null,
+              validator: (v) => (v == null || v.isEmpty) ? 'Zadej heslo' : null,
               onFieldSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 4),
@@ -344,8 +358,10 @@ class _NewUserDialogState extends State<_NewUserDialog> {
               value: _isAdmin,
               onChanged: (v) => setState(() => _isAdmin = v ?? false),
               title: const Text('Admin role'),
-              subtitle: const Text('Může spravovat ostatní uživatele',
-                  style: TextStyle(fontSize: 11)),
+              subtitle: const Text(
+                'Může spravovat ostatní uživatele',
+                style: TextStyle(fontSize: 11),
+              ),
               controlAffinity: ListTileControlAffinity.leading,
               contentPadding: EdgeInsets.zero,
               dense: true,
@@ -399,9 +415,11 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
           labelText: 'Nové heslo',
           prefixIcon: const Icon(Icons.lock_outline),
           suffixIcon: IconButton(
-            icon: Icon(_obscure
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined),
+            icon: Icon(
+              _obscure
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+            ),
             onPressed: () => setState(() => _obscure = !_obscure),
           ),
           border: const OutlineInputBorder(),

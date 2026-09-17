@@ -16,6 +16,7 @@ import '../providers/app_state.dart';
 import '../services/file_export.dart';
 import '../services/template_io.dart';
 import '../widgets/add_module_dialog.dart';
+import '../widgets/p2l_led_dialogs.dart';
 import '../widgets/apply_template_sheet.dart';
 import '../widgets/replace_device_dialog.dart';
 import '../widgets/set_device_id_dialog.dart';
@@ -536,11 +537,10 @@ class _UnitDetailScreenState extends State<UnitDetailScreen> {
                   onClose: () => state.clearBusScan(widget.unitId),
                 ),
               Expanded(
-                child: (modules.isEmpty && ghosts.isEmpty)
-                    ? _EmptyModules(pending: pending)
-                    : _ModulesGroupedList(
+                child: _ModulesGroupedList(
                         unitId: widget.unitId,
                         modules: modules,
+                        pending: pending,
                         alertAddresses: alertAddresses,
                         ghosts: ghosts,
                         onAdd: (addr, busType) =>
@@ -678,6 +678,8 @@ class _UnitInfoCard extends StatelessWidget {
 class _ModulesGroupedList extends StatelessWidget {
   final String unitId;
   final List<PumaModule> modules;
+  // Probíhá GET-DEVICES — mění jen text prázdného stavu.
+  final bool pending;
   // Adresy modulů k červenému okraji chipu (chybí na sběrnici ze skenu NEBO
   // hlásí poruchu v ALIVE).
   final Set<int> alertAddresses;
@@ -701,6 +703,7 @@ class _ModulesGroupedList extends StatelessWidget {
   const _ModulesGroupedList({
     required this.unitId,
     required this.modules,
+    required this.pending,
     required this.alertAddresses,
     required this.ghosts,
     required this.onAdd,
@@ -769,6 +772,14 @@ class _ModulesGroupedList extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       children: [
+        // LED pásky jednotky — samostatná sekce nad devices ze sběrnice.
+        // Není to čip na RS485, takže se nepočítá mezi devices.
+        P2lLedSection(unitId: unitId),
+        if (configByCat.isEmpty && ghostByCat.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 32),
+            child: _EmptyModules(pending: pending),
+          ),
         for (final cat in _order)
           if ((configByCat[cat]?.isNotEmpty ?? false) ||
               (ghostByCat[cat]?.isNotEmpty ?? false))
