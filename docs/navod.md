@@ -117,12 +117,15 @@ Klepnutím na chip se otevře menu se čtyřmi položkami:
 
 #### Ovládání
 
-- **LED od / LED do** — rozsah diod, které se mají rozsvítit. Výchozí rozsah se vezme z počtu LED hlášeného jednotkou.
+- **LED od / LED do** — rozsah diod, které se mají rozsvítit. Výchozí je krátkých `0`–`59`; povel na celý pásek zbytečně zatěžuje jednotku a na test stačí kus.
 - **Barva** — rozevírací seznam; každá položka je barevný obdélník s **číslem barvy** uvnitř. Barvy jsou ty **skutečné z jednotky**, ne tabulkové — když si je přenastavíš v *Barvy P2L LED*, projeví se to i tady.
 - **Styl svícení** — svítí, bliká, střídání barev, split svícení a další.
-- **Porty 0–7** — dvě řady tlačítek (`0`–`3` a `4`–`7`). **Klepnutí povel rovnou odešle**: zhasnutý port se rozsvítí podle nastaveného rozsahu, barvy a stylu, dalším klepnutím zhasne. Barevné tlačítko tedy znamená „tenhle port právě svítí", ne „vybráno k odeslání".
+- **Porty 0–7** — dvě řady tlačítek (`0`–`3` a `4`–`7`). Každý port je **vypínač rozdělený vodorovně**, povel se posílá hned:
+  - **nahoře (číslo portu)** — rozsvítí zadaný rozsah. Barva tlačítka ukazuje, čím port svítí naposledy.
+  - **dole (úzký pruh s ikonou)** — zhasne celý port.
+- **Na jednom portu může svítit víc rozsahů.** Rozsvícení je aditivní — nový povel ty předchozí úseky nezháší. Takže rozsvítíš `0`–`59` červeně, pak přepíšeš rozsah na `100`–`159`, zvolíš modrou a klepneš vlevo znovu: na portu svítí oba úseky, každý svou barvou. Tlačítko zobrazuje barvu toho posledního; zhasnout je můžeš jen všechny najednou (pravá půlka).
 - **Rozsvítit vše** (zelené, vlevo dole) — rozsvítí všech osm portů najednou. Jakmile něco svítí, tlačítko se změní na červené **Zhasnout vše** a jedním stiskem zhasne všechno. Totéž dělá přepínač **Vše / Zrušit** nad řadami portů.
-- Změna barvy, stylu nebo rozsahu se projeví až u **dalšího** rozsvícení — to, co už svítí, se sama nepřekreslí. Když chceš vidět novou barvu na svítícím portu, klepni na něj dvakrát (zhasnout, rozsvítit).
+- Změna barvy, stylu nebo rozsahu se projeví až u **dalšího** rozsvícení — co už svítí, se samo nepřekreslí.
 
 #### Jas, počet LED, barvy
 
