@@ -10,6 +10,7 @@ import '../main.dart';
 import '../models/broker_profile.dart';
 import '../providers/app_state.dart';
 import '../services/file_export.dart';
+import '../services/auth_session.dart';
 import '../widgets/account_section.dart';
 import 'admin_users_screen.dart';
 import 'auth_gate.dart';
@@ -530,29 +531,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (kIsWeb &&
-                    (AuthScope.userOf(context)?.isAdmin ?? false)) ...[
-                  Card(
-                    margin: EdgeInsets.zero,
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.admin_panel_settings,
-                        color: Colors.blue,
-                      ),
-                      title: const Text('Administrace uživatelů'),
-                      subtitle: const Text(
-                        'Spravovat účty pro přístup k webové variantě',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const AdminUsersScreen(),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
                 const Text(
                   'Uložené profily',
                   style: TextStyle(fontWeight: FontWeight.bold),
@@ -872,6 +850,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 const AccountSection(),
+                // Administrace uživatelů patří k Účtu — proto hned pod ním.
+                // Jen pro admina, na všech platformách (web i EXE/APK).
+                // ListenableBuilder kvůli nativu: po přihlášení/odhlášení za
+                // běhu se karta musí objevit i zmizet bez odchodu z obrazovky
+                // (na webu to řeší rebuild AuthScope InheritedWidgetu).
+                ListenableBuilder(
+                  listenable: AuthSession.instance,
+                  builder: (context, _) {
+                    if (!(AuthScope.currentUser(context)?.isAdmin ?? false)) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Card(
+                        margin: EdgeInsets.zero,
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.admin_panel_settings,
+                            color: Colors.blue,
+                          ),
+                          title: const Text('Administrace uživatelů'),
+                          subtitle: const Text(
+                            'Spravovat účty pro přístup k databázi jednotek',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const AdminUsersScreen(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),

@@ -5,9 +5,11 @@
 // Native build (APK/EXE) AuthGate vůbec nepoužívá — main.dart pouští rovnou
 // _InitialRoute, guardováno `kIsWeb`.
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../services/auth_api.dart';
+import '../services/auth_session.dart';
 import 'login_screen.dart';
 
 class AuthGate extends StatefulWidget {
@@ -161,6 +163,13 @@ class AuthScope {
 
   static AuthApi? apiOf(BuildContext context) =>
       _AuthScope.maybeOf(context)?.api;
+
+  /// Přihlášený uživatel napříč platformami: web ho drží v [_AuthScope]
+  /// (InheritedWidget nad AuthGate), nativ v [AuthSession] — AuthGate tam
+  /// vůbec neběží, takže [userOf] by na EXE/APK vždy vrátilo `null`.
+  /// Vrací `null`, když nikdo přihlášený není.
+  static AuthUser? currentUser(BuildContext context) =>
+      kIsWeb ? userOf(context) : AuthSession.instance.user;
 
   /// Zavolá `/api/logout` na backendu a překlopí UI na LoginScreen.
   static Future<void> logout(BuildContext context) async {
