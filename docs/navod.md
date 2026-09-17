@@ -124,7 +124,7 @@ Klepnutím na chip se otevře menu se čtyřmi položkami:
   - **nahoře (číslo portu)** — rozsvítí zadaný rozsah. Barva tlačítka ukazuje, čím port svítí naposledy.
   - **dole (úzký pruh s ikonou)** — zhasne celý port.
 - **Na jednom portu může svítit víc rozsahů.** Rozsvícení je aditivní — nový povel ty předchozí úseky nezháší. Takže rozsvítíš `0`–`59` červeně, pak přepíšeš rozsah na `100`–`159`, zvolíš modrou a klepneš vlevo znovu: na portu svítí oba úseky, každý svou barvou. Tlačítko zobrazuje barvu toho posledního; zhasnout je můžeš jen všechny najednou (pravá půlka).
-- **Rozsvítit vše** (zelené, vlevo dole) — rozsvítí všech osm portů najednou. Jakmile něco svítí, tlačítko se změní na červené **Zhasnout vše** a jedním stiskem zhasne všechno. Totéž dělá přepínač **Vše / Zrušit** nad řadami portů.
+- **Rozsvítit vše** (zelené, vlevo dole) — rozsvítí všech osm portů najednou. Jakmile něco svítí, tlačítko se změní na červené **Zhasnout vše** a jedním stiskem zhasne všechno.
 - Změna barvy, stylu nebo rozsahu se projeví až u **dalšího** rozsvícení — co už svítí, se samo nepřekreslí.
 
 #### Jas, počet LED, barvy

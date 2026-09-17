@@ -53,16 +53,20 @@ class AppState extends ChangeNotifier {
   /// request_id. Do timeoutu bez acku = jednotka nepotvrdila (offline).
   /// `onConfirmed` se spustí až po potvrzení (typicky zápis desired do DB —
   /// ať evidence nelže).
-  final Map<int,
-          ({String unitId, String label, Timer timer, VoidCallback onConfirmed})>
-      _pendingCmdAcks = {};
+  final Map<
+    int,
+    ({String unitId, String label, Timer timer, VoidCallback onConfirmed})
+  >
+  _pendingCmdAcks = {};
 
   /// Totéž pro UNIT-level příkazy, které ack přes `request_id` neumí a
   /// odpovídají Code/Message na zrcadlovém topicu (`O/<unit>/UNIT/<unit>/<CMD>`)
   /// — typicky `SET-CONFIG`. Klíč: `<unitId>/<CMD>`.
-  final Map<String,
-          ({String unitId, String label, Timer timer, VoidCallback onConfirmed})>
-      _pendingUnitAcks = {};
+  final Map<
+    String,
+    ({String unitId, String label, Timer timer, VoidCallback onConfirmed})
+  >
+  _pendingUnitAcks = {};
 
   /// True = jednotka má v DB nesoulad s evidencí. Jen orientační (osvěží se
   /// z DB s malým zpožděním). Prázdné u nepřihlášeného.
@@ -93,7 +97,10 @@ class AppState extends ChangeNotifier {
     }
     try {
       final units = await UnitDbService.instance.fetchUnits();
-      final next = {for (final u in units) if (u.drift) u.id};
+      final next = {
+        for (final u in units)
+          if (u.drift) u.id,
+      };
       if (!setEquals(_dbDriftIds, next)) {
         _dbDriftIds = next;
         notifyListeners();
@@ -102,6 +109,7 @@ class AppState extends ChangeNotifier {
       // DB nedostupná — indikátor necháme být (žádné rušení práce).
     }
   }
+
   bool useSsl = false;
   bool useWebsocket = false;
   String wsPath = '/mqtt';
@@ -216,8 +224,10 @@ class AppState extends ChangeNotifier {
       list = list.where((u) => !u.isOnline).toList();
     }
     list.sort((a, b) {
-      final na = int.tryParse(a.id.startsWith('u') ? a.id.substring(1) : a.id) ?? 0;
-      final nb = int.tryParse(b.id.startsWith('u') ? b.id.substring(1) : b.id) ?? 0;
+      final na =
+          int.tryParse(a.id.startsWith('u') ? a.id.substring(1) : a.id) ?? 0;
+      final nb =
+          int.tryParse(b.id.startsWith('u') ? b.id.substring(1) : b.id) ?? 0;
       return na.compareTo(nb);
     });
     return list;
@@ -226,11 +236,15 @@ class AppState extends ChangeNotifier {
   int get offlineCount => _units.values.where((u) => !u.isOnline).length;
 
   // Device management getters
-  List<PumaModule>? modulesForUnit(String unitId) => _unitModules[_normUnitId(unitId)];
-  DateTime? modulesFetchedAt(String unitId) => _unitModulesFetchedAt[_normUnitId(unitId)];
-  bool isModulesPending(String unitId) => _unitModulesPending.contains(_normUnitId(unitId));
+  List<PumaModule>? modulesForUnit(String unitId) =>
+      _unitModules[_normUnitId(unitId)];
+  DateTime? modulesFetchedAt(String unitId) =>
+      _unitModulesFetchedAt[_normUnitId(unitId)];
+  bool isModulesPending(String unitId) =>
+      _unitModulesPending.contains(_normUnitId(unitId));
   BusScanResult? busScanFor(String unitId) => _unitBusScan[_normUnitId(unitId)];
-  bool isBusScanPending(String unitId) => _unitBusScanPending.contains(_normUnitId(unitId));
+  bool isBusScanPending(String unitId) =>
+      _unitBusScanPending.contains(_normUnitId(unitId));
 
   /// Konfigurace P2L LED jednotky (jas, počty LED na portech, barvy).
   /// Nikdy `null` — dokud jednotka neodpoví, vrací prázdnou
@@ -249,6 +263,7 @@ class AppState extends ChangeNotifier {
     if (scan == null || mods == null) return const [];
     return diagnoseBus(mods, scan);
   }
+
   List<DeviceTemplate> get templates => List.unmodifiable(_templates);
   String get deviceActionStatus => _deviceActionStatus;
   bool get deviceActionIsError => _deviceActionIsError;
@@ -268,6 +283,7 @@ class AppState extends ChangeNotifier {
     filterOffline = !filterOffline;
     notifyListeners();
   }
+
   Set<String> get selectedUnits => Set.unmodifiable(_selectedUnits);
   AppMqttState get connectionState => _connectionState;
   String? get lastError => _lastError;
@@ -328,7 +344,8 @@ class AppState extends ChangeNotifier {
     ledColor = prefs.getInt('led_color') ?? 0;
     _lastWifiSsid = prefs.getString('last_wifi_ssid') ?? '';
     _lastWifiPassword = prefs.getString('last_wifi_password') ?? '';
-    _firmwareBaseUrl = prefs.getString('firmware_base_url') ??
+    _firmwareBaseUrl =
+        prefs.getString('firmware_base_url') ??
         'http://185.149.129.164/download';
     _getConfigUser = prefs.getString('get_config_user') ?? 'admin';
     _getConfigPassword = prefs.getString('get_config_password') ?? 'smartbox';
@@ -346,7 +363,10 @@ class AppState extends ChangeNotifier {
 
   Future<void> _saveProfiles() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('broker_profiles', BrokerProfile.listToJson(_profiles));
+    await prefs.setString(
+      'broker_profiles',
+      BrokerProfile.listToJson(_profiles),
+    );
     await prefs.setInt('active_profile', _activeProfileIndex);
   }
 
@@ -492,9 +512,11 @@ class AppState extends ChangeNotifier {
     // Přepočet _activeProfileIndex tak, aby dál ukazoval na stejný profil.
     if (_activeProfileIndex == oldIndex) {
       _activeProfileIndex = target;
-    } else if (_activeProfileIndex > oldIndex && _activeProfileIndex <= target) {
+    } else if (_activeProfileIndex > oldIndex &&
+        _activeProfileIndex <= target) {
       _activeProfileIndex -= 1;
-    } else if (_activeProfileIndex < oldIndex && _activeProfileIndex >= target) {
+    } else if (_activeProfileIndex < oldIndex &&
+        _activeProfileIndex >= target) {
       _activeProfileIndex += 1;
     }
 
@@ -581,7 +603,8 @@ class AppState extends ChangeNotifier {
             // nemá smysl počítat jeho lastSeen do online/offline výpočtu.
             if (unit.isPlaceholder) continue;
             final wasOnline = unit.isOnline;
-            unit.isOnline = DateTime.now().difference(unit.lastSeen).inSeconds < 360;
+            unit.isOnline =
+                DateTime.now().difference(unit.lastSeen).inSeconds < 360;
             // Při online→offline odebrat z waved setu, aby návrat (kdykoliv,
             // i když je karta mimo viewport) zase spustil vlnu.
             if (wasOnline && !unit.isOnline) {
@@ -595,7 +618,8 @@ class AppState extends ChangeNotifier {
       // Chybu vezmeme synchronně z MqttService — stateStream listener ji
       // doručí až v microtasku, takže UI (čte lastError hned po awaitu) by
       // jinak viděla starou hodnotu (typicky null = "Chyba: null").
-      _lastError = _mqttService.lastError ??
+      _lastError =
+          _mqttService.lastError ??
           'Připojení k brokeru selhalo (neznámá chyba)';
     }
 
@@ -636,19 +660,33 @@ class AppState extends ChangeNotifier {
 
     if (topic.contains('/ALIVE') && decoded is Map<String, dynamic>) {
       _handleAlive(topic, decoded);
-    } else if (topic.startsWith('A/SERVER/') && decoded is Map<String, dynamic>) {
+    } else if (topic.startsWith('A/SERVER/') &&
+        decoded is Map<String, dynamic>) {
       _handleResponse(topic, decoded);
-    } else if (topic.startsWith('D/') && topic.contains('/BTN/') && topic.endsWith('/UPDATE')) {
+    } else if (topic.startsWith('D/') &&
+        topic.contains('/BTN/') &&
+        topic.endsWith('/UPDATE')) {
       _handleBtnUpdate(topic);
-    } else if (topic.startsWith('D/') && topic.contains('/DIST/') && topic.endsWith('/UPDATE') && decoded is Map<String, dynamic>) {
+    } else if (topic.startsWith('D/') &&
+        topic.contains('/DIST/') &&
+        topic.endsWith('/UPDATE') &&
+        decoded is Map<String, dynamic>) {
       _handleDistUpdate(topic, decoded);
-    } else if (topic.startsWith('O/') && topic.contains('/DIST/') && topic.endsWith('/GET-VALUE') && decoded is Map<String, dynamic>) {
+    } else if (topic.startsWith('O/') &&
+        topic.contains('/DIST/') &&
+        topic.endsWith('/GET-VALUE') &&
+        decoded is Map<String, dynamic>) {
       _handleGetValueResponse(topic, decoded);
-    } else if (topic.startsWith('O/') && topic.contains('/P2L/') && topic.endsWith('/CMD') && decoded is Map<String, dynamic>) {
+    } else if (topic.startsWith('O/') &&
+        topic.contains('/P2L/') &&
+        topic.endsWith('/CMD') &&
+        decoded is Map<String, dynamic>) {
       _handleCmdAck(decoded);
     } else if (topic.startsWith('O/')) {
       // GET-DEVICES odpověď je top-level pole; ostatní O/ odpovědi jsou Map s Code/Message.
-      final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+      final json = decoded is Map<String, dynamic>
+          ? decoded
+          : <String, dynamic>{};
       _handleDeviceResponse(topic, json, message);
     }
   }
@@ -669,14 +707,20 @@ class AppState extends ChangeNotifier {
     final baseAddr = addr % 1000;
     final isLeft = number == 1 || number == 3;
     final side = isLeft ? 'left' : 'right';
-    _btnPresses['$unitId:$baseAddr:$side'] = (ts: DateTime.now(), number: number);
+    _btnPresses['$unitId:$baseAddr:$side'] = (
+      ts: DateTime.now(),
+      number: number,
+    );
     notifyListeners();
   }
 
   /// Vrátí poslední stisk (čas + číslo tlačítka) pro daný PUM modul a stranu.
   /// `left=true` → levá hrana (tlačítka 1/3), `false` → pravá (tlačítka 0/2).
-  ({DateTime ts, int number})? lastButtonPress(String unitId, int baseAddr,
-      {required bool left}) {
+  ({DateTime ts, int number})? lastButtonPress(
+    String unitId,
+    int baseAddr, {
+    required bool left,
+  }) {
     final id = _normUnitId(unitId);
     return _btnPresses['$id:$baseAddr:${left ? 'left' : 'right'}'];
   }
@@ -719,7 +763,7 @@ class AppState extends ChangeNotifier {
 
   // Vyžádané změření DIST (GET-VALUE) — completer dokončí odpověď nebo timeout.
   final Map<String, Completer<({int? distance, bool ok, String? message})?>>
-      _distValueCompleters = {};
+  _distValueCompleters = {};
 
   /// Vyžádá aktuální měření DIST senzoru přes GET-VALUE (od FW `P2L_26062301NT`).
   /// Vrátí `distance` [mm] + `ok` (Code==0) + `message`, nebo null při timeoutu.
@@ -729,7 +773,10 @@ class AppState extends ChangeNotifier {
   /// (např. živé měření v editačním dialogu senzoru), který by jinak status
   /// bar zaplavil desítkami zpráv za vteřinu.
   Future<({int? distance, bool ok, String? message})?> requestDistValue(
-      String unitId, int address, {bool silent = false}) {
+    String unitId,
+    int address, {
+    bool silent = false,
+  }) {
     final id = _normUnitId(unitId);
     final key = '$id:$address';
     final existing = _distValueCompleters[key];
@@ -743,8 +790,10 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
 
-    final cmd =
-        CommandService.buildGetValueCommand(unitId: id, distAddress: address);
+    final cmd = CommandService.buildGetValueCommand(
+      unitId: id,
+      distAddress: address,
+    );
     _mqttService.publish(cmd.topic, cmd.payload);
 
     Future.delayed(const Duration(seconds: 10), () {
@@ -755,8 +804,10 @@ class AppState extends ChangeNotifier {
       _distValueCompleters.remove(key);
       if (completer.isCompleted) return;
       if (!silent) {
-        _setStatus('Měření senzoru $address: bez odpovědi (starší firmware?)',
-            isError: true);
+        _setStatus(
+          'Měření senzoru $address: bez odpovědi (starší firmware?)',
+          isError: true,
+        );
         notifyListeners();
       }
       completer.complete(null);
@@ -786,14 +837,20 @@ class AppState extends ChangeNotifier {
 
     final completer = _distValueCompleters.remove(key);
     if (completer != null && !completer.isCompleted) {
-      completer.complete(
-          (distance: distance, ok: ok, message: json['Message'] as String?));
+      completer.complete((
+        distance: distance,
+        ok: ok,
+        message: json['Message'] as String?,
+      ));
     }
     notifyListeners();
   }
 
   void _handleDeviceResponse(
-      String topic, Map<String, dynamic> json, dynamic message) {
+    String topic,
+    Map<String, dynamic> json,
+    dynamic message,
+  ) {
     // Topic: O/<unit>/<TYPE>/<DEVICE_ID>/<CMD>
     final parts = topic.split('/');
     if (parts.length < 5) return;
@@ -826,8 +883,10 @@ class AppState extends ChangeNotifier {
         cmd == 'RECREATE-DEVICES' ||
         cmd == 'DELETE-DEVICES') {
       final ok = code == 0 || code == '0';
-      _setStatus('$cmd na $unitId: ${ok ? 'OK' : 'chyba'}${msg != null ? " — $msg" : ""}',
-          isError: !ok);
+      _setStatus(
+        '$cmd na $unitId: ${ok ? 'OK' : 'chyba'}${msg != null ? " — $msg" : ""}',
+        isError: !ok,
+      );
       _unitModulesPending.remove(unitId);
       if (ok) {
         // Re-adresování (REPLACE/SET-ID) mění fyzické adresy čipů → starý sken
@@ -872,7 +931,10 @@ class AppState extends ChangeNotifier {
   }
 
   void _handleGetDevicesResponse(
-      String unitId, Map<String, dynamic> json, dynamic message) {
+    String unitId,
+    Map<String, dynamic> json,
+    dynamic message,
+  ) {
     _unitModulesPending.remove(unitId);
 
     // Payload: buď pole entries, nebo objekt s "Devices" polem, nebo raw payload.
@@ -894,14 +956,24 @@ class AppState extends ChangeNotifier {
     if (devicesField != null) {
       final devices = parseGetDevicesPayload(devicesField);
       final distConfigs = parseDistConfigs(devicesField);
-      _unitModules[unitId] = reconstructModules(devices, distConfigs: distConfigs);
+      _unitModules[unitId] = reconstructModules(
+        devices,
+        distConfigs: distConfigs,
+      );
       _unitModulesFetchedAt[unitId] = DateTime.now();
-      _setStatus('Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)');
+      _setStatus(
+        'Devices P2L modulu ${int.tryParse(unitId)?.toString() ?? unitId} načteny (${devices.length} entit → ${_unitModules[unitId]!.length} devices)',
+      );
       // Centrální DB (DB3): observed s čerstvým seznamem devices.
       final dbUnit = _units[unitId];
       if (dbUnit != null) {
-        unawaited(UnitDbService.instance.pushObserved(dbUnit,
-            modules: _unitModules[unitId], seenOnBroker: broker));
+        unawaited(
+          UnitDbService.instance.pushObserved(
+            dbUnit,
+            modules: _unitModules[unitId],
+            seenOnBroker: broker,
+          ),
+        );
         _scheduleDbDriftRefresh();
       }
       // Ověření právě přidaného device cíleným skenem jeho adresy (až teď, kdy
@@ -913,7 +985,10 @@ class AppState extends ChangeNotifier {
         Future.microtask(() => scanBus(unitId, scanId: verifyAddr));
       }
     } else {
-      _setStatus('GET-DEVICES $unitId: neočekávaný formát odpovědi', isError: true);
+      _setStatus(
+        'GET-DEVICES $unitId: neočekávaný formát odpovědi',
+        isError: true,
+      );
     }
     notifyListeners();
   }
@@ -927,8 +1002,10 @@ class AppState extends ChangeNotifier {
     final code = json['Code'];
     if (code != null && code != 0 && code != '0') {
       final msg = json['Message'] as String?;
-      _setStatus('GET-CONFIG $unitId: chyba${msg != null ? " — $msg" : ""}',
-          isError: true);
+      _setStatus(
+        'GET-CONFIG $unitId: chyba${msg != null ? " — $msg" : ""}',
+        isError: true,
+      );
       notifyListeners();
       return;
     }
@@ -937,8 +1014,13 @@ class AppState extends ChangeNotifier {
     unit.updateFromGetConfig(json);
     final display = int.tryParse(unitId)?.toString() ?? unitId;
     _setStatus('Konfigurace jednotky $display načtena (GET-CONFIG).');
-    unawaited(UnitDbService.instance
-        .pushObserved(unit, includeConfig: true, seenOnBroker: broker));
+    unawaited(
+      UnitDbService.instance.pushObserved(
+        unit,
+        includeConfig: true,
+        seenOnBroker: broker,
+      ),
+    );
     _scheduleDbDriftRefresh();
     notifyListeners();
   }
@@ -954,8 +1036,10 @@ class AppState extends ChangeNotifier {
     final code = json['Code'];
     if (code != null && code != 0 && code != '0') {
       final msg = json['Message'] as String?;
-      _setStatus('P2L GET-CONFIG $unitId: chyba${msg != null ? " — $msg" : ""}',
-          isError: true);
+      _setStatus(
+        'P2L GET-CONFIG $unitId: chyba${msg != null ? " — $msg" : ""}',
+        isError: true,
+      );
       notifyListeners();
       return;
     }
@@ -969,8 +1053,10 @@ class AppState extends ChangeNotifier {
     final ok = code == null || code == 0 || code == '0';
     final display = int.tryParse(unitId)?.toString() ?? unitId;
     if (!ok) {
-      _setStatus('P2L $cmd na $display: chyba${msg != null ? " — $msg" : ""}',
-          isError: true);
+      _setStatus(
+        'P2L $cmd na $display: chyba${msg != null ? " — $msg" : ""}',
+        isError: true,
+      );
       notifyListeners();
       return;
     }
@@ -995,8 +1081,10 @@ class AppState extends ChangeNotifier {
       _setStatus('$display: ${pending.label} — jednotka potvrdila příjem.');
       pending.onConfirmed();
     } else {
-      _setStatus('$display: ${pending.label} — jednotka vrátila „$status".',
-          isError: true);
+      _setStatus(
+        '$display: ${pending.label} — jednotka vrátila „$status".',
+        isError: true,
+      );
     }
     notifyListeners();
   }
@@ -1005,7 +1093,11 @@ class AppState extends ChangeNotifier {
   /// `{"Code":0,"Message":"OK"}` na zrcadlovém topicu, páruje se podle
   /// jednotky a příkazu (UNIT topicy `request_id` nepoužívají).
   void _handleUnitCmdAck(
-      String unitId, String command, Object? code, String? msg) {
+    String unitId,
+    String command,
+    Object? code,
+    String? msg,
+  ) {
     final pending = _pendingUnitAcks.remove('$unitId/$command');
     if (pending == null) return;
     pending.timer.cancel();
@@ -1018,8 +1110,9 @@ class AppState extends ChangeNotifier {
       pending.onConfirmed();
     } else {
       _setStatus(
-          '$display: ${pending.label} — jednotka odmítla${msg != null ? " — $msg" : ""}.',
-          isError: true);
+        '$display: ${pending.label} — jednotka odmítla${msg != null ? " — $msg" : ""}.',
+        isError: true,
+      );
     }
     notifyListeners();
   }
@@ -1045,13 +1138,21 @@ class AppState extends ChangeNotifier {
       if (p == null) return;
       final display = int.tryParse(p.unitId)?.toString() ?? p.unitId;
       _setStatus(
-          '$display: ${p.label} — jednotka NEPOTVRDILA (offline?), do evidence se nezapsalo.',
-          isError: true);
+        '$display: ${p.label} — jednotka NEPOTVRDILA (offline?), do evidence se nezapsalo.',
+        isError: true,
+      );
       notifyListeners();
     });
-    _pendingUnitAcks[key] =
-        (unitId: id, label: label, timer: timer, onConfirmed: onConfirmed);
-    _mqttService.publish(CommandService.getUnitCommandTopic(id, command), payload);
+    _pendingUnitAcks[key] = (
+      unitId: id,
+      label: label,
+      timer: timer,
+      onConfirmed: onConfirmed,
+    );
+    _mqttService.publish(
+      CommandService.getUnitCommandTopic(id, command),
+      payload,
+    );
   }
 
   /// Odešle potvrzovaný config příkaz a hlídá ack. Nová generace: request_id
@@ -1088,12 +1189,17 @@ class AppState extends ChangeNotifier {
       if (p == null) return;
       final display = int.tryParse(p.unitId)?.toString() ?? p.unitId;
       _setStatus(
-          '$display: ${p.label} — jednotka NEPOTVRDILA (offline?), do evidence se nezapsalo.',
-          isError: true);
+        '$display: ${p.label} — jednotka NEPOTVRDILA (offline?), do evidence se nezapsalo.',
+        isError: true,
+      );
       notifyListeners();
     });
-    _pendingCmdAcks[reqId] =
-        (unitId: id, label: label, timer: timer, onConfirmed: onConfirmed);
+    _pendingCmdAcks[reqId] = (
+      unitId: id,
+      label: label,
+      timer: timer,
+      onConfirmed: onConfirmed,
+    );
     _mqttService.publish(topic, build(reqId));
   }
 
@@ -1107,8 +1213,10 @@ class AppState extends ChangeNotifier {
 
     // Čekající probe (ověření adresy, např. před výměnou)? Doplň completer
     // podle toho, zda sken adresu našel — a NEukládej do zobrazeného skenu.
-    final probeKey = _busProbes.keys
-        .firstWhere((k) => k.startsWith('$unitId:'), orElse: () => '');
+    final probeKey = _busProbes.keys.firstWhere(
+      (k) => k.startsWith('$unitId:'),
+      orElse: () => '',
+    );
     if (probeKey.isNotEmpty) {
       final completer = _busProbes.remove(probeKey);
       final addr = int.tryParse(probeKey.split(':').last);
@@ -1117,9 +1225,10 @@ class AppState extends ChangeNotifier {
         if (isError || addr == null) {
           completer.complete(null);
         } else {
-          final found = BusScanResult.fromJson(json, DateTime.now())
-              .addressTypes
-              .containsKey(addr);
+          final found = BusScanResult.fromJson(
+            json,
+            DateTime.now(),
+          ).addressTypes.containsKey(addr);
           completer.complete(found);
         }
       }
@@ -1128,8 +1237,10 @@ class AppState extends ChangeNotifier {
 
     if (code != null && code != 0 && code != '0') {
       final msg = json['Message'] as String?;
-      _setStatus('Sken sběrnice $displayId: chyba${msg != null ? " — $msg" : ""}',
-          isError: true);
+      _setStatus(
+        'Sken sběrnice $displayId: chyba${msg != null ? " — $msg" : ""}',
+        isError: true,
+      );
     } else {
       final scope = _unitBusScanScope[unitId] ?? BusScanScope.all;
       final scanId = _unitBusScanId[unitId];
@@ -1143,15 +1254,21 @@ class AppState extends ChangeNotifier {
         // aktualizuj jen tuhle adresu, ostatní nalezené devices zachovej.
         scan = existing.withUpdatedAddress(scanId, json, DateTime.now());
       } else {
-        scan = BusScanResult.fromJson(json, DateTime.now(),
-            scope: scope, scanId: scanId);
+        scan = BusScanResult.fromJson(
+          json,
+          DateTime.now(),
+          scope: scope,
+          scanId: scanId,
+        );
       }
       _unitBusScan[unitId] = scan;
       if (scanId != null) {
         final type = scan.addressTypes[scanId];
-        _setStatus(type != null
-            ? 'Ověření adresy $scanId na $displayId: připojeno ($type)'
-            : 'Ověření adresy $scanId na $displayId: na sběrnici nenalezeno');
+        _setStatus(
+          type != null
+              ? 'Ověření adresy $scanId na $displayId: připojeno ($type)'
+              : 'Ověření adresy $scanId na $displayId: na sběrnici nenalezeno',
+        );
       } else {
         _setStatus('Sken sběrnice $displayId: nalezeno ${scan.total} čipů');
       }
@@ -1204,17 +1321,25 @@ class AppState extends ChangeNotifier {
     // Centrální DB jednotek (DB3): observed z ALIVE, throttle 30 s/jednotku.
     // seenOnBroker = host aktivního připojení — ALIVE broker nenese, ale
     // appka ví, přes který broker zprávu dostala (drift detekce).
-    unawaited(UnitDbService.instance
-        .pushObserved(_units[unitId]!, throttled: true, seenOnBroker: broker));
+    unawaited(
+      UnitDbService.instance.pushObserved(
+        _units[unitId]!,
+        throttled: true,
+        seenOnBroker: broker,
+      ),
+    );
 
     // Po restartu: první ALIVE mimo grace window → obnov stav.
     if (_awaitingAliveAfterRestart.contains(unitId)) {
       final sentAt = _restartSentAt[unitId];
-      if (sentAt != null && DateTime.now().difference(sentAt) >= _restartGrace) {
+      if (sentAt != null &&
+          DateTime.now().difference(sentAt) >= _restartGrace) {
         _awaitingAliveAfterRestart.remove(unitId);
         _restartSentAt.remove(unitId);
         _initialFetchDone.add(unitId);
-        _setStatus('P2L modul ${int.tryParse(unitId)?.toString() ?? unitId} zpět online — obnovuji stav.');
+        _setStatus(
+          'P2L modul ${int.tryParse(unitId)?.toString() ?? unitId} zpět online — obnovuji stav.',
+        );
         _autoRefreshObserved(unitId);
       }
     } else if (_initialFetchDone.add(unitId)) {
@@ -1256,8 +1381,10 @@ class AppState extends ChangeNotifier {
     if (isError) {
       final msg = (json['Message'] as String?) ?? 'chyba';
       final displayId = int.tryParse(unitId)?.toString() ?? unitId;
-      _setStatus('$displayId · $type $deviceId: $msg (Code $code)',
-          isError: true);
+      _setStatus(
+        '$displayId · $type $deviceId: $msg (Code $code)',
+        isError: true,
+      );
     }
     notifyListeners();
   }
@@ -1325,8 +1452,13 @@ class AppState extends ChangeNotifier {
 
       // Centrální DB (DB3): get_param nese plný observed (IP, MAC, SSID,
       // aktuální broker, jas) — push bez throttle.
-      unawaited(UnitDbService.instance.pushObserved(_units[effectiveId]!,
-          includeParams: true, seenOnBroker: broker));
+      unawaited(
+        UnitDbService.instance.pushObserved(
+          _units[effectiveId]!,
+          includeParams: true,
+          seenOnBroker: broker,
+        ),
+      );
       _scheduleDbDriftRefresh();
 
       // Po manuálním ověření (get_param) dotáhni devices hned, ať uživatel
@@ -1391,8 +1523,18 @@ class AppState extends ChangeNotifier {
 
   void sendTest() {
     final ports = selectedPorts.toList()..sort();
-    final oldPayload = CommandService.buildTestCommand(ledsOn: ledsOn, ledsOff: ledsOff, color: ledColor, ports: ports);
-    final binPayload = CommandService.buildTestCommandBin(ledsOn: ledsOn, ledsOff: ledsOff, color: ledColor, ports: ports);
+    final oldPayload = CommandService.buildTestCommand(
+      ledsOn: ledsOn,
+      ledsOff: ledsOff,
+      color: ledColor,
+      ports: ports,
+    );
+    final binPayload = CommandService.buildTestCommandBin(
+      ledsOn: ledsOn,
+      ledsOff: ledsOff,
+      color: ledColor,
+      ports: ports,
+    );
     for (final unitId in _selectedUnits) {
       final unit = _units[unitId];
       if (unit != null && unit.useBin) {
@@ -1444,7 +1586,7 @@ class AppState extends ChangeNotifier {
     // Jediná vybraná jednotka → hláška ji pojmenuje ID místo počtu.
     final single = targets.length == 1
         ? (int.tryParse(_normUnitId(targets.first))?.toString() ??
-            _normUnitId(targets.first))
+              _normUnitId(targets.first))
         : null;
     // Genitiv po „u": 1 → „jednotky", jinak „jednotek".
     String jed(int n) => n == 1 ? 'jednotky' : 'jednotek';
@@ -1463,15 +1605,17 @@ class AppState extends ChangeNotifier {
         ),
         // Desired.broker (jediné místo s credentials mimo odeslání) až po acku.
         onConfirmed: () {
-          unawaited(UnitDbService.instance.pushDesired(id, {
-            'broker': {
-              'address': profile.broker,
-              'port': profile.port,
-              'user': profile.username,
-              'password': profile.password,
-              'insecure': !profile.useSsl,
-            },
-          }));
+          unawaited(
+            UnitDbService.instance.pushDesired(id, {
+              'broker': {
+                'address': profile.broker,
+                'port': profile.port,
+                'user': profile.username,
+                'password': profile.password,
+                'insecure': !profile.useSsl,
+              },
+            }),
+          );
           _scheduleDbDriftRefresh();
           // Jednotka opustila tenhle broker → ať zmizí ze seznamu (ne jen
           // zšedne). Když se někde znovu ozve (i po přepnutí appky na nový
@@ -1513,8 +1657,11 @@ class AppState extends ChangeNotifier {
       final topic = _topicFor(unitId);
       _mqttService.publish(topic, payload);
       // Centrální DB (DB3): desired.brightness.
-      unawaited(UnitDbService.instance
-          .pushDesired(_normUnitId(unitId), {'brightness': clamped}));
+      unawaited(
+        UnitDbService.instance.pushDesired(_normUnitId(unitId), {
+          'brightness': clamped,
+        }),
+      );
       sent++;
       _statusMessage = 'Jas jednotky: $sent / ${targets.length} ($clamped%)';
       notifyListeners();
@@ -1529,11 +1676,12 @@ class AppState extends ChangeNotifier {
   /// DISP adresy (PUM-A) jednotky z posledního GET-DEVICES, vzestupně.
   List<int> _dispAddressesFor(String unitId) {
     final mods = _unitModules[_normUnitId(unitId)] ?? const <PumaModule>[];
-    final addrs = mods
-        .where((m) => m.type == ModuleType.pumA)
-        .map((m) => m.baseAddress)
-        .toList()
-      ..sort();
+    final addrs =
+        mods
+            .where((m) => m.type == ModuleType.pumA)
+            .map((m) => m.baseAddress)
+            .toList()
+          ..sort();
     return addrs;
   }
 
@@ -1557,8 +1705,11 @@ class AppState extends ChangeNotifier {
         continue;
       }
       // Centrální DB (DB3): desired.dispBrightness (jas PUM-A displejů).
-      unawaited(UnitDbService.instance
-          .pushDesired(_normUnitId(unitId), {'dispBrightness': clamped}));
+      unawaited(
+        UnitDbService.instance.pushDesired(_normUnitId(unitId), {
+          'dispBrightness': clamped,
+        }),
+      );
       for (final addr in disps) {
         final cmd = CommandService.buildSetDispConfigCommand(
           unitId: _normUnitId(unitId),
@@ -1604,7 +1755,7 @@ class AppState extends ChangeNotifier {
     var confirmed = 0;
     final single = targets.length == 1
         ? (int.tryParse(_normUnitId(targets.first))?.toString() ??
-            _normUnitId(targets.first))
+              _normUnitId(targets.first))
         : null;
     String jed(int n) => n == 1 ? 'jednotky' : 'jednotek';
 
@@ -1612,16 +1763,18 @@ class AppState extends ChangeNotifier {
       final id = _normUnitId(unitId);
       final unit = _units[id];
       void onConfirmed() {
-        unawaited(UnitDbService.instance.pushDesired(id, {
-          'wifi': {'ssid': ssid, 'password': wifiPassword},
-          'broker': {
-            'address': profile.broker,
-            'port': profile.port,
-            'user': profile.username,
-            'password': profile.password,
-            'insecure': !profile.useSsl,
-          },
-        }));
+        unawaited(
+          UnitDbService.instance.pushDesired(id, {
+            'wifi': {'ssid': ssid, 'password': wifiPassword},
+            'broker': {
+              'address': profile.broker,
+              'port': profile.port,
+              'user': profile.username,
+              'password': profile.password,
+              'insecure': !profile.useSsl,
+            },
+          }),
+        );
         _scheduleDbDriftRefresh();
         // Mění se i broker → jednotka opustí tenhle broker. Stejně jako
         // u sendBulkBroker ji zapomeneme; až se někde ozve, přijde jako nová
@@ -1693,7 +1846,10 @@ class AppState extends ChangeNotifier {
   }
 
   /// Hromadná změna WiFi: pošle `set_WiFi` všem vybraným jednotkám s 100ms pauzou.
-  Future<void> sendBulkWifi({required String ssid, required String password}) async {
+  Future<void> sendBulkWifi({
+    required String ssid,
+    required String password,
+  }) async {
     if (_selectedUnits.isEmpty) return;
     final targets = _selectedUnits.toList();
     var sent = 0;
@@ -1705,11 +1861,16 @@ class AppState extends ChangeNotifier {
         unitId: unitId,
         label: 'WiFi',
         build: (reqId) => CommandService.buildSetWifiCommand(
-            ssid: ssid, password: password, requestId: reqId),
+          ssid: ssid,
+          password: password,
+          requestId: reqId,
+        ),
         onConfirmed: () {
-          unawaited(UnitDbService.instance.pushDesired(id, {
-            'wifi': {'ssid': ssid, 'password': password},
-          }));
+          unawaited(
+            UnitDbService.instance.pushDesired(id, {
+              'wifi': {'ssid': ssid, 'password': password},
+            }),
+          );
           _scheduleDbDriftRefresh();
           // Změna WiFi jednotku restartuje → hned offline (zmizí z „připojených")
           // + po návratu re-read observed.
@@ -1729,7 +1890,8 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('last_wifi_ssid', ssid);
     await prefs.setString('last_wifi_password', password);
-    _statusMessage = 'WiFi "$ssid" odesláno na $sent jednotek (čekám na potvrzení)';
+    _statusMessage =
+        'WiFi "$ssid" odesláno na $sent jednotek (čekám na potvrzení)';
     notifyListeners();
   }
 
@@ -1751,13 +1913,17 @@ class AppState extends ChangeNotifier {
       _sendTrackedConfigCmd(
         unitId: unitId,
         label: 'Firmware',
-        build: (reqId) =>
-            CommandService.buildUpdateCommand(fileName: fileName, requestId: reqId),
+        build: (reqId) => CommandService.buildUpdateCommand(
+          fileName: fileName,
+          requestId: reqId,
+        ),
         // Offline-until-alive i desired.fwUrl až po potvrzení příjmu —
         // flash (a tím restart) proběhne jen když jednotka příkaz dostala.
         onConfirmed: () {
           _markUnitOfflineUntilAlive(id);
-          unawaited(UnitDbService.instance.pushDesired(id, {'fwUrl': fileName}));
+          unawaited(
+            UnitDbService.instance.pushDesired(id, {'fwUrl': fileName}),
+          );
           _scheduleDbDriftRefresh();
         },
       );
@@ -1768,7 +1934,8 @@ class AppState extends ChangeNotifier {
         await Future.delayed(const Duration(milliseconds: 100));
       }
     }
-    _statusMessage = 'Update odeslán na $sent jednotek — $fileName (čekám na potvrzení)';
+    _statusMessage =
+        'Update odeslán na $sent jednotek — $fileName (čekám na potvrzení)';
     notifyListeners();
   }
 
@@ -1786,8 +1953,7 @@ class AppState extends ChangeNotifier {
   Future<void> setUnitId(String oldId, int newId) async {
     final id = _normUnitId(oldId);
     final unit = _units[id];
-    final isNewGen = unit?.isNewGen ??
-        ((int.tryParse(id) ?? 0) >= 1000);
+    final isNewGen = unit?.isNewGen ?? ((int.tryParse(id) ?? 0) >= 1000);
 
     final cmd = CommandService.buildSetUnitIdCommand(
       unitId: id,
@@ -1819,7 +1985,9 @@ class AppState extends ChangeNotifier {
     // Ruční načtení ruší čekání na post-restart auto-trigger.
     _awaitingAliveAfterRestart.remove(id);
     _restartSentAt.remove(id);
-    _setStatus('Načítám devices jednotky ${int.tryParse(id)?.toString() ?? id}…');
+    _setStatus(
+      'Načítám devices jednotky ${int.tryParse(id)?.toString() ?? id}…',
+    );
     notifyListeners();
 
     final cmd = CommandService.buildGetDevicesCommand(id);
@@ -1867,12 +2035,14 @@ class AppState extends ChangeNotifier {
     // nový FW navíc v get_param/ALIVE hlásí ID s prefixem „u" (→ isNewGen=false),
     // i když na UNIT topicy normálně odpovídá. ID ≥ 1000 to spolehlivě doplní.
     final isNewGen = unit.isNewGen || CommandService.isNewTopicFormat(id);
-    if (!isNewGen ||
-        !CommandService.firmwareSupportsGetConfig(unit.firmware)) {
+    if (!isNewGen || !CommandService.firmwareSupportsGetConfig(unit.firmware)) {
       return;
     }
-    final cmd = CommandService.buildGetConfigCommand(id,
-        user: _getConfigUser, password: _getConfigPassword);
+    final cmd = CommandService.buildGetConfigCommand(
+      id,
+      user: _getConfigUser,
+      password: _getConfigPassword,
+    );
     _mqttService.publish(cmd.topic, cmd.payload);
   }
 
@@ -1936,9 +2106,11 @@ class AppState extends ChangeNotifier {
       isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
     );
     _mqttService.publish(cmd.topic, cmd.payload);
-    _setStatus(ports.isEmpty
-        ? 'P2L LED: zhasnuty všechny porty'
-        : 'P2L LED: zhasnuto ${ports.map((p) => 'P$p').join(', ')}');
+    _setStatus(
+      ports.isEmpty
+          ? 'P2L LED: zhasnuty všechny porty'
+          : 'P2L LED: zhasnuto ${ports.map((p) => 'P$p').join(', ')}',
+    );
     notifyListeners();
   }
 
@@ -1961,12 +2133,18 @@ class AppState extends ChangeNotifier {
       isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
     );
     _mqttService.publish(cmd.topic, cmd.payload);
-    _setStatus('P2L LED ${ports.map((p) => 'P$p').join(', ')}: zhasnuto $x1–$x2');
+    _setStatus(
+      'P2L LED ${ports.map((p) => 'P$p').join(', ')}: zhasnuto $x1–$x2',
+    );
     notifyListeners();
   }
 
   /// Jas P2L LED (1–100). Lokálně se projeví hned, po potvrzení se stejně
   /// načte skutečný stav z jednotky ([_handleP2lAck]).
+  ///
+  /// Zapisuje i `desired.brightness` do evidence — stejně jako hromadná změna
+  /// jasu ([sendUnitBrightness]). Bez toho by karta jednotky hlásila nesoulad
+  /// („evidence 50 %, jednotka 80 %"), přestože by bylo všechno v pořádku.
   Future<void> setP2lBrightness({
     required String unitId,
     required int brightness,
@@ -1982,11 +2160,17 @@ class AppState extends ChangeNotifier {
     );
     _mqttService.publish(cmd.topic, cmd.payload);
     _p2lConfigs[id] = p2lConfigFor(id).copyWith(brightness: value);
+    unawaited(UnitDbService.instance.pushDesired(id, {'brightness': value}));
     _setStatus('P2L LED jas: $value %');
     notifyListeners();
   }
 
   /// Počet LED na portech (port → počet).
+  ///
+  /// Do evidence se **záměrně nezapisuje** (rozhodnuto 2026-09-17) — na rozdíl
+  /// od jasu se bere jako ladicí nastavení, ne jako evidovaná vlastnost
+  /// instalace. Kdyby se to mělo změnit, chce to i řádek na kartě jednotky,
+  /// jinak by hodnota v DB ležela bez zobrazení.
   Future<void> setP2lLedCounts({
     required String unitId,
     required Map<int, int> counts,
@@ -2001,13 +2185,17 @@ class AppState extends ChangeNotifier {
       isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
     );
     _mqttService.publish(cmd.topic, cmd.payload);
-    _p2lConfigs[id] = p2lConfigFor(id)
-        .copyWith(ledCounts: {...p2lConfigFor(id).ledCounts, ...counts});
+    _p2lConfigs[id] = p2lConfigFor(
+      id,
+    ).copyWith(ledCounts: {...p2lConfigFor(id).ledCounts, ...counts});
     _setStatus('P2L LED: počty nastaveny na ${counts.length} portech');
     notifyListeners();
   }
 
   /// Definice barev (`color_id` → RGB + RGB2).
+  ///
+  /// Do evidence se **záměrně nezapisuje** — ze stejného důvodu jako
+  /// [setP2lLedCounts].
   Future<void> setP2lColors({
     required String unitId,
     required Map<int, P2lColorSlot> colors,
@@ -2022,8 +2210,9 @@ class AppState extends ChangeNotifier {
       isNewGen: unit?.isNewGen ?? CommandService.isNewTopicFormat(id),
     );
     _mqttService.publish(cmd.topic, cmd.payload);
-    _p2lConfigs[id] = p2lConfigFor(id)
-        .copyWith(colors: {...p2lConfigFor(id).colors, ...colors});
+    _p2lConfigs[id] = p2lConfigFor(
+      id,
+    ).copyWith(colors: {...p2lConfigFor(id).colors, ...colors});
     _setStatus('P2L LED: barvy nastaveny (${colors.length})');
     notifyListeners();
   }
@@ -2031,8 +2220,11 @@ class AppState extends ChangeNotifier {
   /// Read-only sken RS485 sběrnice (SCAN-DEVICES) — zjistí fyzicky připojené
   /// čipy bez zápisu do konfigurace jednotky. Vyžaduje FW ≥ P2L_26061801NT;
   /// starší FW neodpoví a po timeoutu se zobrazí hláška.
-  Future<void> scanBus(String unitId,
-      {BusScanScope scope = BusScanScope.all, int? scanId}) async {
+  Future<void> scanBus(
+    String unitId, {
+    BusScanScope scope = BusScanScope.all,
+    int? scanId,
+  }) async {
     final id = _normUnitId(unitId);
     _unitBusScanPending.add(id);
     _unitBusScanScope[id] = scope;
@@ -2042,13 +2234,18 @@ class AppState extends ChangeNotifier {
       _unitBusScanId.remove(id);
     }
     final displayId = int.tryParse(id)?.toString() ?? id;
-    _setStatus(scanId != null
-        ? 'Skenuji adresu $scanId na sběrnici jednotky $displayId…'
-        : 'Skenuji sběrnici jednotky $displayId… (může trvat i přes 10 s)');
+    _setStatus(
+      scanId != null
+          ? 'Skenuji adresu $scanId na sběrnici jednotky $displayId…'
+          : 'Skenuji sběrnici jednotky $displayId… (může trvat i přes 10 s)',
+    );
     notifyListeners();
 
     final cmd = CommandService.buildScanDevicesCommand(
-        unitId: id, scope: scope, scanId: scanId);
+      unitId: id,
+      scope: scope,
+      scanId: scanId,
+    );
     _mqttService.publish(cmd.topic, cmd.payload);
 
     // Sken sběrnice je pomalý — reálně trvá i přes 20 s (ověřeno tracem).
@@ -2058,8 +2255,9 @@ class AppState extends ChangeNotifier {
     Future.delayed(const Duration(seconds: 45), () {
       if (!_unitBusScanPending.remove(id)) return;
       _setStatus(
-          'Sken sběrnice ${int.tryParse(id)?.toString() ?? id}: bez odpovědi (starší firmware?)',
-          isError: true);
+        'Sken sběrnice ${int.tryParse(id)?.toString() ?? id}: bez odpovědi (starší firmware?)',
+        isError: true,
+      );
       notifyListeners();
     });
   }
@@ -2081,8 +2279,10 @@ class AppState extends ChangeNotifier {
     _setStatus('Ověřuji adresu $address na sběrnici jednotky $displayId…');
     notifyListeners();
 
-    final cmd =
-        CommandService.buildScanDevicesCommand(unitId: id, scanId: address);
+    final cmd = CommandService.buildScanDevicesCommand(
+      unitId: id,
+      scanId: address,
+    );
     _mqttService.publish(cmd.topic, cmd.payload);
 
     Future.delayed(const Duration(seconds: 15), () {
@@ -2121,8 +2321,11 @@ class AppState extends ChangeNotifier {
   /// před doručením RESTART do jednotky).
   static const _restartGrace = Duration(seconds: 2);
 
-  Future<void> addModules(String unitId, List<PumaModule> modules,
-      {bool restartAfter = false}) async {
+  Future<void> addModules(
+    String unitId,
+    List<PumaModule> modules, {
+    bool restartAfter = false,
+  }) async {
     if (modules.isEmpty) return;
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
@@ -2161,7 +2364,9 @@ class AppState extends ChangeNotifier {
     final cmd = CommandService.buildRestartCommand(id);
     _mqttService.publish(cmd.topic, cmd.payload);
     _markUnitOfflineUntilAlive(id);
-    _setStatus('Restart jednotky ${int.tryParse(id)?.toString() ?? id} odeslán');
+    _setStatus(
+      'Restart jednotky ${int.tryParse(id)?.toString() ?? id} odeslán',
+    );
     notifyListeners();
   }
 
@@ -2185,7 +2390,8 @@ class AppState extends ChangeNotifier {
     _unitBusScanId.remove(id);
     _pendingAddVerify.remove(id);
     _pendingDispAddrAfterSetId.remove(id);
-    for (final key in _busProbes.keys.where((k) => k.startsWith('$id:')).toList()) {
+    for (final key
+        in _busProbes.keys.where((k) => k.startsWith('$id:')).toList()) {
       final c = _busProbes.remove(key);
       if (c != null && !c.isCompleted) c.complete(null);
     }
@@ -2336,8 +2542,9 @@ class AppState extends ChangeNotifier {
 
     final list = _unitModules[id];
     if (list != null) {
-      final idx = list.indexWhere((m) =>
-          m.type == ModuleType.dist && m.baseAddress == distAddress);
+      final idx = list.indexWhere(
+        (m) => m.type == ModuleType.dist && m.baseAddress == distAddress,
+      );
       if (idx >= 0) {
         _unitModules[id] = [
           ...list.sublist(0, idx),
@@ -2375,7 +2582,9 @@ class AppState extends ChangeNotifier {
   Future<void> deleteModule(String unitId, PumaModule module) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _setStatus('Mažu ${module.displayLabel} na ${int.tryParse(id)?.toString() ?? id}…');
+    _setStatus(
+      'Mažu ${module.displayLabel} na ${int.tryParse(id)?.toString() ?? id}…',
+    );
     // Po smazání ověříme adresu skenem — když je čip pořád fyzicky na sběrnici,
     // ukáže se jako šedý „ghost" (v configu už není, na sběrnici ano).
     _pendingAddVerify[id] = module.baseAddress;
@@ -2402,7 +2611,8 @@ class AppState extends ChangeNotifier {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
     _setStatus(
-        'Výměna ${type.code} @$oldAddress za nový ($newDefaultAddress) na $id…');
+      'Výměna ${type.code} @$oldAddress za nový ($newDefaultAddress) na $id…',
+    );
     if (restartAfter) _pendingRestart.add(id);
     notifyListeners();
 
@@ -2427,8 +2637,7 @@ class AppState extends ChangeNotifier {
   }) async {
     final id = _normUnitId(unitId);
     _unitModulesPending.add(id);
-    _setStatus(
-        'Přečíslování ${type.code} @$oldAddress → $newAddress na $id…');
+    _setStatus('Přečíslování ${type.code} @$oldAddress → $newAddress na $id…');
     if (restartAfter) _pendingRestart.add(id);
     // PUM-A (displej) → po potvrzení zobrazíme novou adresu na displeji.
     if (type == DeviceType.disp) {
@@ -2447,17 +2656,23 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> applyTemplateToUnits(
-      DeviceTemplate template, List<String> targetUnitIds) async {
+    DeviceTemplate template,
+    List<String> targetUnitIds,
+  ) async {
     final normIds = <String>[];
     for (final target in targetUnitIds) {
       final id = _normUnitId(target);
-      final cmd = CommandService.buildRecreateDevicesCommand(id, template.modules);
+      final cmd = CommandService.buildRecreateDevicesCommand(
+        id,
+        template.modules,
+      );
       _mqttService.publish(cmd.topic, cmd.payload);
       _unitModulesPending.add(id);
       normIds.add(id);
     }
     _setStatus(
-        'Šablona "${template.name}" aplikována na ${targetUnitIds.length} jednotek');
+      'Šablona "${template.name}" aplikována na ${targetUnitIds.length} jednotek',
+    );
     notifyListeners();
 
     // Fallback: firmware neposílá O/.../RECREATE-DEVICES odpověď.
@@ -2507,7 +2722,10 @@ class AppState extends ChangeNotifier {
 
   Future<void> _persistTemplates() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('device_templates', DeviceTemplate.listToJson(_templates));
+    await prefs.setString(
+      'device_templates',
+      DeviceTemplate.listToJson(_templates),
+    );
   }
 
   /// Serializuje broker profily, šablony a LED pattern do jednoho JSON stringu.
@@ -2518,11 +2736,7 @@ class AppState extends ChangeNotifier {
       'exportedAt': DateTime.now().toUtc().toIso8601String(),
       'brokerProfiles': _profiles.map((p) => p.toJson()).toList(),
       'deviceTemplates': _templates.map((t) => t.toJson()).toList(),
-      'ledPattern': {
-        'on': ledsOn,
-        'off': ledsOff,
-        'color': ledColor,
-      },
+      'ledPattern': {'on': ledsOn, 'off': ledsOff, 'color': ledColor},
     });
   }
 
@@ -2541,8 +2755,8 @@ class AppState extends ChangeNotifier {
     }
 
     try {
-      final activeBefore = _activeProfileIndex >= 0 &&
-              _activeProfileIndex < _profiles.length
+      final activeBefore =
+          _activeProfileIndex >= 0 && _activeProfileIndex < _profiles.length
           ? _profiles[_activeProfileIndex].name
           : null;
 
@@ -2575,9 +2789,15 @@ class AppState extends ChangeNotifier {
           : _profiles.indexWhere((p) => p.name == activeBefore);
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('broker_profiles', BrokerProfile.listToJson(_profiles));
+      await prefs.setString(
+        'broker_profiles',
+        BrokerProfile.listToJson(_profiles),
+      );
       await prefs.setInt('active_profile', _activeProfileIndex);
-      await prefs.setString('device_templates', DeviceTemplate.listToJson(_templates));
+      await prefs.setString(
+        'device_templates',
+        DeviceTemplate.listToJson(_templates),
+      );
       await prefs.setInt('leds_on', ledsOn);
       await prefs.setInt('leds_off', ledsOff);
       await prefs.setInt('led_color', ledColor);
@@ -2627,10 +2847,7 @@ class AppState extends ChangeNotifier {
       if (canonical == null) continue;
       if (_units.containsKey(canonical)) continue;
       final n = int.tryParse(canonical) ?? 0;
-      _units[canonical] = P2LUnit.placeholder(
-        canonical,
-        isNewGen: n >= 1000,
-      );
+      _units[canonical] = P2LUnit.placeholder(canonical, isNewGen: n >= 1000);
       created++;
     }
     _statusMessage = created > 0

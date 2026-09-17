@@ -839,6 +839,11 @@ class CommandService {
 
   /// Jas P2L LED (1–100). Nový protokol `SET-CONFIG {"brightness":N}`,
   /// starý `set_brightness`.
+  ///
+  /// **Ověřeno na jednotce 1209** (FW 26071501NT): `I/001209/P2L/011209/SET-CONFIG`
+  /// s `{"brightness":100}` → `O/…/SET-CONFIG {"Code":0,"Message":"OK"}`.
+  /// Pozn.: hromadná změna jasu ([AppState.sendUnitBrightness]) jde jinou
+  /// cestou — vždy starým `set_brightness` na CMD topicu.
   static ({String topic, String payload}) buildP2lBrightnessCommand({
     required String unitId,
     required int brightness,

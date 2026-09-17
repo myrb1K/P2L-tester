@@ -10,8 +10,12 @@ library;
 /// Počet LED portů na jednotce.
 const int kP2lPortCount = 8;
 
-/// Počet barevných slotů (`color_id` 0–5).
-const int kP2lColorCount = 6;
+/// Počet barevných slotů (`color_id` 0–9).
+///
+/// Ověřeno odpovědí jednotky 1209 na `GET-CONFIG`: vrací `color0`–`color9`
+/// i `color2_0`–`color2_9`. README-P2L.md popisuje jen sloty 0–5 (ty mají
+/// tovární barvy), zbylé čtyři jsou z výroby černé.
+const int kP2lColorCount = 10;
 
 /// Jedna barva `color_id`. [rgb] je primární, [rgb2] sekundární („color2") —
 /// tu využívají styly se střídáním barev (`style_id` 5 a 6).
@@ -51,9 +55,18 @@ const List<P2lColorSlot> kP2lDefaultColors = [
   P2lColorSlot(0xFFFF00, 0x0000FF), // 3 YELLOW / BLUE
   P2lColorSlot(0xFF00FF, 0xFFFFFF), // 4 PURPLE / WHITE
   P2lColorSlot(0xFFFFFF, 0xFF00FF), // 5 WHITE  / PURPLE
+  // 6–9 jsou z výroby černé. Slot 6 navíc appka používá jako „nesvítí"
+  // v testovacím vzoru na hlavní obrazovce (`CommandService` plní jím mezery
+  // v `colors_id`), takže jeho přebarvení ten vzor rozbije.
+  P2lColorSlot(0x000000, 0x000000), // 6 černá (testovací vzor)
+  P2lColorSlot(0x000000, 0x000000), // 7
+  P2lColorSlot(0x000000, 0x000000), // 8
+  P2lColorSlot(0x000000, 0x000000), // 9
 ];
 
 /// Tovární názvy barev (jen orientační popisek k číslu slotu).
+/// Sloty 6–9 tovární barvu nemají — jsou černé a volné k použití, kromě
+/// slotu 6, který appce slouží jako „nesvítí" v testovacím vzoru.
 const List<String> kP2lDefaultColorNames = [
   'RED',
   'GREEN',
@@ -61,6 +74,10 @@ const List<String> kP2lDefaultColorNames = [
   'YELLOW',
   'PURPLE',
   'WHITE',
+  'černá — testovací vzor',
+  'volná',
+  'volná',
+  'volná',
 ];
 
 /// Styly svícení (`style_id`).

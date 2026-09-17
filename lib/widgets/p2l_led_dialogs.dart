@@ -167,49 +167,29 @@ class _PortToggle extends StatelessWidget {
   }
 }
 
-/// Řádky s tlačítky portů 0–7 a přepínačem Vše / Zrušit.
+/// Řádky s tlačítky portů 0–7.
 /// [litColors] mapuje port na barvu, kterou svítí; co v mapě není, je zhasnuté.
+///
+/// Hromadné rozsvícení/zhasnutí řeší primární tlačítko dialogu — dřívější
+/// přepínač „Vše / Zrušit" nad porty dělal přesně totéž, takže byl jen druhým
+/// ovladačem téže akce s jiným popiskem.
 class _PortPicker extends StatelessWidget {
   final Map<int, Color> litColors;
   final void Function(int port) onLight;
   final void Function(int port) onClear;
-  final VoidCallback onAll;
-  final VoidCallback onNone;
 
   const _PortPicker({
     required this.litColors,
     required this.onLight,
     required this.onClear,
-    required this.onAll,
-    required this.onNone,
   });
 
   @override
   Widget build(BuildContext context) {
-    final all = litColors.length == kP2lPortCount;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text('Porty', style: Theme.of(context).textTheme.labelMedium),
-            const Spacer(),
-            FilledButton.tonal(
-              onPressed: all ? onNone : onAll,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: const Size(0, 28),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                shape: const StadiumBorder(),
-                textStyle: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              child: Text(all ? 'Zrušit' : 'Vše'),
-            ),
-          ],
-        ),
+        Text('Porty', style: Theme.of(context).textTheme.labelMedium),
         const SizedBox(height: 6),
         // Dva pevné řádky po čtyřech (0–3 / 4–7) — Wrap by porty zalomil podle
         // šířky dialogu a rozdělení by se měnilo s velikostí okna.
@@ -497,8 +477,6 @@ class _P2lControlDialogState extends State<P2lControlDialog> {
                 litColors: litColors,
                 onLight: (p) => _lightPort(state, p),
                 onClear: (p) => _clearPort(state, p),
-                onAll: () => _toggleAll(state),
-                onNone: () => _toggleAll(state),
               ),
               const SizedBox(height: 8),
               Text(
@@ -955,17 +933,24 @@ class _HexColorDialogState extends State<_HexColorDialog> {
   late final TextEditingController _ctrl;
   late int _rgb;
 
+  /// Vzorky rychlé volby, seřazené zhruba podle spektra. Prvních deset je
+  /// paleta používaná v provozu (duha + teplá a čistá bílá), zbytek jsou
+  /// doplňky, které se v ní nevyskytují.
   static const _presets = [
-    0xFF0000,
-    0x00FF00,
-    0x0000FF,
-    0xFFFF00,
-    0xFF00FF,
-    0x00FFFF,
-    0xFFFFFF,
-    0xFF8000,
-    0x808080,
-    0x000000,
+    0xFF0000, // červená
+    0xFF7000, // oranžová
+    0xAA5500, // hnědá
+    0xFFFF00, // žlutá
+    0x00FF00, // zelená
+    0x00FFFF, // azurová
+    0x0000FF, // modrá
+    0xA000FF, // fialová
+    0xFF00FF, // purpurová
+    0xFF0080, // růžová
+    0xAA0055, // vínová
+    0xFFFFFF, // bílá
+    0x555555, // šedá
+    0x000000, // černá
   ];
 
   @override

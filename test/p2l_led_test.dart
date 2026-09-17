@@ -52,6 +52,45 @@ void main() {
       expect(cfg.colorOf(1).rgb, 0x0000FF);
     });
 
+    test('reálná odpověď jednotky 1209 — deset barevných slotů', () {
+      // Zkrácený, ale tvarem věrný payload z GET-CONFIG (FW 26071501NT).
+      final cfg = P2lLedConfig.fromGetConfig(<String, dynamic>{
+        'brightness': 20,
+        for (int p = 0; p < 8; p++) 'leds port$p': 599,
+        'color0': 'ff0000',
+        'color2_0': '00ff00',
+        'color1': '00ff00',
+        'color2_1': 'ff0000',
+        'color2': '0000ff',
+        'color2_2': 'aa5500',
+        'color3': 'aa5500',
+        'color2_3': '0000ff',
+        'color4': 'aa0055',
+        'color2_4': '555555',
+        'color5': '555555',
+        'color2_5': 'aa0055',
+        'color6': '000000',
+        'color2_6': '000000',
+        'color7': '000000',
+        'color2_7': '000000',
+        'color8': '000000',
+        'color2_8': '000000',
+        'color9': '000000',
+        'color2_9': '000000',
+      });
+
+      expect(cfg.brightness, 20);
+      expect(cfg.ledCounts.length, 8);
+      expect(cfg.ledCountOf(7), 599);
+      // Past: klíč `color2` je barva slotu 2, ne „color2" slotu 0 —
+      // regexy se nesmí přebít.
+      expect(cfg.colorOf(2).rgb, 0x0000FF);
+      expect(cfg.colorOf(0).rgb2, 0x00FF00);
+      // Slotů je deset, ne šest.
+      expect(cfg.colors.length, kP2lColorCount);
+      expect(cfg.colorOf(9).rgb, 0x000000);
+    });
+
     test('chyba (Code/Message) nezpůsobí pád parseru', () {
       final cfg = P2lLedConfig.fromGetConfig(<String, dynamic>{
         'Code': -2,

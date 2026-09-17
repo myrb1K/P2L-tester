@@ -157,7 +157,7 @@ void main() {
     }
   });
 
-  testWidgets('Barvy: šest slotů s tovární hodnotou', (tester) async {
+  testWidgets('Barvy: deset slotů s tovární hodnotou', (tester) async {
     await tester.pumpWidget(_wrap(const P2lColorsDialog(unitId: '001209')));
     await tester.pumpAndSettle();
 
@@ -167,6 +167,9 @@ void main() {
     // Tovární RED = ff0000, jeho color2 = 00ff00.
     expect(find.text('ff0000'), findsWidgets);
     expect(find.text('00ff00'), findsWidgets);
+    // Jednotka hlásí color0–color9; sloty 6–9 jsou černé a bez tovární barvy.
+    expect(find.text('volná'), findsNWidgets(3));
+    expect(find.text('černá — testovací vzor'), findsOneWidget);
   });
 
   testWidgets(
