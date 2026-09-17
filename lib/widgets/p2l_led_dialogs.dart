@@ -78,43 +78,90 @@ class _DialogTitle extends StatelessWidget {
   }
 }
 
-/// Čtvercové tlačítko portu (0–7). [color] je barva, kterou port **právě
-/// svítí**; `null` znamená zhasnuto. Barva je per-port schválně: po změně
-/// barvy v dialogu musí port, který svítí ještě tou původní, zůstat v ní.
+/// Port jako **vypínač**: nahoře celé tlačítko s číslem portu, které rozsvítí
+/// zadaný rozsah, pod ním úzký pruh na zhasnutí. Rozsvícení je aditivní
+/// (`SET-LEDS` předchozí úseky nezháší), takže na jednom portu může svítit víc
+/// rozsahů najednou — proto zhasínání nemůže být jen „druhé klepnutí" jako dřív.
+///
+/// [color] je barva **posledního** rozsvícení; `null` = port nesvítí. Barvu
+/// držíme per-port schválně: po změně barvy v dialogu musí port, který svítí
+/// ještě tou původní, zůstat v ní.
 class _PortToggle extends StatelessWidget {
   final int port;
   final Color? color;
-  final VoidCallback onTap;
+  final VoidCallback onLight;
+  final VoidCallback onClear;
+
+  /// Výška horní (rozsvěcovací) části.
+  static const double _lightHeight = 56;
+
+  /// Výška spodního zhasínacího pruhu.
+  static const double _clearHeight = 28;
 
   const _PortToggle({
     super.key,
     required this.port,
     required this.color,
-    required this.onTap,
+    required this.onLight,
+    required this.onClear,
   });
 
   @override
   Widget build(BuildContext context) {
     final lit = color != null;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        height: 40,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color ?? Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color ?? Colors.grey.shade400, width: 1),
-        ),
-        child: Text(
-          '$port',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: lit ? _onColor(color!) : Colors.grey.shade700,
+    final onLit = lit ? _onColor(color!) : Colors.grey.shade700;
+    return Container(
+      height: _lightHeight + _clearHeight,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
+      // Rámeček jde do popředí schválně — jako součást `decoration` by ho
+      // barevné plochy překreslily a obsah by vypadal, že leze přes okraj.
+      foregroundDecoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color ?? Colors.grey.shade400, width: 1),
+      ),
+      child: Column(
+        children: [
+          Expanded(
+            child: InkWell(
+              key: ValueKey('p2l-port-$port-on'),
+              onTap: onLight,
+              child: ColoredBox(
+                color: color ?? Colors.grey.shade300,
+                child: Center(
+                  child: Text(
+                    '$port',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: onLit,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
+          SizedBox(
+            height: _clearHeight,
+            width: double.infinity,
+            child: InkWell(
+              key: ValueKey('p2l-port-$port-off'),
+              onTap: onClear,
+              child: ColoredBox(
+                // Zhasínací pruh je vždy šedý, ať je vidět, co dělá,
+                // i u svítícího portu.
+                color: lit ? Colors.grey.shade400 : Colors.grey.shade200,
+                child: Center(
+                  child: Icon(
+                    Icons.power_settings_new,
+                    size: 14,
+                    color: lit ? Colors.white : Colors.grey.shade500,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -124,13 +171,15 @@ class _PortToggle extends StatelessWidget {
 /// [litColors] mapuje port na barvu, kterou svítí; co v mapě není, je zhasnuté.
 class _PortPicker extends StatelessWidget {
   final Map<int, Color> litColors;
-  final void Function(int port) onToggle;
+  final void Function(int port) onLight;
+  final void Function(int port) onClear;
   final VoidCallback onAll;
   final VoidCallback onNone;
 
   const _PortPicker({
     required this.litColors,
-    required this.onToggle,
+    required this.onLight,
+    required this.onClear,
     required this.onAll,
     required this.onNone,
   });
@@ -166,7 +215,9 @@ class _PortPicker extends StatelessWidget {
         // šířky dialogu a rozdělení by se měnilo s velikostí okna.
         for (int row = 0; row < 2; row++)
           Padding(
-            padding: EdgeInsets.only(top: row == 0 ? 0 : 6),
+            // Druhá řada je od první odsazená víc než je mezera mezi porty
+            // v řádku, ať se řady opticky nesléhají.
+            padding: EdgeInsets.only(top: row == 0 ? 0 : 18),
             child: Row(
               children: [
                 for (int i = 0; i < 4; i++) ...[
@@ -176,7 +227,8 @@ class _PortPicker extends StatelessWidget {
                       key: ValueKey('p2l-port-${row * 4 + i}'),
                       port: row * 4 + i,
                       color: litColors[row * 4 + i],
-                      onTap: () => onToggle(row * 4 + i),
+                      onLight: () => onLight(row * 4 + i),
+                      onClear: () => onClear(row * 4 + i),
                     ),
                   ),
                 ],
@@ -288,11 +340,15 @@ class _P2lControlDialogState extends State<P2lControlDialog> {
   void initState() {
     super.initState();
     final config = context.read<AppState>().p2lConfigFor(widget.unitId);
-    // Horní mez bereme z počtu LED hlášeného jednotkou; když ho neznáme,
-    // použijeme stejných 600 LED jako testovací pattern na hlavní obrazovce.
-    final max = config.maxLedCount > 0 ? config.maxLedCount : 600;
+    // Výchozí rozsah je krátký (0–59) schválně: povel na celý pásek zbytečně
+    // zatěžuje jednotku a pro test stačí kus. Když jednotka hlásí kratší pásek,
+    // vezmeme jeho délku, ať výchozí hodnota nemíří mimo.
+    const defaultTo = 59;
+    final max = config.maxLedCount > 0
+        ? (config.maxLedCount - 1).clamp(0, defaultTo)
+        : defaultTo;
     _fromCtrl = TextEditingController(text: '0');
-    _toCtrl = TextEditingController(text: '${max - 1}');
+    _toCtrl = TextEditingController(text: '$max');
   }
 
   @override
@@ -307,14 +363,17 @@ class _P2lControlDialogState extends State<P2lControlDialog> {
 
   /// Klepnutí na port — povel se pošle hned. Zhasnutý port rozsvítí podle
   /// aktuálně nastaveného rozsahu, barvy a stylu, svítící zhasne.
-  Future<void> _togglePort(AppState state, int port) async {
-    final wasLit = _lit.containsKey(port);
-    setState(() => wasLit ? _lit.remove(port) : _lit[port] = _colorId);
-    if (wasLit) {
-      await state.sendP2lClearStrips(unitId: widget.unitId, ports: [port]);
-    } else {
-      await _lightPorts(state, [port]);
-    }
+  /// Levá půlka vypínače — rozsvítí zadaný rozsah. Předchozí rozsahy na portu
+  /// zůstanou svítit, takže víc klepnutí s různým rozsahem rozsvítí víc úseků.
+  Future<void> _lightPort(AppState state, int port) async {
+    setState(() => _lit[port] = _colorId);
+    await _lightPorts(state, [port]);
+  }
+
+  /// Pravá půlka vypínače — zhasne celý port i se všemi rozsahy.
+  Future<void> _clearPort(AppState state, int port) async {
+    setState(() => _lit.remove(port));
+    await state.sendP2lClearStrips(unitId: widget.unitId, ports: [port]);
   }
 
   /// Rozsvítí / zhasne všechny porty najednou.
@@ -436,15 +495,17 @@ class _P2lControlDialogState extends State<P2lControlDialog> {
               const SizedBox(height: 16),
               _PortPicker(
                 litColors: litColors,
-                onToggle: (p) => _togglePort(state, p),
+                onLight: (p) => _lightPort(state, p),
+                onClear: (p) => _clearPort(state, p),
                 onAll: () => _toggleAll(state),
                 onNone: () => _toggleAll(state),
               ),
               const SizedBox(height: 8),
               Text(
                 _lit.isEmpty
-                    ? 'Klepnutím na port ho rozsvítíš, dalším klepnutím zhasneš.'
-                    : 'Svítí ${_lit.length} z $kP2lPortCount portů.',
+                    ? 'Klepnutím na port rozsvítíš zadaný rozsah, pruhem pod ním zhasneš.'
+                    : 'Svítí ${_lit.length} z $kP2lPortCount portů. Další rozsah '
+                          'přidáš změnou LED od/do a klepnutím vlevo.',
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
               ),
             ],
