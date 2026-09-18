@@ -131,6 +131,8 @@ Klepnutím na chip se otevře menu se čtyřmi položkami:
 
 Hodnoty se načítají přímo z jednotky, takže dialogy ukazují skutečný stav. U **počtu LED** platí, že prázdné pole port nezmění — vyplň jen ty, které chceš přenastavit (tlačítko *Port 0 na všechny* zkopíruje hodnotu do ostatních). U **barev** má každé číslo dvě barvy: hlavní a *color2*, kterou používají styly se střídáním barev. Klepnutím na vzorek zadáš RGB hex nebo vybereš ze základní palety; posílají se jen barvy, na které jsi opravdu sáhl.
 
+Tlačítko **Obnovit výchozí** (vlevo dole v dialogu barev) vrátí všech deset slotů na hodnoty, které do jednotky nahrává firmware. Jen je předvyplní — do jednotky se pošlou až tlačítkem *Nastavit*, takže se na ně můžeš nejdřív podívat.
+
 > Starší firmware jednotky konfiguraci LED nehlásí — dialogy pak ukazují tovární hodnoty a napíšou to. Nastavení i ovládání funguje i tam, jen appka nevidí, co v jednotce opravdu je.
 
 ### Akce v liště detailu

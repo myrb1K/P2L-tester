@@ -170,6 +170,32 @@ void main() {
     // Jednotka hlásí color0–color9; sloty 6–9 jsou černé a bez tovární barvy.
     expect(find.text('volná'), findsNWidgets(3));
     expect(find.text('černá — testovací vzor'), findsOneWidget);
+    expect(find.text('Obnovit výchozí'), findsOneWidget);
+  });
+
+  testWidgets('Barvy: „Obnovit výchozí" vrátí sloty na tovární hodnoty', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrap(const P2lColorsDialog(unitId: '001209')));
+    await tester.pumpAndSettle();
+
+    // Slot 3 přepíšeme na jinou barvu…
+    await tester.tap(find.text('aa5500').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '123456');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('123456'), findsOneWidget);
+
+    // …a tlačítkem ji vrátíme zpět na tovární hodnotu z firmwaru.
+    // Tlačítko je na konci scrollovaného seznamu, takže k němu musíme odrolovat.
+    await tester.ensureVisible(find.text('Obnovit výchozí'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Obnovit výchozí'));
+    await tester.pumpAndSettle();
+    expect(find.text('123456'), findsNothing);
+    expect(find.text('aa5500'), findsWidgets);
   });
 
   testWidgets(

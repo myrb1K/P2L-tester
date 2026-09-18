@@ -783,6 +783,18 @@ class _P2lColorsDialogState extends State<P2lColorsDialog> {
       if (entry.value != _config.colorOf(entry.key)) entry.key: entry.value,
   };
 
+  /// Vrátí všech deset slotů na tovární hodnoty z firmwaru. Jen předvyplní —
+  /// odešle se až tlačítkem „Nastavit", stejně jako ruční úprava vzorku.
+  void _restoreDefaults() {
+    setState(() {
+      for (int id = 0; id < kP2lColorCount; id++) {
+        _slots[id] = id < kP2lDefaultColors.length
+            ? kP2lDefaultColors[id]
+            : const P2lColorSlot(0x000000, 0x000000);
+      }
+    });
+  }
+
   Future<void> _edit(int id, {required bool secondary}) async {
     final slot = _slots[id]!;
     final current = secondary ? slot.rgb2 : slot.rgb;
@@ -834,6 +846,9 @@ class _P2lColorsDialogState extends State<P2lColorsDialog> {
 
     return AlertDialog(
       title: _DialogTitle(label: 'Barvy P2L LED', unitId: display),
+      // Spodní odsazení obsahu o 5 px menší než výchozích 24 — posune
+      // tlačítkovou lištu blíž k seznamu barev.
+      contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 19),
       content: _DialogBody(
         maxWidth: 380,
         child: SingleChildScrollView(
@@ -892,10 +907,25 @@ class _P2lColorsDialogState extends State<P2lColorsDialog> {
                     ],
                   ),
                 ),
+              // „Obnovit výchozí" patří k seznamu barev, ne mezi potvrzovací
+              // tlačítka — v `actions` ho OverflowBar odsunul doprava a při
+              // úzkém dialogu zalomil na vlastní řádek.
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _restoreDefaults,
+                    icon: const Icon(Icons.settings_backup_restore, size: 18),
+                    label: const Text('Obnovit výchozí'),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
       ),
+      actionsAlignment: MainAxisAlignment.spaceBetween,
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
