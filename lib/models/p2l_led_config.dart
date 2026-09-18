@@ -48,13 +48,17 @@ class P2lColorSlot {
 /// fallback, dokud jednotka neodpoví na `GET-CONFIG` — skutečné RGB se dá
 /// přepsat (`SET-CONFIG` → `colors`), takže tahle tabulka **není** pravda
 /// o tom, co v jednotce opravdu je.
+/// **Pozor:** hodnoty jsou odečtené z `GET-CONFIG` reálné jednotky
+/// (1209, FW 26071501NT), ne z README-P2L.md — to u slotů 2–5 uvádí jiné
+/// hexy (`ffff00`/`ff00ff`/`ffffff`), které firmware nepoužívá. Autoritativní
+/// je firmware, protože podle téhle tabulky se sloty vracejí na výchozí.
 const List<P2lColorSlot> kP2lDefaultColors = [
   P2lColorSlot(0xFF0000, 0x00FF00), // 0 RED    / GREEN
   P2lColorSlot(0x00FF00, 0xFF0000), // 1 GREEN  / RED
-  P2lColorSlot(0x0000FF, 0xFFFF00), // 2 BLUE   / YELLOW
-  P2lColorSlot(0xFFFF00, 0x0000FF), // 3 YELLOW / BLUE
-  P2lColorSlot(0xFF00FF, 0xFFFFFF), // 4 PURPLE / WHITE
-  P2lColorSlot(0xFFFFFF, 0xFF00FF), // 5 WHITE  / PURPLE
+  P2lColorSlot(0x0000FF, 0xAA5500), // 2 BLUE   / YELLOW
+  P2lColorSlot(0xAA5500, 0x0000FF), // 3 YELLOW / BLUE
+  P2lColorSlot(0xAA0055, 0x555555), // 4 PURPLE / WHITE
+  P2lColorSlot(0x555555, 0xAA0055), // 5 WHITE  / PURPLE
   // 6–9 jsou z výroby černé. Slot 6 navíc appka používá jako „nesvítí"
   // v testovacím vzoru na hlavní obrazovce (`CommandService` plní jím mezery
   // v `colors_id`), takže jeho přebarvení ten vzor rozbije.

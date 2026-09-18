@@ -91,6 +91,21 @@ void main() {
       expect(cfg.colorOf(9).rgb, 0x000000);
     });
 
+    test('tovární tabulka sedí s tím, co hlásí firmware', () {
+      // Odečteno z GET-CONFIG jednotky 1209 (FW 26071501NT). README-P2L.md
+      // uvádí u slotů 2–5 jiné hexy — autoritativní je firmware, protože
+      // podle téhle tabulky vrací dialog barvy na výchozí.
+      expect(kP2lDefaultColors[0], const P2lColorSlot(0xFF0000, 0x00FF00));
+      expect(kP2lDefaultColors[1], const P2lColorSlot(0x00FF00, 0xFF0000));
+      expect(kP2lDefaultColors[2], const P2lColorSlot(0x0000FF, 0xAA5500));
+      expect(kP2lDefaultColors[3], const P2lColorSlot(0xAA5500, 0x0000FF));
+      expect(kP2lDefaultColors[4], const P2lColorSlot(0xAA0055, 0x555555));
+      expect(kP2lDefaultColors[5], const P2lColorSlot(0x555555, 0xAA0055));
+      for (int id = 6; id < kP2lColorCount; id++) {
+        expect(kP2lDefaultColors[id], const P2lColorSlot(0x000000, 0x000000));
+      }
+    });
+
     test('chyba (Code/Message) nezpůsobí pád parseru', () {
       final cfg = P2lLedConfig.fromGetConfig(<String, dynamic>{
         'Code': -2,
