@@ -913,6 +913,23 @@ describe('applySyncOps — rozhodování konfliktů', () => {
     assert.equal((await getUnit(db, '1209')).firmware, 'NOVEJSI');
   });
 
+  test('observed z fronty: last_seen = čas kontaktu, ne čas syncu', async () => {
+    const seen = isoOffset(-86400); // jednotku viděl offline klient včera
+    await applySyncOps(db, [{
+      opId: 'obs-seen', unitId: '1209', layer: 'observed',
+      at: seen, payload: { firmware: 'FW1', lastSeen: seen },
+    }], { username: 'radek' });
+    assert.equal(Date.parse((await getUnit(db, '1209')).last_seen), Date.parse(seen));
+
+    // Starší klient lastSeen neposílá → bere se čas operace.
+    const at = isoOffset(-3600);
+    await applySyncOps(db, [{
+      opId: 'obs-noseen', unitId: '1209', layer: 'observed',
+      at, payload: { firmware: 'FW2' },
+    }], { username: 'radek' });
+    assert.equal(Date.parse((await getUnit(db, '1209')).last_seen), Date.parse(at));
+  });
+
   test('desired: prohraná offline změna nezapíše, ale zůstane v historii', async () => {
     // Kolega upravil evidenci online (teď).
     await updateDesired(db, '1209', { broker: { address: 'server.firma.cz' } }, 'kolega');
