@@ -42,6 +42,19 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
   String? _customerFilter; // null = vše
   String? _brokerFilter; // null = vše
   String? _statusFilter; // null = vše
+  String? _aliveFilter; // null = vše, jinak klíč z _aliveOptions
+
+  /// Volby filtru podle stáří posledního kontaktu (`last_seen`). Jednotka
+  /// posílá ALIVE à 5 min, takže „živá" = ozvala se do 6 min (minuta rezerva).
+  /// Ostatní volby ukazují jednotky, které se neozvaly déle než daná doba —
+  /// včetně těch, které nikdo nikdy neviděl (`last_seen == null`).
+  static const _aliveFresh = 'fresh';
+  static const _aliveOptions = <String, (String, Duration)>{
+    _aliveFresh: ('≤ 6 min', Duration(minutes: 6)),
+    'stale6m': ('> 6 min', Duration(minutes: 6)),
+    'stale1h': ('> 1 hod', Duration(hours: 1)),
+    'stale1d': ('> 1 den', Duration(days: 1)),
+  };
 
   /// Vybrané jednotky pro hromadné akce (drží se napříč filtrem/hledáním).
   final Set<String> _selected = {};
@@ -112,11 +125,25 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
         .where((u) => _customerFilter == null || u.name == _customerFilter)
         .where((u) => _brokerFilter == null || u.broker == _brokerFilter)
         .where((u) => _statusFilter == null || u.status == _statusFilter)
+        .where(_matchesAlive)
         .toList();
   }
 
+  bool _matchesAlive(UnitDbSummary u) {
+    final option = _aliveOptions[_aliveFilter];
+    if (option == null) return true;
+    final age = u.lastSeen == null
+        ? null
+        : DateTime.now().difference(u.lastSeen!);
+    if (_aliveFilter == _aliveFresh) return age != null && age <= option.$2;
+    return age == null || age > option.$2;
+  }
+
   bool get _hasActiveFilter =>
-      _customerFilter != null || _brokerFilter != null || _statusFilter != null;
+      _customerFilter != null ||
+      _brokerFilter != null ||
+      _statusFilter != null ||
+      _aliveFilter != null;
 
   /// Počet karet nad seznamem: bez filtru celkem, při filtrování (dropdowny
   /// nebo hledání) „zobrazeno z celku" — ať je vidět, kolik filtr vyřadil.
@@ -138,6 +165,7 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
     _customerFilter = null;
     _brokerFilter = null;
     _statusFilter = null;
+    _aliveFilter = null;
   });
 
   // ── Výběr pro hromadné akce ─────────────────────────────────────────────
@@ -485,6 +513,50 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
     );
   }
 
+  /// Pole filtrů + „Zrušit filtry". Na úzkém displeji (telefon) dva řádky po
+  /// dvou polích — čtyři vedle sebe by měla každé ~70 px a hodnoty by se
+  /// nevešly.
+  Widget _filterBar({required List<Widget> fields}) {
+    Widget row(List<Widget> items) => Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          items[i],
+        ],
+      ],
+    );
+    final reset = IconButton(
+      icon: const Icon(Icons.filter_alt_off_outlined),
+      iconSize: 20,
+      visualDensity: VisualDensity.compact,
+      tooltip: 'Zrušit filtry',
+      onPressed: _hasActiveFilter ? _resetFilters : null,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 560) {
+          return Row(children: [Expanded(child: row(fields)), reset]);
+        }
+        final half = (fields.length + 1) ~/ 2;
+        return Row(
+          children: [
+            Expanded(
+              child: Column(
+                children: [
+                  row(fields.sublist(0, half)),
+                  const SizedBox(height: 8),
+                  row(fields.sublist(half)),
+                ],
+              ),
+            ),
+            reset,
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -535,9 +607,8 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
+                  child: _filterBar(
+                    fields: [
                       Expanded(
                         child: _filterDropdown(
                           label: 'Zákazník',
@@ -556,7 +627,6 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                           onChanged: (v) => setState(() => _customerFilter = v),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       Expanded(
                         child: _filterDropdown(
                           label: 'Broker',
@@ -575,7 +645,6 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                           onChanged: (v) => setState(() => _brokerFilter = v),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       Expanded(
                         child: _filterDropdown(
                           label: 'Stav',
@@ -608,12 +677,23 @@ class _UnitDbListScreenState extends State<UnitDbListScreen> {
                           onChanged: (v) => setState(() => _statusFilter = v),
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.filter_alt_off_outlined),
-                        iconSize: 20,
-                        visualDensity: VisualDensity.compact,
-                        tooltip: 'Zrušit filtry',
-                        onPressed: _hasActiveFilter ? _resetFilters : null,
+                      Expanded(
+                        child: _filterDropdown(
+                          label: 'Alive',
+                          value: _aliveFilter,
+                          items: [
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('Vše'),
+                            ),
+                            for (final e in _aliveOptions.entries)
+                              DropdownMenuItem<String?>(
+                                value: e.key,
+                                child: Text(e.value.$1),
+                              ),
+                          ],
+                          onChanged: (v) => setState(() => _aliveFilter = v),
+                        ),
                       ),
                     ],
                   ),

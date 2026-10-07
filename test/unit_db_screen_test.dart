@@ -512,6 +512,60 @@ void main() {
       expect(find.text('1209'), findsOneWidget);
     });
 
+    testWidgets('filtr Alive: „> 6 min" ukáže, kdo se neozval (i nikdy)',
+        (tester) async {
+      // 1300 poslala ALIVE před 2 min, 1209 v červenci, 128 nikdy.
+      final fresh =
+          DateTime.now().toUtc().subtract(const Duration(minutes: 2));
+      final body = _listBody.replaceFirst('{"units":[', '''
+{"units":[
+  {"id":"1300","generation":"new","status":"active",
+   "last_seen":"${fresh.toIso8601String()}"},''');
+      final service = _service((r) async => http.Response(body, 200));
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      Future<void> pick(String option) async {
+        await tester.tap(find.ancestor(
+          of: find.text('Alive'),
+          matching: find.byType(DropdownButtonFormField<String?>),
+        ));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(option).last);
+        await tester.pumpAndSettle();
+      }
+
+      await pick('> 6 min');
+      expect(find.text('1300'), findsNothing);
+      expect(find.text('1209'), findsOneWidget);
+      expect(find.text('128'), findsOneWidget);
+      expect(find.text('2 z 3 modulů'), findsOneWidget);
+
+      await pick('≤ 6 min');
+      expect(find.text('1300'), findsOneWidget);
+      expect(find.text('1209'), findsNothing);
+      expect(find.text('128'), findsNothing);
+    });
+
+    testWidgets('úzký displej: čtyři filtry ve dvou řádcích bez přetečení',
+        (tester) async {
+      // 480 px: pod hranicí dvou řádků (560). Užší šířka v testu nejde —
+      // testovací font má široké glyfy a přeteče lišta „Vybrat vše/Zrušit".
+      tester.view.physicalSize = const Size(480, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final service = _service((r) async => http.Response(_listBody, 200));
+      await tester.pumpWidget(
+          MaterialApp(home: UnitDbListScreen(service: service)));
+      await tester.pumpAndSettle();
+
+      final zakaznik = tester.getTopLeft(find.text('Zákazník'));
+      final stav = tester.getTopLeft(find.text('Stav'));
+      expect(stav.dy, greaterThan(zakaznik.dy), reason: 'Stav je v 2. řádku');
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('počet nad seznamem: celkem, po filtraci „X z Y"',
         (tester) async {
       final service = _service((r) async => http.Response(_listBody, 200));

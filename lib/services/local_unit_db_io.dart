@@ -510,7 +510,10 @@ class LocalUnitDb {
     await _write(
       unitId: unitId,
       layer: UnitLayer.observed,
-      fragment: fragment,
+      // Čas kontaktu jde ve fragmentu až na server — bez něj by server dosadil
+      // čas synchronizace a jednotka viděná včera offline by po syncu vypadala,
+      // že žila před minutou. Slučování ve frontě pak nese ten nejnovější.
+      fragment: {'lastSeen': _nowIso(), ...fragment},
       queue: queue,
       history: false, // observed historii negeneruje (ALIVE by byl šum)
     );
@@ -654,7 +657,10 @@ class LocalUnitDb {
           final col = map[e.key];
           if (col != null) card[col] = e.value;
         }
-        card['last_seen'] = fragment['lastSeen'] ?? DateTime.now().toUtc().toIso8601String();
+        // `lastSeen` doplňuje writeObserved (čas kontaktu s jednotkou).
+        if (fragment['lastSeen'] != null) {
+          card['last_seen'] = fragment['lastSeen'];
+        }
         if (fragment.containsKey('unitConfig')) {
           card['unit_config_fetched_at'] = card['last_seen'];
         }

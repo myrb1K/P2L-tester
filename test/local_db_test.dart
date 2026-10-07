@@ -123,6 +123,22 @@ void main() {
       expect(ops.single.payload['battery'], 80.0);
     });
 
+    test('observed nese čas kontaktu (lastSeen), sloučená operace ten poslední',
+        () async {
+      // Bez lastSeen by server po syncu dosadil čas odeslání, ne čas,
+      // kdy appka jednotku viděla.
+      await db.writeObserved('1209', {'firmware': 'FW1'});
+      final first =
+          (await db.pendingOps()).single.payload['lastSeen'] as String;
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await db.writeObserved('1209', {'battery': 80.0});
+
+      final op = (await db.pendingOps()).single;
+      final last = op.payload['lastSeen'] as String;
+      expect(DateTime.parse(last).isAfter(DateTime.parse(first)), isTrue);
+      expect((await db.getCard('1209'))?.lastSeen, DateTime.parse(last));
+    });
+
     test('observed různých jednotek se neslévají', () async {
       await db.writeObserved('1209', {'firmware': 'A'});
       await db.writeObserved('1300', {'firmware': 'B'});

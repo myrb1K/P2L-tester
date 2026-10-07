@@ -153,6 +153,7 @@ class UnitDbService {
       await _localWrite(() => _local.writeObserved(unit.id, body));
       return;
     }
+    body['lastSeen'] = DateTime.now().toUtc().toIso8601String();
     await _put('/units/${unit.id}/observed', body);
   }
 

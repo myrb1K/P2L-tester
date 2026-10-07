@@ -706,14 +706,17 @@ async function applyObserved(tx, rawId, obs = {}, ctx = null) {
   }
   if (obs.unitConfig !== undefined) {
     sets.push('unit_config_fetched_at = :unit_config_fetched_at');
-    params.unit_config_fetched_at = obs.lastSeen || nowIso();
+    params.unit_config_fetched_at = obs.lastSeen || at;
   }
   if (obs.generation === 'old' || obs.generation === 'new') {
     sets.push('generation = :generation');
     params.generation = obs.generation;
   }
+  // Čas kontaktu s jednotkou, ne čas zápisu: klient ho posílá jako `lastSeen`,
+  // starší klient ne — pak je nejbližší odhad čas operace (u syncu z fronty
+  // `at`), nikoli okamžik, kdy operace dorazila na server.
   sets.push('last_seen = :last_seen');
-  params.last_seen = obs.lastSeen || nowIso();
+  params.last_seen = obs.lastSeen || at;
   sets.push('observed_updated_at = :observed_updated_at');
   params.observed_updated_at = at;
   sets.push('updated_at = :updated_at');
