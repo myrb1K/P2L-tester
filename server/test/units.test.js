@@ -413,6 +413,60 @@ describe('listUnits', () => {
     });
     assert.equal((await listUnits(db))[0].drift, false);
   });
+
+  test('servisní režim: service_mode, rozdíly uloženo↔běží a broker se nehlásí jako drift', async () => {
+    // Reálný stav 1209: evidence = uloženo (mqtt.dev), jednotka se na něj
+    // nedostala a běží na servisním brokeru i servisní WiFi.
+    await updateDesired(
+      db, '1209', { broker: { address: 'mqtt.dev.smartci4.com' }, wifi: { ssid: 'Smartbox' } },
+      'r', { at: hourAgo() },
+    );
+    await upsertObserved(db, '1209', {
+      mqttServer: 'config.smartbox4you.com',
+      seenOnBroker: 'mqtt.config.smartci4.com',
+      unitConfig: {
+        mqttAddress: 'mqtt.dev.smartci4.com', SSID: 'Smartbox', actualSSID: 'Service',
+        ip: '', actualIp: '10.104.72.146',
+      },
+    });
+    let u = (await listUnits(db))[0];
+    assert.equal(u.service_mode, true);
+    assert.equal(u.drift, false);
+
+    // Evidence ≠ uloženo (kat. 1) se hlásí i v servisním režimu.
+    await updateDesired(db, '1209', { broker: { address: 'mqtt.jiny.cz' } }, 'r', {
+      at: hourAgo(),
+    });
+    u = (await listUnits(db))[0];
+    assert.equal(u.service_mode, true);
+    assert.equal(u.drift, true);
+
+    // Servisní broker uložený záměrně → servis to není.
+    await upsertObserved(db, '128', {
+      mqttServer: 'config.smartbox4you.com',
+      unitConfig: { mqttAddress: 'mqtt.config.smartci4.com' },
+    });
+    const byId = Object.fromEntries((await listUnits(db)).map((x) => [x.id, x]));
+    assert.equal(byId['128'].service_mode, false);
+  });
+
+  test('servisní režim jen ze servisní WiFi (bez get_param)', async () => {
+    await updateDesired(db, '1266', { broker: { address: '192.168.10.140' } }, 'r', {
+      at: hourAgo(),
+    });
+    await upsertObserved(db, '1266', {
+      seenOnBroker: 'mqtt.config.smartci4.com',
+      unitConfig: { mqttAddress: '192.168.10.140', SSID: '', actualSSID: 'Service' },
+    });
+    // „Service" jako vlastní uložená WiFi → servis to není.
+    await upsertObserved(db, '128', {
+      unitConfig: { mqttAddress: 'mqtt.firma.cz', SSID: 'Service', actualSSID: 'Service' },
+    });
+    const byId = Object.fromEntries((await listUnits(db)).map((x) => [x.id, x]));
+    assert.equal(byId['1266'].service_mode, true);
+    assert.equal(byId['1266'].drift, false);
+    assert.equal(byId['128'].service_mode, false);
+  });
 });
 
 describe('computeDrift — čekající změna (gate na pozorování)', () => {

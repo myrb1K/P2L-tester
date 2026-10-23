@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../models/unit.dart';
 import '../models/unit_db.dart';
 import '../services/file_export.dart';
 import '../services/local_unit_db.dart';
@@ -912,6 +913,17 @@ class _UnitRow extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (unit.serviceMode) ...[
+                      const SizedBox(width: 6),
+                      const Tooltip(
+                        message: 'Servisní režim',
+                        child: Icon(
+                          Icons.build_circle_outlined,
+                          color: Colors.orange,
+                          size: 20,
+                        ),
+                      ),
+                    ],
                     if (unit.drift) ...[
                       const SizedBox(width: 6),
                       const Tooltip(
@@ -1174,6 +1186,7 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
                 // Přehlasovaná lokální změna (DB11) — nad driftem, protože je
                 // to zpráva o TVÉ akci, ne o stavu jednotky.
                 _ConflictBanner(unitId: card.id, onChanged: _load),
+                if (card.inServiceMode) _serviceModeBanner(card),
                 if (card.driftWarnings.isNotEmpty)
                   Card(
                     color: Colors.orange.withAlpha(25),
@@ -1261,6 +1274,56 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  /// Banner servisního režimu — jeden stav místo tří řádků „nesouladu"
+  /// (broker hlášený / přes co ji vidíme / servisní WiFi). Příčinu neuvádí,
+  /// appka ji nezná (síť, WiFi, neběžící broker…).
+  Widget _serviceModeBanner(UnitDbCard card) {
+    final cfg = card.unitConfig;
+    final port = cfg?['mqttPort'];
+    final address = cfg?['mqttAddress'];
+    final stored = address is String && address.isNotEmpty
+        ? ' $address${port != null ? ':$port' : ''}'
+        : '';
+    // Servisní broker jen když ho jednotka nahlásila (get_param); režim jde
+    // poznat i jen ze servisní WiFi.
+    final running = P2LUnit.serviceBrokers.contains(card.mqttServer)
+        ? ' a běží na servisním ${card.mqttServer}'
+        : '';
+    final actualSsid = cfg?['actualSSID'];
+    final ssid = actualSsid is String && actualSsid.isNotEmpty
+        ? actualSsid
+        : card.ssid;
+    final wifi = ssid != null && ssid.isNotEmpty ? ' (WiFi „$ssid")' : '';
+    return Card(
+      color: Colors.orange.withAlpha(25),
+      margin: const EdgeInsets.only(bottom: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.build_circle_outlined, color: Colors.orange, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Servisní režim',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Jednotka se nepřipojila k uloženému brokeru$stored'
+              '$running$wifi.',
+              style: const TextStyle(fontSize: 13),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1429,7 +1492,12 @@ class _UnitDbDetailScreenState extends State<UnitDbDetailScreen> {
         _row('Firmware', card.firmware),
         _row('Generace', card.generation == 'new' ? 'nová (P2L32)' : 'stará'),
         _row('MAC', card.mac),
-        _row('Baterie', card.battery != null ? '${card.battery} %' : null),
+        _row(
+          'Baterie',
+          card.battery != null
+              ? '${card.battery!.toStringAsFixed(1)} V'
+              : null,
+        ),
         // displayLabel nese i detail modulu — počet a čísla tlačítek PUM-A,
         // volitelné LEDS („PUM-A @128 · 1 tl. (0) · LEDS"). Jeden modul na řádek.
         if (card.devices.isNotEmpty)

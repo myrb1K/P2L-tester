@@ -463,6 +463,31 @@ function parseTs(v) {
   return Number.isNaN(t.getTime()) ? null : t;
 }
 
+// Servisní brokery: jednotka, která se nedostane na uložený broker (síť,
+// WiFi, neběžící broker…), se přihlásí sem; v get_param se pak hlásí jako
+// config.smartbox4you.com. Zrcadlí klientské P2LUnit.serviceBrokers.
+const SERVICE_BROKERS = new Set(['config.smartbox4you.com', 'mqtt.config.smartci4.com']);
+// Servisní WiFi napevno ve FW (zrcadlí P2LUnit.serviceSsid).
+const SERVICE_SSID = 'Service';
+
+// Servisní režim = uložený broker (GET-CONFIG) ≠ běžící (get_param) a běží
+// servisní, NEBO jednotka běží na servisní WiFi a uloženou má jinou (stačí
+// GET-CONFIG, get_param není potřeba). Servisní broker uložený záměrně servis
+// není. Bez GET-CONFIG nelze určit → false. Zrcadlí UnitDbCard.inServiceMode.
+function isServiceMode(cfg, row) {
+  if (!cfg) return false;
+  const stored = typeof cfg.mqttAddress === 'string' && cfg.mqttAddress
+    ? cfg.mqttAddress : null;
+  const running = row.mqtt_server || null;
+  if (stored && running && stored !== running &&
+      SERVICE_BROKERS.has(running) && !SERVICE_BROKERS.has(stored)) {
+    return true;
+  }
+  const runningSsid = (typeof cfg.actualSSID === 'string' && cfg.actualSSID) ||
+    row.ssid || null;
+  return runningSsid === SERVICE_SSID && cfg.SSID !== SERVICE_SSID;
+}
+
 function computeDrift(desiredJson, row) {
   // „Nesoulad" má smysl jen když jsme jednotku viděli AŽ PO poslední změně
   // evidence. Čerstvá, ještě nepozorovaná změna (jednotka přešla na jiný broker
@@ -479,9 +504,14 @@ function computeDrift(desiredJson, row) {
     try { cfg = JSON.parse(row.unit_config_json); } catch { cfg = null; }
   }
   const s = (v) => (typeof v === 'string' && v ? v : null);
+  // Servisní režim vysvětluje rozdíly uloženo ↔ běží (FW má napevno servisní
+  // SSID `Service`, kam v servisu přejde, je-li v dosahu; IP z jiné sítě)
+  // i jiný broker, takže kategorie 2 a 3 se v něm nehlásí — ukáže se jako
+  // servisní režim, ne jako nesoulad. Kategorie 1 (evidence ↔ uloženo) platí.
+  const service = isServiceMode(cfg, row);
 
   // 2) uloženo ↔ běží — čistě observed, ukáže se i u nekonfigurované jednotky.
-  if (cfg) {
+  if (cfg && !service) {
     const ip = s(cfg.ip);
     const actualIp = s(cfg.actualIp);
     // "0.0.0.0" = statická IP vypnutá (DHCP) → neporovnávat.
@@ -503,8 +533,10 @@ function computeDrift(desiredJson, row) {
     // 1) vs uloženo v NVS (autoritativní z GET-CONFIG).
     if (cfg && s(cfg.mqttAddress) && broker.address !== cfg.mqttAddress) return true;
     // 3) vs kde jednotku vidíme: mqtt_server (get_param) i seen_on_broker (ALIVE).
-    if (row.mqtt_server && broker.address !== row.mqtt_server) return true;
-    if (row.seen_on_broker && broker.address !== row.seen_on_broker) return true;
+    if (!service) {
+      if (row.mqtt_server && broker.address !== row.mqtt_server) return true;
+      if (row.seen_on_broker && broker.address !== row.seen_on_broker) return true;
+    }
   }
   const wifi = d.wifi;
   if (wifi && typeof wifi.ssid === 'string' && wifi.ssid) {
@@ -547,11 +579,13 @@ async function listUnits(db) {
     // doby neviděli (odešla na nový broker), ukaž ZAMÝŠLENÝ broker z evidence
     // — jinak by řádek dál svítil starou adresou. Jinak realita: uloženo
     // v NVS (GET-CONFIG) → hlášeno jednotkou (get_param) → kde ji appka viděla.
+    let cfg = null;
     let cfgBroker = null;
     let desiredBroker = null;
     if (unitConfigJson) {
       try {
-        cfgBroker = JSON.parse(unitConfigJson).mqttAddress || null;
+        cfg = JSON.parse(unitConfigJson);
+        cfgBroker = cfg.mqttAddress || null;
       } catch {
         /* poškozený JSON → ignoruj */
       }
@@ -570,7 +604,12 @@ async function listUnits(db) {
     const pending = desiredBroker && changed && (!seen || seen < changed);
     const broker =
       (pending ? desiredBroker : null) || observedBroker || desiredBroker || null;
-    return { ...rest, broker, drift: computeDrift(desiredJson, row) };
+    return {
+      ...rest,
+      broker,
+      drift: computeDrift(desiredJson, row),
+      service_mode: isServiceMode(cfg, row),
+    };
   });
 }
 

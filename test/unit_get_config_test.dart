@@ -60,6 +60,88 @@ void main() {
     });
   });
 
+  group('P2LUnit uložený vs. připojený broker', () {
+    P2LUnit unitWith({String? stored, String? running}) {
+      final u = P2LUnit(id: '1158', isNewGen: true, mqttServer: running);
+      if (stored != null) {
+        u.updateFromGetConfig({
+          ..._realConfig,
+          'Id': 1158,
+          'mqttAddress': stored,
+          'mqttPort': 8883,
+        });
+      }
+      return u;
+    }
+
+    test('uložený almeco, připojena na servisní → rozdíl + servisní režim', () {
+      // Reálná situace jednotky 1158.
+      final u = unitWith(
+        stored: 'mqtt.almeco.smartci4.com',
+        running: 'config.smartbox4you.com',
+      );
+      expect(u.brokerDiffers, isTrue);
+      expect(u.inServiceMode, isTrue);
+      expect(u.storedMqttServer, 'mqtt.almeco.smartci4.com');
+      expect(u.storedMqttPort, 8883);
+    });
+
+    test('připojena k uloženému → bez rozdílu', () {
+      final u = unitWith(
+        stored: 'mqtt.config.smartci4.com',
+        running: 'mqtt.config.smartci4.com',
+      );
+      expect(u.brokerDiffers, isFalse);
+      expect(u.inServiceMode, isFalse);
+    });
+
+    test('IP vs. doména → rozdíl, ale ne servisní režim', () {
+      final u = unitWith(stored: 'tigo.home', running: '172.16.101.192');
+      expect(u.brokerDiffers, isTrue);
+      expect(u.inServiceMode, isFalse);
+    });
+
+    test('servisní broker záměrně uložený → ne servisní režim', () {
+      final u = unitWith(
+        stored: 'mqtt.config.smartci4.com',
+        running: 'config.smartbox4you.com',
+      );
+      expect(u.brokerDiffers, isTrue);
+      expect(u.inServiceMode, isFalse);
+    });
+
+    test('servisní WiFi „Service" → servisní režim i bez get_param', () {
+      final u = P2LUnit(id: '1266', isNewGen: true);
+      u.updateFromGetConfig({
+        ..._realConfig,
+        'Id': 1266,
+        'mqttAddress': '192.168.10.140',
+        'SSID': '',
+        'actualSSID': 'Service',
+      });
+      expect(u.mqttServer, isNull);
+      expect(u.brokerDiffers, isFalse);
+      expect(u.onServiceWifi, isTrue);
+      expect(u.inServiceMode, isTrue);
+
+      // „Service" uložená záměrně jako vlastní WiFi → servis to není.
+      u.updateFromGetConfig({
+        ..._realConfig,
+        'SSID': 'Service',
+        'actualSSID': 'Service',
+      });
+      expect(u.inServiceMode, isFalse);
+    });
+
+    test('bez GET-CONFIG / bez get_param / prázdné uloženo → nelze určit', () {
+      expect(unitWith(running: 'config.smartbox4you.com').brokerDiffers, isFalse);
+      expect(unitWith(stored: 'mqtt.almeco.smartci4.com').brokerDiffers, isFalse);
+      final empty = unitWith(stored: '', running: 'config.smartbox4you.com');
+      expect(empty.storedMqttServer, isNull);
+      expect(empty.brokerDiffers, isFalse);
+    });
+  });
+
   group('P2LUnit.fromAlive', () {
     // Reálný UNIT ALIVE nové gen — klíče VELKÝMI písmeny. firmware musí být
     // známé hned z ALIVE, jinak fetchConfig (GET-CONFIG) na prvním ALIVE

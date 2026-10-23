@@ -2,6 +2,7 @@
 // Mapují JSON z `/api/units` endpointů (server/routes/units.js).
 
 import 'module.dart';
+import 'unit.dart';
 
 /// Řádek seznamu `GET /api/units` — bez desired (hesla) a bez devices.
 class UnitDbSummary {
@@ -24,6 +25,9 @@ class UnitDbSummary {
   /// seznam nemusel nést desired (hesla). Detail viz UnitDbCard.driftWarnings.
   final bool drift;
 
+  /// Jednotka je v servisním režimu (viz [UnitDbCard.inServiceMode]).
+  final bool serviceMode;
+
   const UnitDbSummary({
     required this.id,
     required this.generation,
@@ -37,6 +41,7 @@ class UnitDbSummary {
     this.battery,
     this.broker,
     this.drift = false,
+    this.serviceMode = false,
   });
 
   factory UnitDbSummary.fromJson(Map<String, dynamic> json) => UnitDbSummary(
@@ -52,6 +57,7 @@ class UnitDbSummary {
         battery: (json['battery'] as num?)?.toDouble(),
         broker: json['broker'] as String?,
         drift: json['drift'] as bool? ?? false,
+        serviceMode: json['service_mode'] as bool? ?? false,
       );
 
   /// Case-insensitive filtr přes ID + název + umístění (vyhledávací pole).
@@ -189,8 +195,35 @@ class UnitDbCard {
     return !lastSeen!.isBefore(changed);
   }
 
+  /// Servisní režim: jednotka se nedostala na uložený broker (GET-CONFIG)
+  /// a běží na servisním ([P2LUnit.serviceBrokers]), NEBO běží na servisní
+  /// WiFi ([P2LUnit.serviceSsid]) a uloženou má jinou — to jde poznat
+  /// z GET-CONFIG i bez get_param. FW na servisní SSID přejde, je-li
+  /// v dosahu (1209, 1266), jinak zůstane na uložené WiFi (1110, 1158).
+  /// Příčinu servisu odtud neznáme (síť, WiFi, neběžící broker…). Servisní
+  /// broker uložený záměrně servis není. Zrcadlí serverové `isServiceMode`.
+  bool get inServiceMode {
+    final stored = _cfgStr('mqttAddress');
+    final running = mqttServer;
+    if (stored != null &&
+        running != null &&
+        stored != running &&
+        P2LUnit.serviceBrokers.contains(running) &&
+        !P2LUnit.serviceBrokers.contains(stored)) {
+      return true;
+    }
+    if (unitConfig == null) return false;
+    final runningSsid = _cfgStr('actualSSID') ?? ssid;
+    return runningSsid == P2LUnit.serviceSsid &&
+        unitConfig!['SSID'] != P2LUnit.serviceSsid;
+  }
+
   List<String> get driftWarnings {
     if (!_observedSinceChange) return const [];
+    // Servisní režim vysvětluje rozdíly uloženo ↔ běží (servisní SSID
+    // `Service`, IP z jiné sítě) i jiný broker → kategorie 2 a 3 se nehlásí,
+    // karta ukáže servisní režim (běžící WiFi vypíše v banneru).
+    final service = inServiceMode;
     final out = <String>[];
     final broker = desired?['broker'];
     final wifi = desired?['wifi'];
@@ -224,16 +257,23 @@ class UnitDbCard {
     // 2) uloženo ↔ reálně běží (jen z GET-CONFIG). Prázdná / "0.0.0.0"
     // konfigurovaná IP = statická vypnutá (DHCP) → _cfgStr vrátí null, tady
     // se nastavené vs. běžící neporovnává.
-    if (cfgIp != null && cfgIp != '0.0.0.0' && actualIp != null && cfgIp != actualIp) {
+    if (!service &&
+        cfgIp != null &&
+        cfgIp != '0.0.0.0' &&
+        actualIp != null &&
+        cfgIp != actualIp) {
       out.add('IP: nastaveno „$cfgIp", ale běží „$actualIp" (statická IP se neuplatnila?)');
     }
-    if (cfgSsid != null && actualSsid != null && cfgSsid != actualSsid) {
+    if (!service &&
+        cfgSsid != null &&
+        actualSsid != null &&
+        cfgSsid != actualSsid) {
       out.add('WiFi: nastaveno „$cfgSsid", ale připojeno k „$actualSsid"');
     }
 
     // 3) evidence ↔ kde jednotku vidíme (broker connectivity). mqtt_server =
     // co jednotka hlásí v get_param, seenOnBroker = přes co ji appka vidí.
-    if (broker is Map) {
+    if (broker is Map && !service) {
       final want = broker['address'];
       if (want is String && want.isNotEmpty) {
         // „jednotka hlásí" (running) ukaž jen když přidává novou informaci —

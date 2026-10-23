@@ -1009,6 +1009,10 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    // Holé potvrzení bez konfigurace (pozorováno u FW 26102001RO:
+    // `{"Level":"INFO","Code":0,"Message":"OK"}`) snapshot nepřepisuje —
+    // jinak by z evidence zmizel uložený broker i hesla.
+    if (!json.containsKey('mqttAddress') && !json.containsKey('Id')) return;
     final unit = _units[unitId];
     if (unit == null) return;
     unit.updateFromGetConfig(json);
@@ -2038,10 +2042,14 @@ class AppState extends ChangeNotifier {
     if (!isNewGen || !CommandService.firmwareSupportsGetConfig(unit.firmware)) {
       return;
     }
+    // Přihlašovací údaje (→ skutečná hesla v odpovědi) jen když se zapisuje
+    // do evidence. Nepřihlášenému stačí `{}` — uložený broker/SSID FW vrátí
+    // i tak a hesla by putovala přes broker zbytečně.
+    final withSecrets = UnitDbService.instance.isEnabled;
     final cmd = CommandService.buildGetConfigCommand(
       id,
-      user: _getConfigUser,
-      password: _getConfigPassword,
+      user: withSecrets ? _getConfigUser : null,
+      password: withSecrets ? _getConfigPassword : null,
     );
     _mqttService.publish(cmd.topic, cmd.payload);
   }
