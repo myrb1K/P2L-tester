@@ -683,6 +683,33 @@ class _UnitListView extends StatelessWidget {
   }
 }
 
+/// Řádky „MQTT" pro Info dialog a kopii do schránky. Normálně jeden řádek
+/// (běžící broker, bez get_param uložený z GET-CONFIG). Když se uložený
+/// a připojený liší, oba + vysvětlení (servisní režim / možná IP vs. doména).
+/// Servisní režim poznaný jen z WiFi (get_param ještě nedorazil) → uložený
+/// broker + servisní WiFi.
+List<String> _mqttInfoLines(P2LUnit u) {
+  if (u.brokerDiffers) {
+    return [
+      'MQTT uloženo: ${u.storedMqttServer}:${u.storedMqttPort ?? '—'}',
+      'MQTT připojeno: ${u.mqttServer}:${u.mqttPort ?? '—'}',
+      u.inServiceMode
+          ? 'Servisní režim'
+          : 'Liší se od uloženého (nebo jde o IP vs. doménu téhož brokeru)',
+    ];
+  }
+  if (u.inServiceMode) {
+    return [
+      'MQTT uloženo: ${u.storedMqttServer ?? '—'}:${u.storedMqttPort ?? '—'}',
+      'Servisní režim (WiFi „${P2LUnit.serviceSsid}")',
+    ];
+  }
+  final host = u.mqttServer ?? u.storedMqttServer;
+  if (host == null) return const ['MQTT: —'];
+  final port = u.mqttServer != null ? u.mqttPort : u.storedMqttPort;
+  return ['MQTT: $host:${port ?? '—'}'];
+}
+
 class _UnitCard extends StatefulWidget {
   final P2LUnit unit;
   final bool isSelected;
@@ -831,6 +858,28 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                           ),
                         ),
+                        if (unit.isOnline &&
+                            (unit.brokerDiffers || unit.inServiceMode)) ...[
+                          Tooltip(
+                            message: [
+                              if (unit.inServiceMode) 'Servisní režim',
+                              if (unit.storedMqttServer != null)
+                                'Uloženo: ${unit.storedMqttServer}',
+                              if (unit.mqttServer != null)
+                                'Připojena k: ${unit.mqttServer}',
+                              if (unit.onServiceWifi)
+                                'WiFi: ${P2LUnit.serviceSsid}',
+                            ].join('\n'),
+                            child: Icon(
+                              unit.inServiceMode
+                                  ? Icons.build_circle_outlined
+                                  : Icons.compare_arrows,
+                              size: 16,
+                              color: Colors.orange,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         Expanded(
                           child: Text(
                             [
@@ -1047,9 +1096,12 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                   Text('IP: ${liveUnit.ip ?? '—'}'),
                   Text('MAC: ${liveUnit.mac ?? '—'}'),
                   Text('SSID: ${liveUnit.ssid ?? '—'}'),
-                  Text(liveUnit.mqttServer != null
-                      ? 'MQTT: ${liveUnit.mqttServer}:${liveUnit.mqttPort}'
-                      : 'MQTT: —'),
+                  // Při rozdílu uloženo/připojeno řádky za prvním oranžově.
+                  for (final (i, line) in _mqttInfoLines(liveUnit).indexed)
+                    Text(
+                      line,
+                      style: i > 0 ? const TextStyle(color: Colors.orange) : null,
+                    ),
                   Text(liveUnit.battery != null
                       ? 'Bat: ${liveUnit.battery!.toStringAsFixed(1)} V'
                       : 'Bat: —'),
@@ -1124,7 +1176,7 @@ class _UnitCardState extends State<_UnitCard> with SingleTickerProviderStateMixi
                 if (live.ip != null) 'IP: ${live.ip}',
                 if (live.mac != null) 'MAC: ${live.mac}',
                 if (live.ssid != null) 'SSID: ${live.ssid}',
-                if (live.mqttServer != null) 'MQTT: ${live.mqttServer}:${live.mqttPort}',
+                ..._mqttInfoLines(live),
                 if (live.battery != null) 'Bat: ${live.battery!.toStringAsFixed(1)} V',
                 'Brightness: ${live.brightness}',
                 if (live.ledsPerPort.isNotEmpty)

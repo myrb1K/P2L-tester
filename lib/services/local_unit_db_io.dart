@@ -353,6 +353,7 @@ class LocalUnitDb {
         battery: (row['battery'] as num?)?.toDouble(),
         broker: row['broker'] as String?,
         drift: card.driftWarnings.isNotEmpty,
+        serviceMode: card.inServiceMode,
       );
     }).toList();
   }

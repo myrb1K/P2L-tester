@@ -78,6 +78,74 @@ void main() {
       expect(card.driftWarnings.single, contains('mqtt.stary.cz'));
     });
 
+    test('servisní režim: jeden stav místo nesouladu, kat. 1 platí dál', () {
+      // Reálný stav 1209 (23. 10. 2026): uložený mqtt.dev se nepovedl,
+      // běží servisní broker i servisní WiFi.
+      Map<String, dynamic> json(String desiredBroker) => {
+            'id': '1209',
+            'generation': 'new',
+            'status': 'active',
+            'mqtt_server': 'config.smartbox4you.com',
+            'seen_on_broker': 'mqtt.config.smartci4.com',
+            'last_seen': '2026-10-23T08:46:58Z',
+            'unit_config': {
+              'mqttAddress': 'mqtt.dev.smartci4.com',
+              'mqttPort': 1883,
+              'SSID': 'Smartbox',
+              'actualSSID': 'Service',
+              'ip': '',
+              'actualIp': '10.104.72.146',
+            },
+            'desired': {
+              'broker': {'address': desiredBroker},
+              'wifi': {'ssid': 'Smartbox'},
+            },
+            'desired_updated_at': '2026-10-23T08:43:05Z',
+          };
+
+      final card = UnitDbCard.fromJson(json('mqtt.dev.smartci4.com'));
+      expect(card.inServiceMode, isTrue);
+      expect(card.driftWarnings, isEmpty);
+
+      // Evidence ≠ uloženo se hlásí i v servisu.
+      final other = UnitDbCard.fromJson(json('mqtt.jiny.cz'));
+      expect(other.inServiceMode, isTrue);
+      expect(other.driftWarnings, hasLength(1));
+      expect(other.driftWarnings.single, contains('uloženo v jednotce'));
+    });
+
+    test('servisní WiFi bez get_param → servisní režim, bez nesouladu', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1266',
+        'generation': 'new',
+        'status': 'active',
+        'seen_on_broker': 'mqtt.config.smartci4.com',
+        'last_seen': '2026-10-22T14:18:00Z',
+        'unit_config': {
+          'mqttAddress': '192.168.10.140',
+          'SSID': 'Smartbox',
+          'actualSSID': 'Service',
+        },
+        'desired': {
+          'broker': {'address': '192.168.10.140'},
+        },
+        'desired_updated_at': '2026-10-22T14:00:00Z',
+      });
+      expect(card.inServiceMode, isTrue);
+      expect(card.driftWarnings, isEmpty);
+    });
+
+    test('servisní broker uložený záměrně → ne servisní režim', () {
+      final card = UnitDbCard.fromJson({
+        'id': '1209',
+        'generation': 'new',
+        'status': 'active',
+        'mqtt_server': 'config.smartbox4you.com',
+        'unit_config': {'mqttAddress': 'mqtt.config.smartci4.com'},
+      });
+      expect(card.inServiceMode, isFalse);
+    });
+
     test('driftWarnings přes seen_on_broker (jen ALIVE, bez get_param)', () {
       // Scénář z praxe: jednotka přeconfigurovaná mimo appku — mqtt_server
       // (get_param) chybí, ale ALIVE přišel přes jiný broker než v evidenci.

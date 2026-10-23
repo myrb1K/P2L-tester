@@ -89,6 +89,10 @@ class UnitDbService {
   /// opt-in loginu.
   bool get _enabled => kIsWeb || _session.isLoggedIn;
 
+  /// Zapisuje se do evidence? (web vždy, nativ jen přihlášený.) AppState
+  /// podle toho rozhoduje, jestli si u GET-CONFIG říct i o hesla.
+  bool get isEnabled => _enabled;
+
   /// Jde evidence přes lokální DB (offline-first, DB10)? Na webu nikdy
   /// (stub → `isAvailable == false`, PRD-DB/03 R5), na nativu když se lokální
   /// DB podařilo otevřít. Když ne, chová se appka jako do DB9 — přímé HTTP.

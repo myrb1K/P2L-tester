@@ -32,6 +32,68 @@ class P2LUnit {
   /// bohatší než `get_param`. `null` u staré generace / staršího FW.
   Map<String, dynamic>? unitConfig;
 
+  /// Brokery, na které se jednotka přihlásí, když se nedostane na uložený.
+  /// V get_param se hlásí jako `config.smartbox4you.com`, appka ho vidí na
+  /// `mqtt.config.smartci4.com`.
+  static const serviceBrokers = {
+    'config.smartbox4you.com',
+    'mqtt.config.smartci4.com',
+  };
+
+  /// Servisní WiFi napevno ve FW. Je-li v dosahu, jednotka na ni v servisním
+  /// režimu přejde; jinak zůstane na uložené WiFi.
+  static const serviceSsid = 'Service';
+
+  /// Broker uložený v jednotce (GET-CONFIG `mqttAddress`); `null` bez
+  /// GET-CONFIG nebo při prázdné hodnotě. [mqttServer] je naproti tomu broker,
+  /// ke kterému je jednotka právě připojená (get_param).
+  String? get storedMqttServer {
+    final v = unitConfig?['mqttAddress'];
+    return (v is String && v.isNotEmpty) ? v : null;
+  }
+
+  int? get storedMqttPort {
+    final v = unitConfig?['mqttPort'];
+    return v is int ? v : null;
+  }
+
+  /// Jednotka je připojená k jinému brokeru, než má uložený. Obě hodnoty hlásí
+  /// jednotka sama (nic se nepřekládá přes DNS), takže v normálním provozu
+  /// sedí znak po znaku. Rozdíl ale může být i tentýž broker zadaný jednou
+  /// jako IP a jednou jako doména — proto se rozdíl jen ukazuje a jako
+  /// servisní režim se označí až podle [inServiceMode]. Bez GET-CONFIG
+  /// (starý FW) nebo bez get_param se určit nedá → false.
+  bool get brokerDiffers {
+    final stored = storedMqttServer;
+    final running = mqttServer;
+    return stored != null &&
+        running != null &&
+        running.isNotEmpty &&
+        stored != running;
+  }
+
+  /// Jednotka běží na servisní WiFi ([serviceSsid]) a uloženou má jinou.
+  /// Stačí GET-CONFIG (`actualSSID`), get_param není potřeba; bez GET-CONFIG
+  /// neznáme uloženou WiFi → false.
+  bool get onServiceWifi {
+    final cfg = unitConfig;
+    if (cfg == null) return false;
+    final actual = cfg['actualSSID'];
+    final running = (actual is String && actual.isNotEmpty) ? actual : ssid;
+    return running == serviceSsid && cfg['SSID'] != serviceSsid;
+  }
+
+  /// Servisní režim: jednotka se nedostala na uložený broker a přihlásila se
+  /// na servisní ([serviceBrokers]), nebo běží na servisní WiFi
+  /// ([onServiceWifi]). Příčinu odtud neznáme (síť, WiFi, neběžící broker…),
+  /// proto ji UI neuvádí. Když je servisní broker i uložený (záměrně),
+  /// o servis nejde.
+  bool get inServiceMode =>
+      (brokerDiffers &&
+          serviceBrokers.contains(mqttServer) &&
+          !serviceBrokers.contains(storedMqttServer)) ||
+      onServiceWifi;
+
   P2LUnit({
     required this.id,
     this.firmware,
