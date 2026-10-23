@@ -1625,7 +1625,10 @@ class AppState extends ChangeNotifier {
           // zšedne). Když se někde znovu ozve (i po přepnutí appky na nový
           // broker), přijde jako nová a auto-fetch (get_param + GET-DEVICES +
           // GET-CONFIG) se spustí znovu přes cestu prvního ALIVE.
-          _forgetUnit(id);
+          // Výjimka: broker, ke kterému je appka připojená (typicky uložení
+          // servisního brokeru jednotce v servisním režimu) — jednotka tu
+          // zůstane, jen se restartuje.
+          _onBrokerChangeConfirmed(id, profile);
           confirmed++;
           // Hlavní status bar čte _statusMessage (ne _setStatus, které míří na
           // status detailu devices) — jinak by zůstala viset „čekám na potvrzení".
@@ -1780,10 +1783,9 @@ class AppState extends ChangeNotifier {
           }),
         );
         _scheduleDbDriftRefresh();
-        // Mění se i broker → jednotka opustí tenhle broker. Stejně jako
-        // u sendBulkBroker ji zapomeneme; až se někde ozve, přijde jako nová
-        // a auto-fetch observed se spustí přes cestu prvního ALIVE.
-        _forgetUnit(id);
+        // Mění se i broker → stejně jako u sendBulkBroker: odchází-li jinam,
+        // zapomeneme ji (přijde jako nová), na brokeru appky zůstane.
+        _onBrokerChangeConfirmed(id, profile);
         confirmed++;
         _statusMessage = single != null
             ? 'U jednotky $single potvrzen příjem požadavku na změnu WiFi "$ssid" a brokera "${profile.name}"'
@@ -2376,6 +2378,19 @@ class AppState extends ChangeNotifier {
       'Restart jednotky ${int.tryParse(id)?.toString() ?? id} odeslán',
     );
     notifyListeners();
+  }
+
+  /// Po potvrzené změně brokera: jednotka, která odchází na jiný broker,
+  /// zmizí ze seznamu ([_forgetUnit]). Když je cílem broker, ke kterému je
+  /// připojená appka, jednotka tu zůstane — jen se restartuje, takže zšedne
+  /// do dalšího ALIVE a pak si appka znovu načte observed (jako u změny WiFi).
+  void _onBrokerChangeConfirmed(String id, BrokerProfile profile) {
+    if (profile.broker == broker && profile.port == port) {
+      _markUnitOfflineUntilAlive(id);
+      _expectRestartReread(id);
+    } else {
+      _forgetUnit(id);
+    }
   }
 
   /// Zapomene jednotku z živého seznamu i pomocných map. Použití: po změně ID

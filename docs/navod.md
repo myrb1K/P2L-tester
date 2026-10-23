@@ -96,7 +96,7 @@ Menu **Hromadná konfigurace** (ikona `settings_remote`) je aktivní jen při v�
 
 | Položka | Co dělá |
 |---------|---------|
-| **Změnit broker** | Přepne vybrané jednotky na jiný broker (`set_Mqtt`). Lze vybrat uložený profil nebo zadat nový (ten se zároveň uloží). Pozor: jednotky se odpojí z aktuálního brokera. |
+| **Změnit broker** | Přepne vybrané jednotky na jiný broker (`set_Mqtt`). Lze vybrat uložený profil nebo zadat nový (ten se zároveň uloží). Pozor: jednotky se odpojí z aktuálního brokera a zmizí ze seznamu. V nabídce je i broker, ke kterému je appka právě připojená (označený **· aktuální**, nikdy předvybraný) — slouží třeba k tomu, aby si jednotka v **servisním režimu** uložila servisní broker `mqtt.config.smartci4.com` a jezdila na něm normálně. Taková jednotka ze seznamu nezmizí, jen do restartu zšedne. |
 | **Změnit WiFi** | Nastaví SSID + heslo (`set_WiFi`). |
 | **Změnit WiFi + broker** | Obojí **jedním příkazem** (`set_Config`, u firmwaru od `P2L_26071501NT` UNIT `SET-CONFIG`). Použij, když jednotka mění síť i broker zároveň — poslané zvlášť se jednotka po prvním příkazu restartuje a druhý už nemusí dostat. |
 

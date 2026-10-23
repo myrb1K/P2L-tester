@@ -141,12 +141,10 @@ class BulkConfigMenu extends StatelessWidget {
   }
 
   Future<void> _showBrokerDialog(BuildContext context, AppState state) async {
-    // Z dropdownu odfiltrujeme aktuálně aktivní broker — měnit aktuální na
-    // aktuální nedává smysl.
-    final selectable = <BrokerProfile>[
-      for (var i = 0; i < state.profiles.length; i++)
-        if (i != state.activeProfileIndex) state.profiles[i],
-    ];
+    // Nabízí se i aktuální broker (v nabídce označený) — potřeba třeba pro
+    // jednotku v servisním režimu, které se má uložit servisní broker, na
+    // kterém právě je. Předvybraný ale není, ať se nezvolí omylem.
+    final selectable = state.profiles;
     final result = await showDialog<BrokerProfile>(
       context: context,
       builder: (ctx) => _BulkBrokerDialog(
@@ -161,10 +159,7 @@ class BulkConfigMenu extends StatelessWidget {
 
   /// WiFi + broker jedním příkazem (`set_Config` / UNIT `SET-CONFIG`).
   Future<void> _showNetworkDialog(BuildContext context, AppState state) async {
-    final selectable = <BrokerProfile>[
-      for (var i = 0; i < state.profiles.length; i++)
-        if (i != state.activeProfileIndex) state.profiles[i],
-    ];
+    final selectable = state.profiles; // vč. aktuálního, viz _showBrokerDialog
     final result =
         await showDialog<({String ssid, String password, BrokerProfile profile})>(
       context: context,
@@ -420,14 +415,25 @@ class _BrokerChooserState extends State<_BrokerChooser> {
   @override
   void initState() {
     super.initState();
-    // Pokud nemáme žádné použitelné profily (kromě aktuálního), rovnou
-    // otevřeme v režimu "zadat nový".
+    // Pokud nemáme žádné uložené profily, rovnou otevřeme v režimu
+    // "zadat nový".
     if (widget.selectableProfiles.isEmpty) {
       _mode = _BrokerMode.newProfile;
     } else {
       _mode = _BrokerMode.existing;
-      _selected = widget.selectableProfiles.first;
+      // Předvyber první jiný než aktuální — aktuální jen na výslovnou volbu.
+      _selected = widget.selectableProfiles.firstWhere(
+        (p) => !_isCurrent(p),
+        orElse: () => widget.selectableProfiles.first,
+      );
     }
+  }
+
+  /// Profil, ke kterému je appka právě připojená (názvy profilů jsou unikátní).
+  bool _isCurrent(BrokerProfile p) {
+    final state = context.read<AppState>();
+    final i = state.activeProfileIndex;
+    return i >= 0 && i < state.profiles.length && state.profiles[i].name == p.name;
   }
 
   @override
@@ -515,7 +521,10 @@ class _BrokerChooserState extends State<_BrokerChooser> {
       items: widget.selectableProfiles
           .map((p) => DropdownMenuItem(
                 value: p,
-                child: Text('${p.name}  (${p.broker}:${p.port})'),
+                child: Text(
+                  '${p.name}  (${p.broker}:${p.port})'
+                  '${_isCurrent(p) ? '  · aktuální' : ''}',
+                ),
               ))
           .toList(),
       onChanged: (p) => setState(() => _selected = p),
